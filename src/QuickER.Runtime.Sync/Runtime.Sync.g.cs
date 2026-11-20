@@ -2378,6 +2378,132 @@ public static class SyncLocalTracking
         return EnsureExpected(connection, Expect(tables), beforeCommit: null);
     }
 
+    /// <summary>
+    /// Runs writes that the change tracking does not record: what <paramref name="write"/> writes to the synchronised
+    /// tables is not sent by a later synchronisation.
+    /// </summary>
+    /// <param name="connection">An open connection to the local database, outside any transaction.</param>
+    /// <param name="write">
+    /// The writes. It receives <paramref name="connection"/> and writes through it: with SQL, or with an
+    /// <see cref="ILocalRowStore"/>.
+    /// </param>
+    /// <param name="cancellationToken">The cancellation token (passed on to <paramref name="write"/>).</param>
+    /// <remarks>
+    /// <para>
+    /// Everything runs in one transaction on <paramref name="connection"/> that holds the write lock of the database from
+    /// its first statement: the applying flag of <c>quicker_sync_state</c> is set, <paramref name="write"/> runs, the flag
+    /// is cleared, and the transaction commits. The triggers record nothing while the flag is set, and what was recorded
+    /// before (the rows still to be sent, the engine's columns, the change numbers) stays as it is. No other connection
+    /// ever sees the flag set: until the commit it reads the database as it was, and its writes wait for the commit (as long
+    /// as its busy timeout allows) and are recorded as usual.
+    /// </para>
+    /// <para>
+    /// When <paramref name="write"/> throws or is cancelled, or the commit fails, the transaction is rolled back before the
+    /// exception leaves: nothing that was written stays, and the connection is outside a transaction again. A pooled
+    /// connection may therefore be passed. A connection from <see cref="ILocalRowStore.CreateDedicatedConnection"/> (not
+    /// pooled) is the safer choice: should the rollback itself fail, closing it releases the write lock, whereas a pooled
+    /// connection keeps the transaction and the lock until it is opened again through a
+    /// <see cref="SyncLocalTrackingGuard"/> (which rolls the transaction back) or the pool discards it.
+    /// </para>
+    /// <para>
+    /// Inside <paramref name="write"/>:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>Write only through the given connection. A generated repository or an <c>ISqlExecutor</c> opens a connection
+    /// of its own, and a write through it waits for the lock this transaction holds until its busy timeout runs out.</item>
+    /// <item>Do not begin, commit or roll back a transaction (a savepoint, started and ended with SQL, is fine), and do not
+    /// close the connection.</item>
+    /// <item>Do not call this method again, and do not run a synchronisation.</item>
+    /// </list>
+    /// <para>
+    /// Foreign keys are checked as <paramref name="connection"/> is set to check them.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// The connection is not open or is already inside a transaction (nothing has been changed); the change tracking is not
+    /// set up in the database; or <paramref name="write"/> closed the connection (nothing was committed, but a pooled
+    /// connection keeps the transaction and the write lock until it is opened again through a
+    /// <see cref="SyncLocalTrackingGuard"/> or the pool discards it).
+    /// </exception>
+    public static async Task WriteUntrackedAsync(
+        DbConnection connection,
+        Func<DbConnection, CancellationToken, Task> write,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(write);
+
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            throw new InvalidOperationException(
+                "The connection must be open before an untracked write runs."
+            );
+        }
+
+        try
+        {
+            // A deferred BEGIN takes no lock and waits for nothing: it fails only when the connection is already inside a
+            // transaction. The first statement after it takes the write lock
+            await TrackedSyncState.ExecuteAsync(connection, "BEGIN", cancellationToken).ConfigureAwait(false);
+        }
+        catch (DbException exception)
+        {
+            throw new InvalidOperationException(
+                "An untracked write could not start its transaction: the connection is already inside a transaction. "
+                    + "Pass a connection that is outside any transaction; an untracked write cannot run inside another "
+                    + "one, and the writes it runs must not begin a transaction of their own.",
+                exception
+            );
+        }
+
+        try
+        {
+            // Takes the write lock (waiting for another writer as long as the connection's busy timeout allows). A flag
+            // found set here was left by a write that committed without clearing it: no writer is in the middle of
+            // anything while this transaction holds the lock, so it is simply set and cleared again
+            if (await TrackedSyncState.SetApplyingAsync(connection, true, cancellationToken).ConfigureAwait(false) != 1)
+            {
+                throw new InvalidOperationException(
+                    "The change tracking is not set up in this database (" + StateTableName + " has no row). "
+                        + "Call SyncLocalTracking.Ensure before an untracked write."
+                );
+            }
+
+            await write(connection, cancellationToken).ConfigureAwait(false);
+
+            if (connection.State != System.Data.ConnectionState.Open)
+            {
+                throw new InvalidOperationException(
+                    "The writes of an untracked write closed the connection they were given. Nothing was committed, but "
+                        + "the transaction could not be rolled back: a pooled connection keeps it, together with the "
+                        + "write lock of the database, until it is opened again through a SyncLocalTrackingGuard or the "
+                        + "pool discards it. Do not close the connection inside the writes."
+                );
+            }
+
+            // What is left only tidies up after writes that have run: it is not cancelled half way
+            await TrackedSyncState.SetApplyingAsync(connection, false, CancellationToken.None).ConfigureAwait(false);
+            await TrackedSyncState.ExecuteAsync(connection, "COMMIT", CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            if (connection.State == System.Data.ConnectionState.Open)
+            {
+                try
+                {
+                    await TrackedSyncState.ExecuteAsync(connection, "ROLLBACK", CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (DbException)
+                {
+                    // The rollback failing must not hide what went wrong first
+                }
+            }
+
+            throw;
+        }
+    }
+
     /// <summary>Builds the expected triggers of every table, refusing a table that cannot be tracked before anything changes.</summary>
     /// <param name="tables">The synchronised tables.</param>
     /// <returns>Each table with its expected triggers, in the order of <paramref name="tables"/>.</returns>
@@ -2794,6 +2920,17 @@ public static class SyncLocalTracking
 /// tracking could not be confirmed is never handed on open, and nothing is remembered: the next connection that opens
 /// checks again.
 /// </para>
+/// <para>
+/// The check also clears an applying flag that was left set. The engine and
+/// <see cref="SyncLocalTracking.WriteUntrackedAsync"/> set and clear the flag inside one transaction, and no other
+/// connection sees the flag of a transaction still open. A connection that has just opened therefore sees it set in two
+/// cases only. A write committed without clearing it (the writes of an untracked write committed the transaction
+/// themselves, or something outside set it): while it stayed set nothing was recorded, and those writes are not
+/// recovered; clearing it makes the following ones recorded again. Or the connection is a pooled one that was closed in
+/// the middle of such a transaction (the writes of an untracked write closed it, or its rollback failed): the check rolls
+/// that transaction back, which also releases the write lock it held. The flag is read together with the pair, so the
+/// usual case still costs one statement; clearing a committed flag needs the write lock, and fails like the repair does.
+/// </para>
 /// </remarks>
 public sealed class SyncLocalTrackingGuard
 {
@@ -2803,9 +2940,13 @@ public sealed class SyncLocalTrackingGuard
         (long SchemaVersion, string DatabaseId)
     > Confirmed = new();
 
-    /// <summary>The statement that reads the schema version and the database identifier together.</summary>
+    /// <summary>The statement that reads the schema version, the database identifier and the applying flag together.</summary>
     private const string ReadPairSql =
-        "SELECT (SELECT schema_version FROM pragma_schema_version), (SELECT db_id FROM quicker_sync_state)";
+        "SELECT (SELECT schema_version FROM pragma_schema_version), (SELECT db_id FROM quicker_sync_state), "
+        + "(SELECT applying FROM quicker_sync_state)";
+
+    /// <summary>The statement that clears an applying flag left set in the database.</summary>
+    private const string ClearLeftoverFlagSql = "UPDATE quicker_sync_state SET applying = 0 WHERE applying <> 0";
 
     /// <summary>The tables with their expected triggers.</summary>
     private readonly IReadOnlyList<(ISyncTableDescriptor Table, IReadOnlyList<SyncLocalTrigger> Triggers)> _expected;
@@ -2859,7 +3000,8 @@ public sealed class SyncLocalTrackingGuard
     /// <param name="connection">An open connection to the local database, outside any transaction.</param>
     /// <exception cref="InvalidOperationException">
     /// The change tracking could not be confirmed or put back (the connection has been closed): a table lacks a column its
-    /// triggers name, or the database refused the check or the repair (the original error is the inner exception).
+    /// triggers name, or the database refused the check, the repair or the clearing of an applying flag left set (the
+    /// original error is the inner exception).
     /// </exception>
     public void Check(DbConnection connection)
     {
@@ -2870,14 +3012,16 @@ public sealed class SyncLocalTrackingGuard
             ? null
             : (source, _definitionHash);
 
+        var inPlace = false;
+        var flagLeftSet = false;
+
         if (key is { } known && Confirmed.TryGetValue(known, out var remembered))
         {
             try
             {
-                if (ReadPair(connection) == remembered)
-                {
-                    return;
-                }
+                var read = ReadPair(connection);
+                inPlace = (read.SchemaVersion, read.DatabaseId) == remembered;
+                flagLeftSet = read.Applying;
             }
             catch (DbException)
             {
@@ -2885,28 +3029,58 @@ public sealed class SyncLocalTrackingGuard
             }
         }
 
-        var repairing = false;
+        var doing = "checked";
 
         try
         {
-            Interlocked.Increment(ref _fullCheckCount);
-
-            if (ConfirmWithoutWriting(connection) is { } confirmed)
+            if (!inPlace)
             {
-                Remember(key, confirmed);
-                return;
+                Interlocked.Increment(ref _fullCheckCount);
+
+                if (ConfirmWithoutWriting(connection) is { } confirmed)
+                {
+                    Remember(key, (confirmed.SchemaVersion, confirmed.DatabaseId));
+                    flagLeftSet = confirmed.Applying;
+                }
+                else
+                {
+                    doing = "put in place";
+                    Interlocked.Increment(ref _repairCount);
+
+                    (long SchemaVersion, string? DatabaseId, bool Applying) repaired = default;
+                    SyncLocalTracking.EnsureExpected(
+                        connection,
+                        _expected,
+                        beforeCommit: inside => repaired = ReadPair(inside)
+                    );
+                    Remember(key, (repaired.SchemaVersion, repaired.DatabaseId));
+                    flagLeftSet = repaired.Applying;
+                }
             }
 
-            repairing = true;
-            Interlocked.Increment(ref _repairCount);
+            if (flagLeftSet)
+            {
+                // A connection that has just opened sees the flag set in two cases. Either a write committed without
+                // clearing it, and nothing clears it any more. Or this is a pooled connection that was closed in the middle
+                // of a transaction (the writes of an untracked write closed it, or its rollback failed): the flag belongs
+                // to that transaction, which still holds the write lock. Rolling back ends such a transaction; when there
+                // is none, the rollback fails and changes nothing
+                doing = "cleared of the applying flag an earlier write left set";
 
-            (long SchemaVersion, string? DatabaseId) repaired = default;
-            SyncLocalTracking.EnsureExpected(
-                connection,
-                _expected,
-                beforeCommit: inside => repaired = ReadPair(inside)
-            );
-            Remember(key, repaired);
+                try
+                {
+                    Execute(connection, "ROLLBACK");
+                }
+                catch (DbException)
+                {
+                    // No transaction was left open on the connection
+                }
+
+                if (ReadPair(connection).Applying)
+                {
+                    Execute(connection, ClearLeftoverFlagSql);
+                }
+            }
         }
         catch (DbException exception)
         {
@@ -2914,7 +3088,7 @@ public sealed class SyncLocalTrackingGuard
 
             throw new InvalidOperationException(
                 $"The change tracking of the local database '{source}' could not be "
-                    + (repairing ? "put in place" : "checked")
+                    + doing
                     + $": {exception.Message} The connection has been closed. The next connection that opens checks "
                     + "again; if another writer held the database, open the connection again once it has finished. If "
                     + "the database was opened read-only, open it once with a connection that can write, so that the "
@@ -2931,11 +3105,11 @@ public sealed class SyncLocalTrackingGuard
 
     /// <summary>
     /// The full check that only reads: in one read transaction, the schema version first, then whether everything is in
-    /// place, then the database identifier.
+    /// place, then the database identifier and the applying flag.
     /// </summary>
     /// <param name="connection">The connection.</param>
-    /// <returns>The pair to remember, or null when something is missing or different.</returns>
-    private (long SchemaVersion, string? DatabaseId)? ConfirmWithoutWriting(DbConnection connection)
+    /// <returns>The pair to remember with the applying flag, or null when something is missing or different.</returns>
+    private (long SchemaVersion, string? DatabaseId, bool Applying)? ConfirmWithoutWriting(DbConnection connection)
     {
         Execute(connection, "BEGIN");
 
@@ -2950,11 +3124,12 @@ public sealed class SyncLocalTrackingGuard
                 schemaVersion = Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
             }
 
-            (long, string?)? confirmed = null;
+            (long, string?, bool)? confirmed = null;
 
             if (SyncLocalTracking.HasExpectedState(connection, _expected))
             {
-                confirmed = (schemaVersion, ReadPair(connection).DatabaseId);
+                var pair = ReadPair(connection);
+                confirmed = (schemaVersion, pair.DatabaseId, pair.Applying);
             }
 
             Execute(connection, "COMMIT");
@@ -2987,8 +3162,11 @@ public sealed class SyncLocalTrackingGuard
         }
     }
 
-    /// <summary>Reads the schema version and the database identifier (null when the state table has no row).</summary>
-    private static (long SchemaVersion, string? DatabaseId) ReadPair(DbConnection connection)
+    /// <summary>
+    /// Reads the schema version, the database identifier (null when the state table has no row) and whether the applying
+    /// flag is set.
+    /// </summary>
+    private static (long SchemaVersion, string? DatabaseId, bool Applying) ReadPair(DbConnection connection)
     {
         using var command = connection.CreateCommand();
         command.CommandText = ReadPairSql;
@@ -2997,12 +3175,13 @@ public sealed class SyncLocalTrackingGuard
 
         if (!reader.Read())
         {
-            return (-1, null);
+            return (-1, null, false);
         }
 
         return (
             Convert.ToInt64(reader.GetValue(0), CultureInfo.InvariantCulture),
-            reader.IsDBNull(1) ? null : reader.GetString(1)
+            reader.IsDBNull(1) ? null : reader.GetString(1),
+            !reader.IsDBNull(2) && Convert.ToInt64(reader.GetValue(2), CultureInfo.InvariantCulture) != 0
         );
     }
 
@@ -12953,11 +13132,12 @@ internal static class TrackedSyncState
             ("@key", rawKey)
         );
 
-    /// <summary>Sets or clears the applying flag the triggers check (what the engine writes while it is set is not recorded).</summary>
+    /// <summary>Sets or clears the applying flag the triggers check (what is written while it is set is not recorded).</summary>
     /// <param name="connection">An open connection to the local database.</param>
-    /// <param name="applying">Whether the engine is applying.</param>
+    /// <param name="applying">Whether the flag is set.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
-    public static Task SetApplyingAsync(
+    /// <returns>The number of rows of the state table that were written (1 when the change tracking is set up).</returns>
+    public static Task<int> SetApplyingAsync(
         DbConnection connection,
         bool applying,
         CancellationToken cancellationToken

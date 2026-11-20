@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -502,19 +503,33 @@ internal sealed class SyncModelDevice : IDisposable
         };
 
     /// <summary>記録しない書き込みを流す口（<see cref="SyncModelDeviceParts.WriteUntrackedAsync"/>）</summary>
-    private Func<Func<Task>, CancellationToken, Task>? _writeUntracked;
+    private Func<Func<DbConnection, Task>, CancellationToken, bool, Task>? _writeUntracked;
 
     /// <summary>1 行の未送信の記録を全部消す口（<see cref="SyncModelDeviceParts.ClearPendingRecordsAsync"/>）</summary>
     private Func<string, string, CancellationToken, Task>? _clearPendingRecords;
 
     /// <summary>
-    /// 記録しない書き込み（Raw 系のリポジトリ・判定役の包みの生の SQL）を、端末の未送信の記録が残らないように流す（口が無い
-    /// 端末では関数をそのまま流す）。前からある未送信の記録は変えない
+    /// 記録しない書き込みを、端末の未送信の記録が残らないように流す。口を持つ端末は、口が開いた接続を関数へ渡す（関数は
+    /// その接続の SQL か <see cref="LocalRows"/> だけで書く）。口が無い端末は、関数へ null を渡してそのまま流す（関数は
+    /// Raw 系のリポジトリ・生の SQL で書く）。前からある未送信の記録は変えない
     /// </summary>
-    /// <param name="write">記録しない書き込みを流す関数</param>
+    /// <param name="write">記録しない書き込みを流す関数（接続は口を持つ端末だけが渡す）</param>
     /// <param name="ct">キャンセルトークン</param>
-    public Task WriteUntrackedAsync(Func<Task> write, CancellationToken ct) =>
-        _writeUntracked is { } writeUntracked ? writeUntracked(write, ct) : write();
+    /// <param name="withoutForeignKeys">真なら、口が外部キーの検査を切った接続を渡す（口が無い端末では関係しない）</param>
+    public Task WriteUntrackedAsync(
+        Func<DbConnection?, Task> write,
+        CancellationToken ct,
+        bool withoutForeignKeys = false
+    ) =>
+        _writeUntracked is { } writeUntracked
+            ? writeUntracked(connection => write(connection), ct, withoutForeignKeys)
+            : write(null);
+
+    /// <summary>
+    /// 端末の DB の行を、渡された接続で読み書きする口（記録しない書き込みの口が渡した接続の上で、行を書くのに使う。状態を
+    /// 持たないので呼ぶたびに作る）
+    /// </summary>
+    public ILocalRowStore LocalRows => new SqliteLocalRowStore(Factory);
 
     /// <summary>
     /// 1 行の未送信の記録を全部消す（口が無い端末では、製品のジャーナルの表からその行の記録を消す）
@@ -863,56 +878,90 @@ internal sealed class SyncModelWorld : IAsyncDisposable
     {
         var device = Device(op.Actor);
 
-        return device.WriteUntrackedAsync(() => InsertUntrackedAsync(device, op, ct), ct);
+        return device.WriteUntrackedAsync(
+            connection => InsertUntrackedAsync(device, op, connection, ct),
+            ct
+        );
     }
 
-    /// <summary>追加の手を、端末の記録しないリポジトリ（Raw 系）で入れる（<see cref="ApplyUntrackedAsync"/> の本体）</summary>
+    /// <summary>
+    /// 追加の手を入れる（<see cref="ApplyUntrackedAsync"/> の本体）。接続があれば、その接続へ <see cref="SyncModelDevice.LocalRows"/>
+    /// で全列を書き、接続が無ければ、端末の記録しないリポジトリ（Raw 系）で入れる
+    /// </summary>
     private static async Task InsertUntrackedAsync(
         SyncModelDevice device,
         ModelWriteOp op,
+        DbConnection? connection,
         CancellationToken ct
     )
     {
         switch (op)
         {
             case AddFolderOp add:
-                await device.RawFolders.InsertAsync(
-                    new ModelFolderEntity
-                    {
-                        FolderId = add.Id,
-                        ParentId = add.ParentId,
-                        Name = add.Name,
-                    },
-                    ct
-                );
+            {
+                var folder = new ModelFolderEntity
+                {
+                    FolderId = add.Id,
+                    ParentId = add.ParentId,
+                    Name = add.Name,
+                };
+
+                if (connection is null)
+                {
+                    await device.RawFolders.InsertAsync(folder, ct);
+                }
+                else
+                {
+                    await device.LocalRows.InsertAsync(connection, folder, ct);
+                }
+
                 break;
+            }
 
             case AddLabelOp add:
-                await device.RawLabels.InsertAsync(
-                    new ModelLabelEntity
-                    {
-                        LabelCode = add.Code,
-                        FolderId = add.FolderId,
-                        Caption = add.Caption,
-                    },
-                    ct
-                );
+            {
+                var label = new ModelLabelEntity
+                {
+                    LabelCode = add.Code,
+                    FolderId = add.FolderId,
+                    Caption = add.Caption,
+                };
+
+                if (connection is null)
+                {
+                    await device.RawLabels.InsertAsync(label, ct);
+                }
+                else
+                {
+                    await device.LocalRows.InsertAsync(connection, label, ct);
+                }
+
                 break;
+            }
 
             case AddItemOp add:
-                await device.RawItems.InsertAsync(
-                    new ModelItemEntity
-                    {
-                        ItemId = add.Id,
-                        FolderId = add.FolderId,
-                        LabelCode = add.LabelCode,
-                        Code = add.Code,
-                        Title = add.Title,
-                        Payload = Convert.FromHexString(add.PayloadHex),
-                    },
-                    ct
-                );
+            {
+                var item = new ModelItemEntity
+                {
+                    ItemId = add.Id,
+                    FolderId = add.FolderId,
+                    LabelCode = add.LabelCode,
+                    Code = add.Code,
+                    Title = add.Title,
+                    Payload = Convert.FromHexString(add.PayloadHex),
+                };
+
+                if (connection is null)
+                {
+                    await device.RawItems.InsertAsync(item, ct);
+                }
+                else
+                {
+                    await device.LocalRows.InsertAsync(connection, item, ct);
+                }
+
                 break;
+            }
 
             default:
                 throw new ArgumentException(

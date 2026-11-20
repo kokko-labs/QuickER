@@ -8,6 +8,7 @@ using Microsoft.Data.Sqlite;
 using QuickER.Tests.GeneratedSyncModelFixture;
 using QuickER.Tests.TestSupport.Engines;
 using Xunit;
+using Sqlite = QuickER.Tests.GeneratedSyncModelFixture.Repositories.Sqlite;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -114,6 +115,62 @@ internal static class SyncEngineFixedRows
                     + "送信を挟まない受信だけの実行がサーバーの行を端末に入れる（端末に送るものは無い）。続く同期は何も送らず、"
                     + "競合も打ち切りも無く、端末とサーバーの内容が同じ",
                 UnsentGoneRowOfUnknownKeyAsync
+            ),
+            Row(
+                "untracked-write-is-not-recorded-and-keeps-earlier-records",
+                "記録しない書き込み（SyncLocalTracking.WriteUntrackedAsync）が渡した接続で書いた行は記録されず、前からある"
+                    + "未送信の記録・変更の連番・適用中の印は変わらない。その後の普通の書き込みは記録され、同期で送られる",
+                UntrackedWriteIsNotRecordedAsync
+            ),
+            Row(
+                "untracked-write-that-throws-leaves-nothing-and-no-transaction",
+                "プールの接続で、記録しない書き込みの関数が例外を投げると、同じ例外が出て、書いた行も印も残らず、接続は"
+                    + "トランザクションの外に戻る（同じプールの次の接続にトランザクションが残らず、別の接続が待たずに書ける）",
+                (h, ct) => UntrackedWriteFailsAsync(h, cancelled: false, ct)
+            ),
+            Row(
+                "untracked-write-cancelled-leaves-nothing-and-no-transaction",
+                "プールの接続で、記録しない書き込みが取り消されると、取り消しの例外が出て、書いた行も印も残らず、接続は"
+                    + "トランザクションの外に戻る（同じプールの次の接続にトランザクションが残らず、別の接続が待たずに書ける）",
+                (h, ct) => UntrackedWriteFailsAsync(h, cancelled: true, ct)
+            ),
+            Row(
+                "untracked-write-holds-off-other-writers-until-commit",
+                "記録しない書き込みが流れている間、別の接続の読み取りは待たずにコミットの前の内容（印は 0・書いた行は無い）を"
+                    + "読み、別の接続の書き込みはコミットまで進まない。コミットの後に通った書き込みは記録され、記録しない"
+                    + "書き込みの行は記録されない",
+                UntrackedWriteHoldsOffWritersAsync
+            ),
+            Row(
+                "untracked-write-through-repository-fails-on-lock-wait",
+                "記録しない書き込みの関数が、渡された接続でなく生成の Repository（自分の接続を開く）で書くと、書き込みの"
+                    + "ロックを Default Timeout まで待って SQLITE_BUSY で失敗し、全体が巻き戻って何も残らない",
+                UntrackedWriteThroughRepositoryAsync
+            ),
+            Row(
+                "untracked-write-refuses-connection-in-transaction-and-nested-call",
+                "記録しない書き込みは、すでにトランザクションの中の接続を InvalidOperationException で断り、利用者の"
+                    + "トランザクションには触らない。関数の中からの入れ子の呼び出しも同じに断り、外側は続けてコミットできる",
+                UntrackedWriteRefusesTransactionAsync
+            ),
+            Row(
+                "untracked-write-refuses-closed-connection-and-missing-tracking",
+                "記録しない書き込みは、開いていない接続・関数の中で閉じられた接続・状態の表に行の無い DB を "
+                    + "InvalidOperationException で断り、どれも何もコミットしない",
+                UntrackedWriteRefusesUnusableAsync
+            ),
+            Row(
+                "untracked-write-clears-applying-flag-left-set",
+                "適用中の印が 1 のままコミットされて残った DB（その間の書き込みは記録されない）でも、記録しない書き込みは"
+                    + "断らずに流れ、終わると印は 0 に戻り、その後の書き込みは記録される",
+                UntrackedWriteClearsLeftoverFlagAsync
+            ),
+            Row(
+                "untracked-write-closed-pooled-connection-is-rolled-back-on-next-open",
+                "記録しない書き込みの関数がプールの接続を閉じると、名指しの例外が出て、その接続はトランザクションと書き込みの"
+                    + "ロックを持ったままプールへ戻る（別の接続の書き込みはロック待ちで失敗する）。同じプールの次の接続を開くと、"
+                    + "開くたびの確認がそのトランザクションを巻き戻し、何も残らず、別の接続が書けて記録される",
+                UntrackedWriteClosedPooledConnectionAsync
             ),
         ];
 
@@ -831,6 +888,649 @@ internal static class SyncEngineFixedRows
             .Be(Describe(await h.ReadServerAsync(ct)), "端末がサーバーの内容になる");
         local.Folders[1].Name.Should().Be("f1");
         local.Items[1].Title.Should().Be("server-edit");
+    }
+
+    /// <summary>記録しない書き込み：書いた行は記録されず、前からある記録は変わらない</summary>
+    private static async Task UntrackedWriteIsNotRecordedAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedFolderAndSyncAsync(h, ct);
+        await h.ExecuteLocalAsync(
+            "UPDATE model_folders SET name = 'local-edit' WHERE folder_id = 1",
+            ct
+        );
+        var stateBefore = await h.ReadStateTablesAsync(ct);
+
+        await using (var connection = h.Rows.CreateDedicatedConnection())
+        {
+            await connection.OpenAsync(ct);
+            await SyncLocalTracking.WriteUntrackedAsync(
+                connection,
+                async (inside, token) =>
+                {
+                    await h.Rows.InsertAsync(
+                        inside,
+                        new ModelFolderEntity { FolderId = 9, Name = "untracked" },
+                        token
+                    );
+                    await ExecuteOnAsync(
+                        inside,
+                        "UPDATE model_folders SET name = 'untracked-edit' WHERE folder_id = 1",
+                        token
+                    );
+                    (await ScalarOnAsync(inside, ApplyingSql, token))
+                        .Should()
+                        .Be("1", "関数の中の接続からは、適用中の印が立って見える");
+                },
+                ct
+            );
+        }
+
+        (await h.ReadStateTablesAsync(ct))
+            .Should()
+            .Equal(
+                stateBefore,
+                "書いた行は記録されず、前からある未送信の記録・変更の連番・印は変わらない"
+            );
+        var local = await h.ReadLocalAsync(ct);
+        local.Folders[9].Name.Should().Be("untracked");
+        local.Folders[1].Name.Should().Be("untracked-edit");
+
+        // その後の普通の書き込みは記録され、前からの未送信と一緒に送られる
+        await h.ExecuteLocalAsync(
+            "UPDATE model_folders SET name = 'tracked' WHERE folder_id = 9",
+            ct
+        );
+        (await RecordedAsync(h, 9, ct)).Should().Be("1", "印を戻した後の書き込みは記録される");
+        var result = await h.SyncAsync(null, ct);
+        result.Conflicts.Should().BeEmpty();
+        Describe(await h.ReadServerAsync(ct)).Should().Be(Describe(await h.ReadLocalAsync(ct)));
+        (await h.ReadServerAsync(ct)).Folders[9].Name.Should().Be("tracked");
+    }
+
+    /// <summary>
+    /// 記録しない書き込みが失敗で終わる（関数の例外・取り消し）：何も残らず、プールの接続にトランザクションが残らない
+    /// </summary>
+    private static async Task UntrackedWriteFailsAsync(
+        SyncEngineFixedHarness h,
+        bool cancelled,
+        CancellationToken ct
+    )
+    {
+        await SeedFolderAndSyncAsync(h, ct);
+        var stateBefore = await h.ReadStateTablesAsync(ct);
+        var localBefore = Describe(await h.ReadLocalAsync(ct));
+
+        // 端末の接続ファクトリの普通の接続（プールされる）
+        await using (var connection = h.Factory.CreateConnection())
+        {
+            await connection.OpenAsync(ct);
+
+            if (cancelled)
+            {
+                using var cancel = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                var thrown = await Record.ExceptionAsync(() =>
+                    SyncLocalTracking.WriteUntrackedAsync(
+                        connection,
+                        async (inside, token) =>
+                        {
+                            await ExecuteOnAsync(inside, InsertFolderSql(9), token);
+                            await cancel.CancelAsync();
+                            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                        },
+                        cancel.Token
+                    )
+                );
+                thrown
+                    .Should()
+                    .BeAssignableTo<OperationCanceledException>(
+                        "取り消しは取り消しの例外のまま出る"
+                    );
+            }
+            else
+            {
+                var failure = new InvalidOperationException("the writes failed");
+                var thrown = await Record.ExceptionAsync(() =>
+                    SyncLocalTracking.WriteUntrackedAsync(
+                        connection,
+                        async (inside, token) =>
+                        {
+                            await ExecuteOnAsync(inside, InsertFolderSql(9), token);
+                            throw failure;
+                        },
+                        ct
+                    )
+                );
+                thrown.Should().BeSameAs(failure, "関数の例外はそのまま出る");
+            }
+
+            connection.State.Should().Be(System.Data.ConnectionState.Open);
+            await ShouldBeOutsideTransactionAsync(
+                connection,
+                "失敗の後、渡した接続はトランザクションの外に戻る",
+                ct
+            );
+        }
+
+        (await h.ReadStateTablesAsync(ct)).Should().Equal(stateBefore, "印も記録も残らない");
+        Describe(await h.ReadLocalAsync(ct)).Should().Be(localBefore, "書いた行は残らない");
+        await ShouldLeaveNoTransactionAsync(h, ct);
+    }
+
+    /// <summary>記録しない書き込みの間：読み取りは待たず、書き込みはコミットまで進まない</summary>
+    private static async Task UntrackedWriteHoldsOffWritersAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedFolderAndSyncAsync(h, ct);
+        var inside = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await using var connection = h.Rows.CreateDedicatedConnection();
+        await connection.OpenAsync(ct);
+        var untracked = SyncLocalTracking.WriteUntrackedAsync(
+            connection,
+            async (held, token) =>
+            {
+                await ExecuteOnAsync(held, InsertFolderSql(9), token);
+                inside.SetResult();
+                await release.Task.WaitAsync(token);
+            },
+            ct
+        );
+
+        Task? writer = null;
+
+        try
+        {
+            await inside.Task.WaitAsync(ReachTimeout, ct);
+
+            await using (var reader = OutsideConnection(h, timeoutSeconds: 1))
+            {
+                await reader.OpenAsync(ct);
+                (await ScalarOnAsync(reader, ApplyingSql, ct))
+                    .Should()
+                    .Be("0", "別の接続からは、コミットの前の印（0）が待たずに読める");
+                (await ScalarOnAsync(reader, CountFolderSql(9), ct))
+                    .Should()
+                    .Be("0", "別の接続からは、コミットの前に書いた行は見えない");
+            }
+
+            // 待ちの長い別の接続の書き込み（コミットまで進まないことは順序で見る。この間は、ロックが無ければ進む余地を作るだけ）
+            writer = Task.Run(
+                async () =>
+                {
+                    await using var other = OutsideConnection(h, timeoutSeconds: 30);
+                    await other.OpenAsync(ct);
+                    await ExecuteOnAsync(other, InsertFolderSql(10), ct);
+                },
+                ct
+            );
+            await Task.Delay(SecondRunWindow, ct);
+            writer
+                .IsCompleted.Should()
+                .BeFalse("記録しない書き込みが終わるまで、別の接続の書き込みは進まない");
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+
+        await untracked;
+        await writer.WaitAsync(ReachTimeout, ct);
+
+        (await h.ScalarAsync(ApplyingSql, ct)).Should().Be("0");
+        (await RecordedAsync(h, 9, ct)).Should().Be("0", "記録しない書き込みの行は記録されない");
+        (await RecordedAsync(h, 10, ct))
+            .Should()
+            .Be("1", "コミットの後に通った別の接続の書き込みは記録される");
+        var local = await h.ReadLocalAsync(ct);
+        local.Folders.Keys.Should().Contain([9, 10]);
+    }
+
+    /// <summary>関数が生成の Repository（別の接続）で書く：ロック待ちで失敗し、全体が巻き戻る</summary>
+    private static async Task UntrackedWriteThroughRepositoryAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedFolderAndSyncAsync(h, ct);
+        var stateBefore = await h.ReadStateTablesAsync(ct);
+        var localBefore = Describe(await h.ReadLocalAsync(ct));
+
+        await using (var connection = h.Rows.CreateDedicatedConnection())
+        {
+            await connection.OpenAsync(ct);
+            var thrown = await Record.ExceptionAsync(() =>
+                SyncLocalTracking.WriteUntrackedAsync(
+                    connection,
+                    async (inside, token) =>
+                    {
+                        await ExecuteOnAsync(inside, InsertFolderSql(9), token);
+                        await h.Folders.InsertAsync(
+                            new ModelFolderEntity { FolderId = 10, Name = "via-repository" },
+                            token
+                        );
+                    },
+                    ct
+                )
+            );
+
+            thrown
+                .Should()
+                .NotBeNull("別の接続の書き込みは、記録しない書き込みが持つロックを待って失敗する");
+            Chain(thrown!)
+                .OfType<SqliteException>()
+                .Should()
+                .Contain(
+                    ex => ex.SqliteErrorCode == 5,
+                    $"Default Timeout まで待って SQLITE_BUSY で失敗する（{thrown}）"
+                );
+            await ShouldBeOutsideTransactionAsync(
+                connection,
+                "失敗の後、渡した接続はトランザクションの外に戻る",
+                ct
+            );
+        }
+
+        (await h.ReadStateTablesAsync(ct)).Should().Equal(stateBefore);
+        Describe(await h.ReadLocalAsync(ct))
+            .Should()
+            .Be(localBefore, "渡した接続で書いた行も、Repository で書こうとした行も残らない");
+        await ShouldLeaveNoTransactionAsync(h, ct);
+    }
+
+    /// <summary>トランザクションの中の接続と入れ子の呼び出しを断る</summary>
+    private static async Task UntrackedWriteRefusesTransactionAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedFolderAndSyncAsync(h, ct);
+        var stateBefore = await h.ReadStateTablesAsync(ct);
+        var localBefore = Describe(await h.ReadLocalAsync(ct));
+
+        // 利用者のトランザクションの中の接続
+        await using (var connection = h.Rows.CreateDedicatedConnection())
+        {
+            await connection.OpenAsync(ct);
+            await ExecuteOnAsync(connection, "BEGIN IMMEDIATE", ct);
+            await ExecuteOnAsync(connection, InsertFolderSql(9), ct);
+            var called = false;
+            var thrown = await Record.ExceptionAsync(() =>
+                SyncLocalTracking.WriteUntrackedAsync(
+                    connection,
+                    (_, _) =>
+                    {
+                        called = true;
+                        return Task.CompletedTask;
+                    },
+                    ct
+                )
+            );
+
+            thrown
+                .Should()
+                .BeOfType<InvalidOperationException>("トランザクションの中の接続は断る")
+                .Which.InnerException.Should()
+                .BeAssignableTo<System.Data.Common.DbException>();
+            called.Should().BeFalse("断るときは関数を呼ばない");
+            (await ScalarOnAsync(connection, CountFolderSql(9), ct))
+                .Should()
+                .Be("1", "利用者のトランザクションはそのまま続いている");
+            await ExecuteOnAsync(connection, "ROLLBACK", ct);
+        }
+
+        (await h.ReadStateTablesAsync(ct)).Should().Equal(stateBefore);
+        Describe(await h.ReadLocalAsync(ct)).Should().Be(localBefore);
+
+        // 関数の中からの入れ子の呼び出し：断られ、外側は続けてコミットできる
+        await using (var connection = h.Rows.CreateDedicatedConnection())
+        {
+            await connection.OpenAsync(ct);
+            Exception? nested = null;
+            await SyncLocalTracking.WriteUntrackedAsync(
+                connection,
+                async (inside, token) =>
+                {
+                    await ExecuteOnAsync(inside, InsertFolderSql(9), token);
+                    nested = await Record.ExceptionAsync(() =>
+                        SyncLocalTracking.WriteUntrackedAsync(
+                            inside,
+                            (_, _) => Task.CompletedTask,
+                            token
+                        )
+                    );
+                },
+                ct
+            );
+
+            nested.Should().BeOfType<InvalidOperationException>("入れ子の呼び出しは断る");
+        }
+
+        (await h.ReadStateTablesAsync(ct))
+            .Should()
+            .Equal(stateBefore, "外側の書き込みは記録されず、印は 0 に戻る");
+        (await h.ReadLocalAsync(ct)).Folders.Keys.Should().Contain(9, "外側はコミットされる");
+    }
+
+    /// <summary>開いていない接続・関数の中で閉じた接続・状態の表に行の無い DB を断る</summary>
+    private static async Task UntrackedWriteRefusesUnusableAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedFolderAndSyncAsync(h, ct);
+        var stateBefore = await h.ReadStateTablesAsync(ct);
+        var localBefore = Describe(await h.ReadLocalAsync(ct));
+        var called = false;
+
+        // 開いていない接続
+        await using (var connection = h.Rows.CreateDedicatedConnection())
+        {
+            var thrown = await Record.ExceptionAsync(() =>
+                SyncLocalTracking.WriteUntrackedAsync(
+                    connection,
+                    (_, _) =>
+                    {
+                        called = true;
+                        return Task.CompletedTask;
+                    },
+                    ct
+                )
+            );
+            thrown.Should().BeOfType<InvalidOperationException>("開いていない接続は断る");
+        }
+
+        // 関数の中で接続を閉じる（プールしない接続なので、閉じるとトランザクションも消える）
+        await using (var connection = h.Rows.CreateDedicatedConnection())
+        {
+            await connection.OpenAsync(ct);
+            var thrown = await Record.ExceptionAsync(() =>
+                SyncLocalTracking.WriteUntrackedAsync(
+                    connection,
+                    async (inside, token) =>
+                    {
+                        await ExecuteOnAsync(inside, InsertFolderSql(9), token);
+                        await inside.CloseAsync();
+                    },
+                    ct
+                )
+            );
+            thrown
+                .Should()
+                .BeOfType<InvalidOperationException>("関数の中で閉じられた接続は名指しで断る")
+                .Which.Message.Should()
+                .Contain("closed the connection");
+        }
+
+        called.Should().BeFalse("断るときは関数を呼ばない");
+        (await h.ReadStateTablesAsync(ct)).Should().Equal(stateBefore);
+        Describe(await h.ReadLocalAsync(ct)).Should().Be(localBefore, "何もコミットしない");
+
+        // 状態の表に行の無い DB（記録の仕組みが置かれていない）
+        await using (var raw = OutsideConnection(h, timeoutSeconds: 1))
+        {
+            await raw.OpenAsync(ct);
+            await ExecuteOnAsync(raw, $"DELETE FROM {SyncLocalTracking.StateTableName}", ct);
+            var thrown = await Record.ExceptionAsync(() =>
+                SyncLocalTracking.WriteUntrackedAsync(
+                    raw,
+                    (_, _) =>
+                    {
+                        called = true;
+                        return Task.CompletedTask;
+                    },
+                    ct
+                )
+            );
+            thrown
+                .Should()
+                .BeOfType<InvalidOperationException>("状態の表に行の無い DB は断る")
+                .Which.Message.Should()
+                .Contain("not set up");
+            called.Should().BeFalse();
+            await ShouldBeOutsideTransactionAsync(
+                raw,
+                "断った後、接続はトランザクションの外に戻る",
+                ct
+            );
+        }
+
+        Describe(await h.ReadLocalAsync(ct)).Should().Be(localBefore);
+    }
+
+    /// <summary>
+    /// 関数がプールの接続を閉じる：トランザクションとロックがプールに残り、同じプールの次の接続を開くと確認が巻き戻す
+    /// </summary>
+    private static async Task UntrackedWriteClosedPooledConnectionAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedFolderAndSyncAsync(h, ct);
+        var stateBefore = await h.ReadStateTablesAsync(ct);
+        var localBefore = Describe(await h.ReadLocalAsync(ct));
+
+        // 製品の接続ファクトリを開くたびの確認で包む（プールする）。接続文字列を端末のほかの接続と変えて、プールを分ける
+        // （残ったトランザクションを持つ接続を、この行の次の接続だけが借りる）
+        var factory = new Sqlite.ObservedSqlConnectionFactory(
+            new Sqlite.SqlConnectionFactory(
+                new SqliteConnectionStringBuilder(h.ConnectionString)
+                {
+                    DefaultTimeout = 2,
+                }.ToString()
+            ),
+            new SyncLocalTrackingGuard(GeneratedSyncTables.All).OnStateChange
+        );
+
+        await using (var connection = factory.CreateConnection())
+        {
+            await connection.OpenAsync(ct);
+            var thrown = await Record.ExceptionAsync(() =>
+                SyncLocalTracking.WriteUntrackedAsync(
+                    connection,
+                    async (inside, token) =>
+                    {
+                        await ExecuteOnAsync(inside, InsertFolderSql(9), token);
+                        await inside.CloseAsync();
+                    },
+                    ct
+                )
+            );
+            thrown
+                .Should()
+                .BeOfType<InvalidOperationException>("関数の中で閉じられた接続は名指しで断る")
+                .Which.Message.Should()
+                .Contain("closed the connection");
+        }
+
+        // プールへ戻った接続がトランザクションと書き込みのロックを持ったまま（この形が実際に起きていることの確かめ）
+        await using (var blocked = OutsideConnection(h, timeoutSeconds: 1))
+        {
+            await blocked.OpenAsync(ct);
+            var busy = await Record.ExceptionAsync(() =>
+                ExecuteOnAsync(blocked, InsertFolderSql(78), ct)
+            );
+            busy.Should().NotBeNull("プールに残ったトランザクションが書き込みのロックを持っている");
+            Chain(busy!).OfType<SqliteException>().Should().Contain(ex => ex.SqliteErrorCode == 5);
+        }
+
+        // 同じプールの次の接続を開くと、開くたびの確認が残ったトランザクションを巻き戻す
+        await using (var next = factory.CreateConnection())
+        {
+            await next.OpenAsync(ct);
+            await ShouldBeOutsideTransactionAsync(
+                next,
+                "開くたびの確認が、プールに残ったトランザクションを巻き戻す",
+                ct
+            );
+        }
+
+        (await h.ReadStateTablesAsync(ct)).Should().Equal(stateBefore, "印も記録も残らない");
+        Describe(await h.ReadLocalAsync(ct)).Should().Be(localBefore, "書いた行は残らない");
+        await ShouldLeaveNoTransactionAsync(h, ct);
+    }
+
+    /// <summary>コミットされて残った印：記録しない書き込みは断らずに流れ、印を 0 に戻す</summary>
+    private static async Task UntrackedWriteClearsLeftoverFlagAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedFolderAndSyncAsync(h, ct);
+
+        // 包んでいない接続で印を 1 にしてコミットする（包んだ接続を開くと、開くたびの確認が戻してしまう）
+        await h.ExecuteLocalAsync(
+            $"UPDATE {SyncLocalTracking.StateTableName} SET applying = 1",
+            ct
+        );
+        await h.ExecuteLocalAsync(InsertFolderSql(8), ct);
+        (await RecordedAsync(h, 8, ct))
+            .Should()
+            .Be("0", "印が残っている間の書き込みは記録されない");
+
+        await using (var raw = OutsideConnection(h, timeoutSeconds: 1))
+        {
+            await raw.OpenAsync(ct);
+            await SyncLocalTracking.WriteUntrackedAsync(
+                raw,
+                (inside, token) => ExecuteOnAsync(inside, InsertFolderSql(9), token),
+                ct
+            );
+        }
+
+        (await h.ScalarAsync(ApplyingSql, ct)).Should().Be("0", "終わると印は 0 に戻る");
+        (await RecordedAsync(h, 9, ct)).Should().Be("0");
+        await h.ExecuteLocalAsync(InsertFolderSql(10), ct);
+        (await RecordedAsync(h, 10, ct)).Should().Be("1", "その後の書き込みは記録される");
+    }
+
+    /// <summary>適用中の印を読む文</summary>
+    private static readonly string ApplyingSql =
+        $"SELECT applying FROM {SyncLocalTracking.StateTableName}";
+
+    /// <summary>フォルダーを 1 行入れる文</summary>
+    private static string InsertFolderSql(int key) =>
+        string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"INSERT INTO model_folders (folder_id, name) VALUES ({key}, 'folder-{key}')"
+        );
+
+    /// <summary>そのキーのフォルダーの行の数を読む文</summary>
+    private static string CountFolderSql(int key) =>
+        string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"SELECT count(*) FROM model_folders WHERE folder_id = {key}"
+        );
+
+    /// <summary>そのキーのフォルダーが、行の状態の表に送る印つきで載っている数（"0" か "1"）</summary>
+    private static Task<string?> RecordedAsync(
+        SyncEngineFixedHarness h,
+        int key,
+        CancellationToken ct
+    ) =>
+        h.ScalarAsync(
+            string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"SELECT count(*) FROM {SyncLocalTracking.RowTableName} "
+                    + $"WHERE table_name = '{ModelTables.Folders}' AND \"key\" = {key} AND dirty = 1"
+            ),
+            ct
+        );
+
+    /// <summary>サーバーにフォルダー 1 を入れて同期する</summary>
+    private static async Task SeedFolderAndSyncAsync(SyncEngineFixedHarness h, CancellationToken ct)
+    {
+        await h.Server.Folders.InsertAsync(new ModelFolderEntity { FolderId = 1, Name = "f1" }, ct);
+        await h.SyncAsync(null, ct);
+    }
+
+    /// <summary>端末の DB への、包んでいない・プールしない接続（開く前）</summary>
+    private static SqliteConnection OutsideConnection(
+        SyncEngineFixedHarness h,
+        int timeoutSeconds
+    ) =>
+        new(
+            new SqliteConnectionStringBuilder(h.ConnectionString)
+            {
+                Pooling = false,
+                DefaultTimeout = timeoutSeconds,
+            }.ToString()
+        );
+
+    /// <summary>渡された接続で 1 文を流す</summary>
+    private static async Task ExecuteOnAsync(
+        System.Data.Common.DbConnection connection,
+        string sql,
+        CancellationToken ct
+    )
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>渡された接続で 1 つの値を読む（文字列へ）</summary>
+    private static async Task<string?> ScalarOnAsync(
+        System.Data.Common.DbConnection connection,
+        string sql,
+        CancellationToken ct
+    )
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+
+        return Convert.ToString(
+            await command.ExecuteScalarAsync(ct),
+            System.Globalization.CultureInfo.InvariantCulture
+        );
+    }
+
+    /// <summary>接続がトランザクションの外にあることを表明する（中なら BEGIN IMMEDIATE が断られる）</summary>
+    private static async Task ShouldBeOutsideTransactionAsync(
+        System.Data.Common.DbConnection connection,
+        string because,
+        CancellationToken ct
+    )
+    {
+        var thrown = await Record.ExceptionAsync(async () =>
+        {
+            await ExecuteOnAsync(connection, "BEGIN IMMEDIATE", ct);
+            await ExecuteOnAsync(connection, "ROLLBACK", ct);
+        });
+        thrown.Should().BeNull(because);
+    }
+
+    /// <summary>
+    /// 端末の DB にトランザクションも書き込みのロックも残っていないことを表明する：同じプールの次の接続がトランザクションの外に
+    /// あり、プールしない別の接続（待ち 1 秒）の書き込みが通って記録される
+    /// </summary>
+    private static async Task ShouldLeaveNoTransactionAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await using (var pooled = h.Factory.CreateConnection())
+        {
+            await pooled.OpenAsync(ct);
+            await ShouldBeOutsideTransactionAsync(
+                pooled,
+                "同じプールの次の接続にトランザクションが残らない",
+                ct
+            );
+        }
+
+        await using var other = OutsideConnection(h, timeoutSeconds: 1);
+        await other.OpenAsync(ct);
+        var thrown = await Record.ExceptionAsync(() =>
+            ExecuteOnAsync(other, InsertFolderSql(77), ct)
+        );
+        thrown.Should().BeNull("書き込みのロックが残らず、別の接続が待たずに書ける");
+        (await RecordedAsync(h, 77, ct)).Should().Be("1", "その書き込みは記録される");
     }
 
     /// <summary>サーバーにフォルダー 1 と品目 1・2（blob つき）を入れる</summary>

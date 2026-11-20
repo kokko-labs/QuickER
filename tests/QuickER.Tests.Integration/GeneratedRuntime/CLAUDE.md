@@ -374,13 +374,16 @@
   - エンジンの宣言 `IModelDeviceSync.RefetchesHeldRowsInSameRun`：同期と洗い替えの取得で保留して取り残した行を、同じ実行の中で上限を取り直してもう 1 回取得するか。製品のエンジンは偽（取り残した行は後の実行が降ろす）、新しいエンジンは真（その間にサーバーで変わった行も同じ実行に入る）、判定役の包みは包んだエンジンの値を引き継ぐ。
   - 宣言で振る舞いが変わる決まった形の行は、期待の手 `WhenEngineDeclaresOp`（端末・宣言 `EngineDeclaration`・真の手・偽の手）で枝を選ぶ。エンジンや転送の名前で選ばず、どちらの枝も結果を行ごとの値で表明する（`CarriesServerWinsDecision` の枝は例外で終わった ServerWins の 3 行、`DerivesResumePointFromLocalVersions` の枝は `ack-serverwins-restored-row-then-edit-is-not-a-false-duplicate`・`sw-restore-does-not-advance-anchor`、`RefetchesHeldRowsInSameRun` の枝は割り込みの網の洗い替え × `unique-holder-after-taker` × 更新 × 取得の前の点の 4 行の、上限を固定するサーバー役の枝）。
   - 端末の部品 `SyncModelDeviceParts` の口と、端末（`SyncModelDevice`）の読み口。今の端末は製品のジャーナルを持つ端末で、そこでの振る舞いを併せて書く。
-    - `WriteUntrackedAsync`（記録しない書き込みを流す関数）：記録しない書き込み（Raw 系のリポジトリ・判定役の包みの生の SQL・最初の形 Untracked の行）を、流す間は端末の未送信の記録が残らないように流す。前からある未送信の記録は変えない。同期のモデルは記録しない書き込みをすべて `SyncModelDevice.WriteUntrackedAsync` に通す。口は省略でき、省略なら関数をそのまま流す（今の端末は記録デコレータの内側で書くので記録が作られず、口は省略されている）。新しい端末は、状態の表の適用中の印を立ててから流し、例外でも印を戻す（立てる前に印が 0 でなければ投げる）。
+    - `WriteUntrackedAsync`（記録しない書き込みを流す関数）：記録しない書き込み（最初の形 Untracked の行・一括の Raw の挿入・`LocalSqlOp` の `Untracked`・判定役の包みの生の SQL）を、流す間は端末の未送信の記録が残らないように流す。前からある未送信の記録は変えない。同期のモデルは記録しない書き込みをすべて `SyncModelDevice.WriteUntrackedAsync(write, ct, withoutForeignKeys)` に通す。
+      - 書き込みの関数は接続を受け取る（`Func<DbConnection?, Task>`）。口を省略した端末（今の端末）は null を渡し、関数は今までどおり Raw 系のリポジトリ・自分で開く接続で書く（記録デコレータの内側で書くので記録が作られない）。
+      - 口を持つ端末（新しい端末）は、口が接続を開いて製品の `SyncLocalTracking.WriteUntrackedAsync` を呼び、関数はその接続だけで書く（行は `SyncModelDevice.LocalRows`＝`ILocalRowStore.InsertAsync`、SQL はその接続のコマンド）。接続は、外部キーありが `ILocalRowStore.CreateDedicatedConnection`、外部キーなし（`withoutForeignKeys`）が外部キーの検査を切ったプールしない接続。
+      - 関数が接続を受け取ったのに Raw 系のリポジトリ・`device.Sql`（別の接続）で書くと、API が持つ書き込みのロックを待って失敗する。呼ぶ所は、接続が null かどうかで書き方を分ける。
     - `ClearPendingRecordsAsync`：1 行の未送信の記録を全部消す。判定役の対照の行の包みが、エンジンが記録を捨てた結果を作るのに使う（記録しない書き込みとは別の明示の手順）。口を省略すると、製品のジャーナルの表（`quicker_sync_journal`）からその行の記録を消す（今の端末はこちら）。
     - `RequireJournal`・`RequireEngine`（手の名前）：製品のジャーナル・エンジンを返す。持たない端末（別のエンジンへ載せ替えた端末）では、手の名前つきの `NotSupportedException` を投げる。メッセージは定数 `SyncModelDevice.UnsupportedPrefix` で始まり、手の名前は `SyncModelDevice.UnsupportedHand(exception)` で取り出す。今の端末は両方を持つので投げない。製品のジャーナルの表を読み書きする手は、SQL を流す前にこの口を通る。`LocalSqlOp`・`ExpectLocalSqlOp` の SQL が製品のジャーナルの補助の表 4 つ（記録・コピー待ち・受理記録・降ろし直す約束）を名指しするときも、流す前にこの口を通る（手の名前は「手:表」）。
     - `CurrentParts()`：今の端末の部品を返す。部品の一部だけ差し替えて `Install` で載せ直す包みが使う（ほかの部品・口は今のまま持ち越す）。
   - 「流せない」：端末で流せない手は「流せない」（`SyncModelDevice.Unsupported`）の `NotSupportedException` で終わる。新しいエンジンは、持たない部分の例外の書式（`QUICKER-SYNC-PENDING`）を持たない（生成テンプレートと同期のランタイムに残っていないことは `SourceRuleTests` の規則 `sync-engine-pending-markers-in-templates`・`sync-engine-pending-markers-in-runtime` が固定する）。
   - 素通しの印 `SyncModelWorldOptions.PassesNotRunnableThrough`（既定は偽）：真の世界では、判定役は「流せない」の例外を違反として記録せずにシナリオの外へ出す。真にするのは新しいエンジンの端末の控えの Fact（`SyncSupportAdoSqliteEngineRuntimeTests.ScenarioLedgerDrift_MatchesRecord`）だけで、偽の世界ではほかの例外と同じ扱い（違反か、テストの例外）。
-  - 生の SQL の手 `LocalSqlOp` の指定 `Untracked`（既定は偽）：真なら SQL を `SyncModelDevice.WriteUntrackedAsync` を通して流す。端末が前から持っていた状態・壊れた状態を作る手（利用者が送る編集でない業務の表の書き込み）に付け、偽の手はトリガーで記録する端末では利用者の書き込みとして記録される。業務の表を書かない手（DDL・補助の表だけ・トリガーを足す・落とす）には付けない。
+  - 生の SQL の手 `LocalSqlOp` の指定 `Untracked`（既定は偽）：真なら SQL を `SyncModelDevice.WriteUntrackedAsync` を通して流す（外部キーの検査を切った接続）。端末が前から持っていた状態・壊れた状態を作る手（利用者が送る編集でない業務の表の書き込み）に付け、偽の手はトリガーで記録する端末では利用者の書き込みとして記録される。業務の表を書かない手（DDL・補助の表だけ・トリガーを足す・落とす）には付けない。
 - 台帳「端末の持ち分」（`SyncModelRun.Ledger.cs`）：（端末・表・キー）→ その端末が自分で書いてまだ届いていない最後の内容。品目の blob は行と別の品目。
   - 作るのは、書き込みの手の前後の端末の DB の差分・実行の前後の端末とサーバーの DB・実行の公開の結果（競合・`LocalRowChanges`）・失敗の注入の控えだけ。状態の面・ジャーナル・受理記録は読まない（エンジンが印を間違えたときに、判定が一緒に間違えないため）。状態の面を読むのは、比べる相手にする照合（`5/facet:server-knows`）だけ。
 - 実行ごとの照合（署名は `5/` の族。根拠の判定と同じく実行の直後に確定し、静止化が失敗しても報告する）：
@@ -530,17 +533,22 @@
 
 - 同期のモデルの決定的なシナリオでは書けない、新しいエンジン（`TrackedSyncEngine`）だけで確かめる形は、表「新しいエンジンの決まった形の行」（`SyncEngineFixedRows`・影響の地図の名前 `table:SyncEngineFixed`）に置き、`SyncSupportAdoSqliteEngineRuntimeTests.FixedRow_BehavesAsExpected` が 1 行ずつ流す（コンテナなし）。
   - 端末とサーバー役は `SyncEngineFixedHarness`：端末は `SyncModelEngineDevice` と同じ部品（`SyncLocalTracking.Ensure`・開くたびの確認で包んだ接続ファクトリ・`SqliteLocalRowStore`・4 表の `TrackedSyncTable`）で組み、接続文字列の `Default Timeout` を 1 秒にし、フォルダーのリポジトリに Save フックの口を持つ。サーバー役は同期のモデルの SQLite の代役（`SyncModelServer`）。
-  - 行は 10 本：同じ DB の 2 本の実行の直列化（1 本目をサーバー役の待ちの点で止め、2 本目がサーバー役に来る順序を `SyncModelFaults.ObservePoint` で記録する。表明は順序で行う）・保存フックの中の同期（保存の書き込みのロックを待って SQLITE_BUSY で失敗し、行の状態の表・端末・サーバーに途中の状態を残さず、実行のロックを手放す）・空にした表（3 つの入口が `SyncLocalTableEmptiedException` で断り何も変えない）・引数の検査（取得の大きさ 0 以下・同期しない型の除外。同期・送信だけ・受信だけ・洗い替えの 4 つの入口）・生の SQL で主キーを変えた行の blob が届く（主キーの変更はトリガーに記録され、新しいキーは挿入として全列を送る）・一意な値の回転が端末の blob を保つ・サーバーへの書き込みの後に送信の決着が失敗した後の同期（docs の既知の制限のとおり、次の Collect は自分が書いた行を相手に ModifiedOnServer を報告し続け、LocalWins で収束する）・洗い替えの取得の失敗は端末・未送信・行の状態の表を洗い替えの前のまま残す（今のエンジンは表を空にしてから流し込むので、同じ形を同期のモデルの決定的なシナリオには置けない）・洗い替えの直後の同期と同期の直後の同期がサーバーから 1 行も取得しない（再開点を書かなくても、取り直した行はエコーとして書かれず内容に出ないので、`SyncModelFaults.ObservePoint` で取得が 1 行以上を返した後の点が来ないことを見る。対照としてサーバーの他者が変えた後の同期では点が来る）・端末が作って消したサーバーが知らないキーの未送信の行と同じキーでサーバーの他者が行を作ると、受信だけの実行がサーバーの行を端末に入れる（同期の送信の段はその記録を送らずに片付けるので、受信の段まで未送信が残るのは受信だけの実行のとき。今のエンジンはその実行では降ろさないので、同期のモデルの決定的なシナリオには置けない）。
+  - エンジンの行は 10 本：同じ DB の 2 本の実行の直列化（1 本目をサーバー役の待ちの点で止め、2 本目がサーバー役に来る順序を `SyncModelFaults.ObservePoint` で記録する。表明は順序で行う）・保存フックの中の同期（保存の書き込みのロックを待って SQLITE_BUSY で失敗し、行の状態の表・端末・サーバーに途中の状態を残さず、実行のロックを手放す）・空にした表（3 つの入口が `SyncLocalTableEmptiedException` で断り何も変えない）・引数の検査（取得の大きさ 0 以下・同期しない型の除外。同期・送信だけ・受信だけ・洗い替えの 4 つの入口）・生の SQL で主キーを変えた行の blob が届く（主キーの変更はトリガーに記録され、新しいキーは挿入として全列を送る）・一意な値の回転が端末の blob を保つ・サーバーへの書き込みの後に送信の決着が失敗した後の同期（docs の既知の制限のとおり、次の Collect は自分が書いた行を相手に ModifiedOnServer を報告し続け、LocalWins で収束する）・洗い替えの取得の失敗は端末・未送信・行の状態の表を洗い替えの前のまま残す（今のエンジンは表を空にしてから流し込むので、同じ形を同期のモデルの決定的なシナリオには置けない）・洗い替えの直後の同期と同期の直後の同期がサーバーから 1 行も取得しない（再開点を書かなくても、取り直した行はエコーとして書かれず内容に出ないので、`SyncModelFaults.ObservePoint` で取得が 1 行以上を返した後の点が来ないことを見る。対照としてサーバーの他者が変えた後の同期では点が来る）・端末が作って消したサーバーが知らないキーの未送信の行と同じキーでサーバーの他者が行を作ると、受信だけの実行がサーバーの行を端末に入れる（同期の送信の段はその記録を送らずに片付けるので、受信の段まで未送信が残るのは受信だけの実行のとき。今のエンジンはその実行では降ろさないので、同期のモデルの決定的なシナリオには置けない）。
+  - 記録しない書き込みの API（`SyncLocalTracking.WriteUntrackedAsync`）の行は 9 本（`untracked-write-*`）：関数がプールの接続を閉じると、トランザクションとロックがプールに残り（別の接続の書き込みが SQLITE_BUSY になることで、その形が起きていることを確かめる）、同じプールの次の接続を開くと開くたびの確認が巻き戻す（この行だけ、製品の接続ファクトリを確認で包んだ行の中のファクトリを使う。開く処理が流す文を製品のものだけにするため＝端末の接続ファクトリは、開くたびにテストのジャーナルの設定の PRAGMA も流す。接続文字列を変えて、端末のほかの接続とプールを分ける）／書いた行は記録されず前からある記録・連番・印は変わらない／プールの接続で関数が例外を投げた後・取り消された後に何も残らず、渡した接続・同じプールの次の接続がトランザクションの外にあり、プールしない別の接続（待ち 1 秒）が書けて記録される／流れている間、別の接続の読み取りは待たずにコミットの前の内容を読み、書き込みはコミットまで進まない（順序で見る）／関数が生成の Repository で書くと SQLITE_BUSY で失敗して全体が巻き戻る／トランザクションの中の接続と入れ子の呼び出しを断り、利用者のトランザクションに触らない／開いていない接続・関数の中で閉じた接続・状態の表に行の無い DB を断る／コミットされて残った印があっても断らずに流れ、印を 0 に戻す。
+    - 「トランザクションが残らない」は、渡した接続で `BEGIN IMMEDIATE` が通ることと、同じ接続ファクトリの次の接続（同じプール）で同じことと、接続文字列の違うプールしない接続の書き込みが通ることの 3 つで見る（1 つだけだと、同じプールの接続が残ったトランザクションの中で書いて通ってしまう）。
+    - `SyncEngineFixedHarness.ExecuteUntrackedAsync` も同じ API で流す。
   - 観測の口 `SyncModelFaults.ObservePoint` は既定で null で、同期のモデルの結果を変えない。
-- mutation 実証済み（実行のロックを外す・空にした表の確かめを外す・回転で blob を戻さない・挿入した行の blob の列を全部にしない・洗い替えが再開点を書かない・同期が再開点を書かない・洗い替えの取得の大きさの検査を外す・ローカルに無くサーバーが知らない未送信の行にもローカルを残す、のそれぞれで対応する行が赤）。
+- mutation 実証済み（実行のロックを外す・空にした表の確かめを外す・回転で blob を戻さない・挿入した行の blob の列を全部にしない・洗い替えが再開点を書かない・同期が再開点を書かない・洗い替えの取得の大きさの検査を外す・ローカルに無くサーバーが知らない未送信の行にもローカルを残す、のそれぞれで対応する行が赤。記録しない書き込みの API：失敗の出口で巻き戻さない・巻き戻しを呼び出し側の取り消しのトークンで流す・印を立てない・印を戻さずにコミットする・トランザクションの中の接続を名指しで断らない・関数の中で閉じた接続を確かめない・状態の表の行を確かめない・開くたびの確認がプールに残ったトランザクションを巻き戻さない、のそれぞれで対応する行が赤）。
 
 ### 同期のトリガーのテスト
 
 - ローカルの変更の記録（`SyncLocalTracking`）と開くたびの確認（`SyncLocalTrackingGuard`）は、`SyncSupportAdoSqliteTriggerRuntimeTests`（Theory 2 本・コンテナなし）が 2 つの行の表を 1 行ずつ流して確かめる。仕組みの正本は `src/QuickER.Runtime.Sync/CLAUDE.md`「ローカルの変更の記録（SyncLocalTracking）」「開くたびの確認（SyncLocalTrackingGuard）」。
   - 行の表は「同期のトリガーの記録」（`SyncTriggerRecordingRows`・影響の地図の名前 `table:SyncTriggerRecording`）と「同期のトリガーの確認」（`SyncTriggerGuardRows`・`table:SyncTriggerGuard`）。端末の組み立ては `SyncTriggerHarness`（SyncModelFixture・SyncFixture・SyncVoFixture の 3 つのフィクスチャの SQLite の側）。
-  - 行の数は記録の表が 50 行・確認の表が 32 行。
+  - 行の数は記録の表が 50 行・確認の表が 38 行。
   - 記録の表には、行ごとの状態の表のエンジンだけが書く 4 列（`base_version`・`known`・`sw_seq`・`blob_owed`）を、更新・削除して入れ直す・主キーの変更（古いキー）・無制限バイナリ列の書き込みの後も保つ行（`engine-columns-kept-by-*`）がある。
   - 確認の表には、エンジンの列が足りない状態の表へ列を足して未送信の行を保つ行（`row-table-without-engine-columns-gets-them-and-keeps-unsent-rows`）と、再開点の表（`quicker_sync_table`）だけを落としたときに 2 段目で足りないと答えて作り直す行（`anchor-table-dropped-is-recreated`）がある。
+  - 確認の表には、コミットされて残った適用中の印の行が 6 本ある（`applying-flag-*`）：速い道・2 段目の後・張り直しの後のどれでも、その開く処理が印を 0 に戻す（`applying-flag-left-set-is-cleared-on-fast-path-open`・`-after-full-check`・`-after-repair`）／書き込みのロックを取れなければ接続を閉じて断り、後で開けば戻す／読み取り専用の接続は断る／開いたままのトランザクションの中の印は、開く処理を待たせない（`applying-flag-inside-open-transaction-does-not-block-open`）。
+    - 戻す 3 行は、行のガードで 1 回だけ開いた直後に、包んでいない接続で印を読む（行の手 `Open` を差し替える）。共通の表明（その後の Repository の書き込みが記録される）より後で読むと、その書き込みの接続が速い道で印を戻してしまい、2 段目・張り直しの後に戻さない壊し方が緑のまま通る。
 - 記録の表の共通の表明
   - 張った直後：初回の `Ensure` は渡した表を全部返し 2 回目は空・状態の表は 1 行・トリガーは渡した表にだけ付く・記録は空。
   - 手の後：記録が期待の並びと一致する・連番が並びの順に厳密に増えて `next_seq` より小さい・適用中の印は 0 のまま・触らなかった前準備の行は記録に無い・記録したキーで元の表を引き直せる。
@@ -551,4 +559,4 @@
 - 行に固めていないもの：同時に開く 2 つの接続の回数（範囲で期待する）。
 - 観測どおりに固めたもの：カスケードの記録の順（孫の削除 → 子の削除 → 子の NULL 化 → 親の削除）・`VACUUM` の後は 2 段目に入る・`Data Source=:memory:` は開くたびに別の空の DB になる・同期する表の名前を変えるとトリガーが変えた後の名前の表に付け替わり、古い表の名前で記録し続ける。
 - 生成の行：`CodegenCaseTests` の行 `exec-sync-dotted-table-name-local-tracking-refuses-attached-database`・`exec-sync-quoted-names-local-tracking-records-on-sqlite`。分割の Runtime 系ファイルの型の集合の行 `relation-runtime-type-set-split-multi-dialect` は、機能で出し分ける固定の部品（HTTP・同期）を有効にした構成で照らす。
-- mutation 実証済み（記録：適用中の印の条件を外す・連番を進めない・主キーを変える更新の古いキーを削除として記録しない・挿入し直しで無制限バイナリ列の名前を付け直さない／確認：速い道が DB ごとの印を見ない・失敗のときに接続を閉じない・読むだけの確かめが比べない・覚える鍵に定義のハッシュを入れない・張る前に列を確かめない）。
+- mutation 実証済み（記録：適用中の印の条件を外す・連番を進めない・主キーを変える更新の古いキーを削除として記録しない・挿入し直しで無制限バイナリ列の名前を付け直さない／確認：速い道が DB ごとの印を見ない・失敗のときに接続を閉じない・読むだけの確かめが比べない・覚える鍵に定義のハッシュを入れない・張る前に列を確かめない・残った適用中の印を戻さない・印を速い道でしか戻さない・印を戻す文を開くたびに流す）。

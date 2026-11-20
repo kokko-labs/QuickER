@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -261,7 +262,14 @@ internal sealed partial class SyncModelRun
                 {
                     await _world
                         .Device(sql.Device)
-                        .WriteUntrackedAsync(() => LocalSqlAsync(sql.Device, [sql.Sql]), _ct);
+                        .WriteUntrackedAsync(
+                            connection =>
+                                connection is null
+                                    ? LocalSqlAsync(sql.Device, [sql.Sql])
+                                    : RunStatementsAsync(connection, [sql.Sql]),
+                            _ct,
+                            withoutForeignKeys: true
+                        );
                 }
                 else
                 {
@@ -415,6 +423,17 @@ internal sealed partial class SyncModelRun
         }
     }
 
+    /// <summary>開いた接続で文を順に流す（記録しない書き込みの口が渡した接続。接続は呼び出し側が持つ）</summary>
+    internal async Task RunStatementsAsync(DbConnection connection, IEnumerable<string> statements)
+    {
+        foreach (var sql in statements)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            await command.ExecuteNonQueryAsync(_ct);
+        }
+    }
+
     /// <summary>外部キーの検査を切り、プールしない接続文字列（利用者の手やエンジンの壊し方が親の無い行を書くため）</summary>
     internal static string WithoutForeignKeys(string connectionString) =>
         new SqliteConnectionStringBuilder(connectionString)
@@ -464,6 +483,7 @@ internal sealed partial class SyncModelRun
         Func<SyncModelDevice, List<TEntity>, Task<int>> journaled,
         Func<List<TEntity>, Task> server
     )
+        where TEntity : EntityBaseCore, new()
     {
         if ((mode == ModelBulkMode.Server) != (actor == ModelActor.Server))
         {
@@ -483,7 +503,24 @@ internal sealed partial class SyncModelRun
             case ModelBulkMode.Raw:
             {
                 var device = _world.Device(actor);
-                await device.WriteUntrackedAsync(() => raw(device, rows), _ct);
+                await device.WriteUntrackedAsync(
+                    async connection =>
+                    {
+                        // 接続が無い端末は Raw のリポジトリの一括挿入、接続がある端末は渡した順に 1 行ずつ全列を書く
+                        if (connection is null)
+                        {
+                            _ = await raw(device, rows);
+
+                            return;
+                        }
+
+                        foreach (var row in rows)
+                        {
+                            await device.LocalRows.InsertAsync(connection, row, _ct);
+                        }
+                    },
+                    _ct
+                );
                 break;
             }
 

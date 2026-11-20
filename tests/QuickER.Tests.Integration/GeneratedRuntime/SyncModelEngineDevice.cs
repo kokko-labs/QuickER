@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Data.Sqlite;
 using QuickER.Tests.GeneratedSyncModelFixture;
 using QuickER.Tests.GeneratedSyncModelFixture.Repositories.Sqlite;
 
@@ -35,6 +37,30 @@ internal static class SyncModelEngineDevice
             CreateDevice = CreateAsync,
             Name = options.Name + "+engine",
         };
+
+    /// <summary>
+    /// 記録しない書き込みの口：接続を開き、製品の <c>SyncLocalTracking.WriteUntrackedAsync</c>（適用中の印を立てた 1 つの
+    /// トランザクションで書き込みロックを持つ）の上で、その接続を関数へ渡す。接続は破棄する
+    /// </summary>
+    /// <param name="rows">端末のローカルの行の口（外部キーありの接続は <c>CreateDedicatedConnection</c>＝プールしない）</param>
+    /// <param name="connectionString">端末の DB の接続文字列（外部キーなしの接続の元）</param>
+    /// <param name="write">渡された接続で書く関数</param>
+    /// <param name="ct">キャンセルトークン</param>
+    /// <param name="withoutForeignKeys">真なら、外部キーの検査を切った接続（プールしない）を渡す</param>
+    private static async Task WriteUntrackedAsync(
+        ILocalRowStore rows,
+        string connectionString,
+        Func<DbConnection, Task> write,
+        CancellationToken ct,
+        bool withoutForeignKeys
+    )
+    {
+        await using DbConnection connection = withoutForeignKeys
+            ? new SqliteConnection(SyncModelRun.WithoutForeignKeys(connectionString))
+            : rows.CreateDedicatedConnection();
+        await connection.OpenAsync(ct);
+        await SyncLocalTracking.WriteUntrackedAsync(connection, (c, _) => write(c), ct);
+    }
 
     /// <summary>端末 1 台を作る（<see cref="SyncModelWorldOptions.CreateDevice"/> へ渡す形）</summary>
     /// <param name="request">端末の注文</param>
@@ -103,7 +129,14 @@ internal static class SyncModelEngineDevice
                     Events = new ModelEventRepository(factory, device.Hooks),
                     Sync = new EngineModelDeviceSync(engine, rowStore),
                     State = state,
-                    WriteUntrackedAsync = state.WriteUntrackedAsync,
+                    WriteUntrackedAsync = (write, token, withoutForeignKeys) =>
+                        WriteUntrackedAsync(
+                            rowStore,
+                            device.ConnectionString,
+                            write,
+                            token,
+                            withoutForeignKeys
+                        ),
                     ClearPendingRecordsAsync = state.ClearPendingAsync,
                 }
             );
@@ -309,50 +342,6 @@ internal sealed class EngineModelDeviceSyncState(ISqlConnectionFactory factory, 
             clear.Parameters.AddWithValue("@table", table);
             clear.Parameters.AddWithValue("@key", raw);
             await clear.ExecuteNonQueryAsync(ct);
-        }
-    }
-
-    /// <summary>
-    /// 記録しない書き込みを流す関数を、状態の表の適用中の印（<c>quicker_sync_state.applying</c>）を立てた間に流す（トリガーは印が
-    /// 立っている間は記録しないので、書いた行は未送信にならず、前からある未送信の行・エンジンの列・変更の連番も変わらない）
-    /// </summary>
-    /// <remarks>
-    /// 印を立てる・戻す書き込みは、端末の接続ファクトリの普通の接続でコミットする（関数がほかの接続で書いても効く）。立てる前に
-    /// 印が 0 であることを確かめ、0 でなければ投げる（エンジンの適用の中で入れ子にしない）。印は関数が例外で終わっても戻す
-    /// </remarks>
-    /// <param name="write">記録しない書き込みを流す関数</param>
-    /// <param name="ct">キャンセルトークン</param>
-    /// <exception cref="InvalidOperationException">印がすでに立っている</exception>
-    public async Task WriteUntrackedAsync(Func<Task> write, CancellationToken ct)
-    {
-        await using (var connection = factory.CreateConnection())
-        {
-            await connection.OpenAsync(ct);
-            await using var command = connection.CreateCommand();
-
-            // 印が 0 の行だけを 1 に変える（0 でなければ 1 行も変わらない＝ほかの適用の途中）
-            command.CommandText =
-                $"UPDATE {SyncLocalTracking.StateTableName} SET applying = 1 WHERE applying = 0";
-
-            if (await command.ExecuteNonQueryAsync(ct) != 1)
-            {
-                throw new InvalidOperationException(
-                    "The applying flag of the change tracking is already set: an untracked write cannot run inside an apply."
-                );
-            }
-        }
-
-        try
-        {
-            await write();
-        }
-        finally
-        {
-            await using var connection = factory.CreateConnection();
-            await connection.OpenAsync(CancellationToken.None);
-            await using var command = connection.CreateCommand();
-            command.CommandText = $"UPDATE {SyncLocalTracking.StateTableName} SET applying = 0";
-            await command.ExecuteNonQueryAsync(CancellationToken.None);
         }
     }
 

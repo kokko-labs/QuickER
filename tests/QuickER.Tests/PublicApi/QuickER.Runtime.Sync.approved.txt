@@ -285,6 +285,7 @@ public static class QuickER.Runtime.Sync.SyncLocalTracking
     public const string TriggerNamePrefix = "quicker_sync_trg_"
     public static System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncLocalTrigger> TriggersFor(QuickER.Runtime.Sync.ISyncTableDescriptor table)
     public static System.Collections.Generic.IReadOnlyList<string> Ensure(System.Data.Common.DbConnection connection, System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.ISyncTableDescriptor> tables)
+    public static System.Threading.Tasks.Task WriteUntrackedAsync(System.Data.Common.DbConnection connection, System.Func<System.Data.Common.DbConnection, System.Threading.CancellationToken, System.Threading.Tasks.Task> write, System.Threading.CancellationToken cancellationToken = default)
 
 public sealed class QuickER.Runtime.Sync.SyncLocalTrackingGuard
     public .ctor(System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.ISyncTableDescriptor> tables)

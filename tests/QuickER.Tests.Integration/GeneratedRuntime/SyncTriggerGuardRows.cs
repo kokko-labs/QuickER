@@ -218,6 +218,31 @@ internal static class SyncTriggerGuardRows
             }
         };
 
+    /// <summary>適用中の印を 1 にする文（外の接続で流してコミットすると、印が残った DB になる）</summary>
+    private const string SetApplyingFlagSql = "UPDATE quicker_sync_state SET applying = 1";
+
+    /// <summary>状態の表の適用中の印が 0 に戻っていることを表明する手</summary>
+    private static async Task FlagIsClearedAsync(
+        SyncTriggerGuardContext ctx,
+        CancellationToken ct
+    ) =>
+        (await ctx.Harness.ReadStateAsync(ct))
+            .Applying.Should()
+            .Be(0, "コミットされて残った適用中の印は、開くたびの確認が 0 に戻す");
+
+    /// <summary>
+    /// 行のガードで包んだ接続を 1 回だけ開いて閉じ、その直後に印が 0 に戻っていることを表明する手（後で開くほかの接続が
+    /// 戻す前に見る＝印を戻すのは、その開く処理であること）
+    /// </summary>
+    private static async Task OpenOnceThenFlagIsClearedAsync(
+        SyncTriggerGuardContext ctx,
+        CancellationToken ct
+    )
+    {
+        await ctx.OpenAsync("印が残った DB を開く", ct);
+        await FlagIsClearedAsync(ctx, ct);
+    }
+
     /// <summary>状態の表の DB の識別子が、準備で張った直後の値と違うことを表明する手</summary>
     private static async Task DbIdChangedAsync(SyncTriggerGuardContext ctx, CancellationToken ct)
     {
@@ -853,6 +878,143 @@ internal static class SyncTriggerGuardRows
                         await using var rollback = ctx.Held!.CreateCommand();
                         rollback.CommandText = "ROLLBACK";
                         await rollback.ExecuteNonQueryAsync(ct);
+                    },
+                    ConnectionString: h =>
+                        new SqliteConnectionStringBuilder(h.ConnectionString)
+                        {
+                            DefaultTimeout = 1,
+                        }.ConnectionString
+                )
+            ),
+            // コミットされて残った適用中の印
+            Row(
+                "applying-flag-left-set-is-cleared-on-fast-path-open",
+                "適用中の印が 1 のままコミットされた DB を開くと、2 段目に入らずに印を 0 に戻し、その後の書き込みは記録される",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    Prepared: true,
+                    Outside(SetApplyingFlagSql),
+                    Counts(0, 0),
+                    Open: OpenOnceThenFlagIsClearedAsync
+                )
+            ),
+            Row(
+                "applying-flag-left-set-is-cleared-after-full-check",
+                "印が残り、無関係な表も作られた DB を開くと、2 段目で確かめた後（張り直さない）に印を 0 に戻す",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    Prepared: true,
+                    Outside(SetApplyingFlagSql + "; CREATE TABLE guard_unrelated (x INTEGER)"),
+                    Counts(1, 0),
+                    Open: OpenOnceThenFlagIsClearedAsync
+                )
+            ),
+            Row(
+                "applying-flag-left-set-is-cleared-after-repair",
+                "印が残り、トリガーも 1 本落とされた DB を開くと、張り直した後に印を 0 に戻す",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    Prepared: true,
+                    Outside(
+                        SetApplyingFlagSql + "; DROP TRIGGER \"quicker_sync_trg_model_items_au\""
+                    ),
+                    Counts(1, 1),
+                    Open: OpenOnceThenFlagIsClearedAsync
+                )
+            ),
+            Row(
+                "applying-flag-left-set-lock-timeout-closes-connection-and-is-cleared-after-rollback",
+                "印が残った DB を、外の接続が BEGIN IMMEDIATE を持ったまま Default Timeout=1 の接続で開くと、包んだ例外"
+                    + "（内側は DB の例外）で断り、接続は閉じる。外の接続を ROLLBACK した後は開けて印を 0 に戻す",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    Prepared: true,
+                    async (ctx, ct) =>
+                    {
+                        await ctx.Harness.ExecuteOutsideAsync(SetApplyingFlagSql, ct);
+                        ctx.Held = await ctx.Harness.OpenOutsideAsync(ct);
+                        await using var begin = ctx.Held.CreateCommand();
+                        begin.CommandText = "BEGIN IMMEDIATE";
+                        await begin.ExecuteNonQueryAsync(ct);
+                    },
+                    Counts(0, 0),
+                    Failure: new(
+                        typeof(InvalidOperationException),
+                        typeof(System.Data.Common.DbException),
+                        [
+                            "could not be cleared of the applying flag",
+                            "The connection has been closed",
+                            "open the connection again once it has finished",
+                        ],
+                        FailsAgain: false
+                    ),
+                    Recover: async (ctx, ct) =>
+                    {
+                        await using var rollback = ctx.Held!.CreateCommand();
+                        rollback.CommandText = "ROLLBACK";
+                        await rollback.ExecuteNonQueryAsync(ct);
+                    },
+                    After: FlagIsClearedAsync,
+                    ConnectionString: h =>
+                        new SqliteConnectionStringBuilder(h.ConnectionString)
+                        {
+                            DefaultTimeout = 1,
+                        }.ConnectionString
+                )
+            ),
+            Row(
+                "applying-flag-left-set-refuses-read-only-open",
+                "印が残った DB は、読み取り専用の接続では印を戻せないので、包んだ例外（内側は DB の例外・書ける接続で開き直す"
+                    + "趣旨の文）で断り、接続は閉じる",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    Prepared: true,
+                    Outside(SetApplyingFlagSql),
+                    Counts(0, 0),
+                    Failure: new(
+                        typeof(InvalidOperationException),
+                        typeof(System.Data.Common.DbException),
+                        ["could not be cleared of the applying flag", "opened read-only"],
+                        FailsAgain: true
+                    ),
+                    WriteRecorded: false,
+                    ConnectionString: h =>
+                        new SqliteConnectionStringBuilder(h.ConnectionString)
+                        {
+                            Mode = SqliteOpenMode.ReadOnly,
+                        }.ConnectionString
+                )
+            ),
+            Row(
+                "applying-flag-inside-open-transaction-does-not-block-open",
+                "外の接続が、開いたままのトランザクションの中で印を 1 にしている間（コミットしていない）、Default Timeout=1 の"
+                    + "接続は待たずに開ける（開いたばかりの接続からは印は 0 に見え、戻す文を流さない）",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    Prepared: true,
+                    async (ctx, ct) =>
+                    {
+                        ctx.Held = await ctx.Harness.OpenOutsideAsync(ct);
+                        await using var begin = ctx.Held.CreateCommand();
+                        begin.CommandText = "BEGIN IMMEDIATE; " + SetApplyingFlagSql;
+                        await begin.ExecuteNonQueryAsync(ct);
+                    },
+                    Counts(0, 0),
+                    WriteRecorded: false,
+                    After: async (ctx, ct) =>
+                    {
+                        await using var read = ctx.Held!.CreateCommand();
+                        read.CommandText = "SELECT applying FROM quicker_sync_state";
+                        Convert
+                            .ToInt64(
+                                await read.ExecuteScalarAsync(ct),
+                                System.Globalization.CultureInfo.InvariantCulture
+                            )
+                            .Should()
+                            .Be(
+                                1,
+                                "開いたままのトランザクションの印は、ほかの接続が開いても変わらない"
+                            );
                     },
                     ConnectionString: h =>
                         new SqliteConnectionStringBuilder(h.ConnectionString)

@@ -198,14 +198,24 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
     }
 
     /// <summary>
-    /// 端末の DB へ文を、状態の表の適用中の印を立てた間に流す（トリガーは記録しない＝アプリの外で表を作り直した形）
+    /// 端末の DB へ文を、記録しない書き込み（<c>SyncLocalTracking.WriteUntrackedAsync</c>）で流す（トリガーは記録しない＝アプリの
+    /// 外で表を作り直した形）
     /// </summary>
-    public Task ExecuteUntrackedAsync(string sql, CancellationToken ct) =>
-        ExecuteLocalAsync(
-            $"UPDATE {SyncLocalTracking.StateTableName} SET applying = 1; {sql}; "
-                + $"UPDATE {SyncLocalTracking.StateTableName} SET applying = 0",
+    public async Task ExecuteUntrackedAsync(string sql, CancellationToken ct)
+    {
+        await using var connection = Rows.CreateDedicatedConnection();
+        await connection.OpenAsync(ct);
+        await SyncLocalTracking.WriteUntrackedAsync(
+            connection,
+            async (inside, token) =>
+            {
+                await using var command = inside.CreateCommand();
+                command.CommandText = sql;
+                await command.ExecuteNonQueryAsync(token);
+            },
             ct
         );
+    }
 
     /// <summary>端末の DB で 1 つの値を読む（文字列へ。NULL は null）</summary>
     public async Task<string?> ScalarAsync(string sql, CancellationToken ct)
