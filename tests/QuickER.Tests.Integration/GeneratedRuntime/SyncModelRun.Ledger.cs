@@ -353,11 +353,8 @@ internal sealed partial class SyncModelRun
     /// （<see cref="CheckCarried"/>）。端末の blob の持ち分を立てる所（<see cref="NoteWrite"/>）で足し、行の決定を作るときに
     /// 消す。blob の内容では決めない（エンジンがサーバーの blob を端末へ写しても、端末の書き込みではないので決定は外れない）
     /// </summary>
-    private readonly HashSet<(
-        ModelActor Device,
-        string Table,
-        string Key
-    )> _blobWrittenAfterHeld = [];
+    private readonly HashSet<(ModelActor Device, string Table, string Key)> _blobWrittenAfterHeld =
+    [];
 
     /// <summary>
     /// 例外で終わった ServerWins の実行（ダウンロード以外）が戻せなかった行：（端末・表・キー）→ その実行の直後の端末の内容。
