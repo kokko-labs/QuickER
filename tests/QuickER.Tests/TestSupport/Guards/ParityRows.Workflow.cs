@@ -725,7 +725,8 @@ internal static partial class ParityRows
         );
 
     /// <summary>テストのプロジェクト（リポジトリの tests の下の csproj のうち xunit v3 を参照するもの・序数の順）</summary>
-    private static IReadOnlyList<string> TestProjectFiles() =>
+    /// <remarks>CI のジョブがどのテストのプロジェクトも流すことの照合（<c>WorkflowGuardTests</c>）も、この集め方を使う</remarks>
+    internal static IReadOnlyList<string> TestProjectFiles() =>
         NonEmpty(
             TestProjectFilesUnder(WorkflowGuardTests.Root),
             "tests の下に xunit v3 を参照する csproj が無い"

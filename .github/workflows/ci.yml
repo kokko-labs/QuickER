@@ -1,12 +1,17 @@
 # QuickER CI: push / PR ごとにビルドと全テストを実行する
 #
-# - build-and-test（windows-latest）: 全体のビルド＋全テスト。QuickER.Tests は net10.0-windows / WPF
-#   依存のため Windows が必須。Windows ランナーは Linux コンテナを起動できないため、Testcontainers 系は
-#   このジョブではフィクスチャの Docker 検出によりスキップされる
-# - integration-tests-linux（ubuntu-latest）: 切り出した QuickER.Tests.Integration（net10.0）を実 DB
-#   コンテナで実行する＝実 DB 検証の唯一の CI 経路。厳格モード（QUICKER_REQUIRE_DOCKER=1）により
-#   コンテナ起動失敗はスキップでなく失敗になる（壊れた Docker 構成がスキップ緑に化けない）
-# - 生成コードの Roslyn コンパイル検証（CodegenCaseTests の行 compile-*）は windows ジョブで常時実行される
+# - build-and-test（windows-latest）: 全体のビルド＋QuickER.Tests（net10.0-windows / WPF 依存のため Windows が必須）
+#   ＋変異テストの環境の同期の計画のテスト＋サンプル＋パッケージの検証
+# - integration-tests-windows（windows-latest）: QuickER.Tests.Integration を Windows で流す（Integration だけをビルドする）。
+#   Windows ランナーは Linux コンテナを起動できないため、Testcontainers 系はフィクスチャの Docker 検出によりスキップされる。
+#   build-and-test と 1 つのジョブで流すと 2 つのテストのプロジェクトが同じ 4 コアを取り合い、遅いランナーでは 30 分に
+#   収まらないので分けている
+# - integration-tests-linux（ubuntu-latest）: QuickER.Tests.Integration（net10.0）を実 DB コンテナで実行する
+#   ＝実 DB 検証の唯一の CI 経路。厳格モード（QUICKER_REQUIRE_DOCKER=1）によりコンテナ起動失敗はスキップでなく
+#   失敗になる（壊れた Docker 構成がスキップ緑に化けない）
+# - どのテストのプロジェクトも Windows のどれかのジョブで流れ、Integration は厳格の Ubuntu でも流れる
+#   （WorkflowGuardTests が固定する）
+# - 生成コードの Roslyn コンパイル検証（CodegenCaseTests の行 compile-*）は build-and-test で常時実行される
 name: CI
 
 on:
@@ -46,7 +51,7 @@ env:
 jobs:
   # 実 DB 統合テスト（ubuntu＝Linux コンテナが使える唯一の GitHub ホストランナー）。
   # イメージ pull（SQL Server / PostgreSQL / MySQL / Oracle）を毎回行うため 10〜15 分程度かかるが、
-  # windows ジョブと並走するので壁時計時間はほぼ増えない
+  # windows の 2 つのジョブと並走するので壁時計時間はほぼ増えない
   integration-tests-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -68,6 +73,41 @@ jobs:
         env:
           QUICKER_REQUIRE_DOCKER: "1"
         run: dotnet test tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj --output detailed
+
+  # Integration の Windows の実行（Docker の要るテストはスキップ＝SQLite・インメモリ・生成コードのランタイムなど）。
+  # Integration は QuickER.Tests を参照せず（共有の部品はソースを Compile のリンクで取り込む）、ほかのプロジェクトの出力も
+  # 読まないので、Integration だけをビルドする（全体のビルドより短い）
+  integration-tests-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: .NET SDK をセットアップ
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+
+      - name: ビルド
+        run: dotnet build tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj
+
+      - name: テスト
+        # 一時ファイル（SQLite の実ファイル DB など）はランナーの一時領域（D: ドライブ）へ置く（build-and-test のテストの手順と同じ理由）。
+        # 結果は TRX でも書く（テストのクラスごとの時間は TRX の完全修飾名で読む）
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: dotnet test tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj --no-build --output detailed --report-trx --results-directory "${{ runner.temp }}/test-results"
+
+      - name: テストの結果を保存
+        # 失敗した実行にも残す（確かめたいのは失敗の結果）
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: integration-tests-windows-trx
+          path: ${{ runner.temp }}/test-results/*.trx
+          retention-days: 14
 
   build-and-test:
     runs-on: windows-latest
@@ -131,17 +171,18 @@ jobs:
         # 一時領域（D: ドライブ）へ置く。既定の TEMP は C: のユーザープロファイルの下で、ファイルの作成と削除が遅い
         # （SQLite のジャーナルはトランザクションごとにファイルを作って消す）。
         # 結果は TRX でも書く（コンソールは表示名だけなので、テストのクラスごとの時間は TRX の完全修飾名で読む）。
-        # ファイル名を指定しないと、プロジェクトごとに別の名前（アセンブリ名_TFM_アーキテクチャ.trx）で書かれる
+        # ファイル名は指定しない（アセンブリ名_TFM_アーキテクチャ.trx で書かれる）。
+        # 流すのは QuickER.Tests だけ（Integration は integration-tests-windows が流す。QuickER.slnx に戻すと Windows で 2 回流す）
         env:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
-        run: dotnet test QuickER.slnx --no-build --output detailed --report-trx --results-directory "${{ runner.temp }}/test-results"
+        run: dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --no-build --output detailed --report-trx --results-directory "${{ runner.temp }}/test-results"
 
       - name: 変異テストの環境で同期の計画のテストを流す
         # 週 1 回の変異テスト（provider-sync-planner）の最初のテストの実行と同じ環境（Docker を飛ばし、種を減らす）で、
         # その環境が変えるテストだけを流す。環境の変数は起動スクリプトの表だけが持つ（ここには書かない）。
         # 種を減らすと外れるはずの表明が外れていないと、週 1 回の実行まで気づかずに Stryker が止まるので、PR で捕まえる。
-        # ビルドは上の「ビルド」を使い回す（スクリプトが --no-build で流す）
+        # ビルドは上の「ビルド」を使い回す（スクリプトが Integration を --no-build で流す。全体のビルドに Integration が入っている）
         env:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
