@@ -2411,7 +2411,7 @@ public abstract class SyncPlanCapabilityNetTestsBase
         // 合格側の行は、規則が失敗を予言し（偽陽性の守りが空振りしていない）、違反が 0
         problems.AddRange(SyncPlanScenarios.PassRowProblems(scenarioOutcomes));
 
-        // 来歴の行：4m-F1 の行は静的な規則が名前の衝突を予言し、合格の行は予言しない。行が実際に作った状態（来歴・子の表名の長さ・
+        // 来歴の行：静的な規則が失敗を予言しない。行が実際に作った状態（来歴・子の表名の長さ・
         // 2 本目）で次元表の全組を数える（行を流したときだけ＝来歴の行は PostgreSQL だけ）
         problems.AddRange(SyncPlanHistoryRows.NetProblems(scenarioOutcomes));
 

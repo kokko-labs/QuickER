@@ -8,10 +8,10 @@ namespace QuickER.Tests.Document;
 internal static partial class DocumentFormatRows
 {
     /// <summary>
-    /// 計算列・採番列の印の往復と旧形式との互換
+    /// 計算列・採番列の印の往復と、印のキーの無い JSON の読み込み
     /// </summary>
     /// <remarks>
-    /// <see cref="DiagramDocument.Version"/> は据え置き（1 のまま）。旧形式 JSON はプロパティ欠落＝
+    /// <see cref="DiagramDocument.Version"/> は据え置き（1 のまま）。印のキーの無い JSON はプロパティ欠落＝
     /// <c>false</c> として読め、失われるのは「書き込みから外す」指定だけ（列そのものは残る）。
     /// <c>bool</c> なので明示的な <c>null</c> は System.Text.Json が型不一致として拒否する（修復口がない）。
     /// </remarks>
@@ -47,13 +47,13 @@ internal static partial class DocumentFormatRows
                 }
             ),
             Row(
-                "load-legacy-json-without-is-computed-yields-false",
-                "旧形式 JSON（IsComputed なし）は false として読める",
+                "load-json-without-is-computed-yields-false",
+                "IsComputed の無い JSON は false として読める",
                 new FormatCase
                 {
                     Stage = FormatStage.Load,
                     Result = FormatResult.Loaded,
-                    Json = LegacyColumnFlagJson(),
+                    Json = ColumnFlagJsonWithoutFlags(),
                     Expect = o =>
                     {
                         var column = o.Loaded!.Schema.Entities.Should()
@@ -108,13 +108,13 @@ internal static partial class DocumentFormatRows
                 }
             ),
             Row(
-                "load-legacy-json-without-is-identity-yields-false",
-                "旧形式 JSON（IsIdentity なし）は false として読める",
+                "load-json-without-is-identity-yields-false",
+                "IsIdentity の無い JSON は false として読める",
                 new FormatCase
                 {
                     Stage = FormatStage.Load,
                     Result = FormatResult.Loaded,
-                    Json = LegacyColumnFlagJson(),
+                    Json = ColumnFlagJsonWithoutFlags(),
                     Expect = o =>
                     {
                         var column = o.Loaded!.Schema.Entities.Should()
@@ -154,8 +154,8 @@ internal static partial class DocumentFormatRows
         return new DiagramDocument { Schema = new ErDiagram { Entities = { entity } } };
     }
 
-    /// <summary>印のプロパティを持たない旧形式の JSON（total 列 1 本）</summary>
-    private static string LegacyColumnFlagJson() =>
+    /// <summary>印のプロパティを持たない JSON（total 列 1 本）</summary>
+    private static string ColumnFlagJsonWithoutFlags() =>
         """
             {
               "Version": 1,
@@ -197,11 +197,11 @@ internal static partial class DocumentFormatRows
             """;
 
     /// <summary>
-    /// 主キーの順序と一意制約の往復と旧形式との互換
+    /// 主キーの順序と一意制約の往復と、そのキーの無い JSON の読み込み
     /// </summary>
     /// <remarks>
-    /// <see cref="DiagramDocument.Version"/> は据え置き（1 のまま）で、旧形式 JSON は
-    /// プロパティ欠落＝空リスト（＝列宣言順）として読める後方互換を保つ。
+    /// <see cref="DiagramDocument.Version"/> は据え置き（1 のまま）で、キーの無い JSON は
+    /// プロパティ欠落＝空リスト（＝列宣言順）として読める。
     /// </remarks>
     private static IEnumerable<ScenarioRow<FormatCase>> KeyOrderAndUniqueRows() =>
         [
@@ -255,8 +255,8 @@ internal static partial class DocumentFormatRows
                 }
             ),
             Row(
-                "load-legacy-json-without-primary-key-column-ids-yields-empty-list",
-                "旧形式 JSON（PrimaryKeyColumnIds なし）は空リストとして読める",
+                "load-json-without-primary-key-column-ids-yields-empty-list",
+                "PrimaryKeyColumnIds の無い JSON は空リストとして読める",
                 new FormatCase
                 {
                     Stage = FormatStage.Load,
@@ -380,8 +380,8 @@ internal static partial class DocumentFormatRows
                 }
             ),
             Row(
-                "load-legacy-json-without-unique-constraints-yields-empty-list",
-                "旧形式 JSON（UniqueConstraints なし）は空リストとして読める",
+                "load-json-without-unique-constraints-yields-empty-list",
+                "UniqueConstraints の無い JSON は空リストとして読める",
                 new FormatCase
                 {
                     Stage = FormatStage.Load,

@@ -39,7 +39,6 @@ public sealed class QuickER.Runtime.AspNetCore.RemoteErrorDetailPolicy
 public static class QuickER.Runtime.AspNetCore.RemoteServerEngine
     public static QuickER.Runtime.ConcurrencyMode ValidatedMode(QuickER.Runtime.ConcurrencyMode mode)
     public static System.Collections.Generic.List<QuickER.Runtime.RemoteEntityRef> CollectSkipped<TEntity>(System.Collections.Generic.IEnumerable<TEntity> entities, bool cascade)
-    public static System.Collections.Generic.List<QuickER.Runtime.RemoteRowVersionEntry> CollectRowVersions<TEntity>(System.Collections.Generic.IEnumerable<TEntity> entities, bool cascade)
     public static System.Threading.Tasks.Task ExecuteAsync(Microsoft.AspNetCore.Http.HttpContext context, System.Func<System.Threading.Tasks.Task<object>> handler)
     public static System.Threading.Tasks.Task ExecuteDeleteAsync(Microsoft.AspNetCore.Http.HttpContext context, System.Func<System.Threading.Tasks.Task<bool>> deleteToNull)
     public static System.Threading.Tasks.Task ExecuteDownloadAsync(Microsoft.AspNetCore.Http.HttpContext context, System.Func<System.IO.Stream, System.Threading.Tasks.Task<bool>> read)

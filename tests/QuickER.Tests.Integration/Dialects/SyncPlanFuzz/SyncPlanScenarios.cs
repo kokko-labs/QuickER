@@ -847,7 +847,7 @@ internal static class SyncPlanScenarios
                 ),
                 // ---- D4 の形の行（SyncPlanShapeRows）：主キーの変更 × 参照する外部キーの数 × 型の変更 × 明示の削除 × 一意制約の数 ----
                 .. SyncPlanShapeRows.Rows,
-                // ---- 来歴の行（SyncPlanHistoryRows・PostgreSQL）：DB の来歴 × 子の表名の長さ × 2 本目の外部キー（4m-F1 を含む） ----
+                // ---- 来歴の行（SyncPlanHistoryRows・PostgreSQL）：DB の来歴 × 子の表名の長さ × 2 本目の外部キー ----
                 .. SyncPlanHistoryRows.Rows,
             ]
         );

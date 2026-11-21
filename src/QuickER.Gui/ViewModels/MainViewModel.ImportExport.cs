@@ -747,16 +747,15 @@ public partial class MainViewModel : IDiagramTransferHost
             var meta = settings.CurrentDocument;
 
             // メタが別の自動保存のものなら（メタだけ書けなかった・2 つの書き込みの間で落ちた）、パスを信じない。
+            // 図のハッシュを持たないメタ（メタが無い・書き換えられた）も照合できないので信じない。
             // 図の内容は残し、無題・未保存として開く（Ctrl+S は名前を付けて保存になり、前のファイルを確認なしに上書きしない）
             if (
-                meta.AutoSaveHash is { } recorded
-                && (
-                    autoSavedBytes is null
-                    || !string.Equals(
-                        recorded,
-                        DocumentContentHash.ComputeForBytes(autoSavedBytes),
-                        StringComparison.OrdinalIgnoreCase
-                    )
+                meta.AutoSaveHash is not { } recorded
+                || autoSavedBytes is null
+                || !string.Equals(
+                    recorded,
+                    DocumentContentHash.ComputeForBytes(autoSavedBytes),
+                    StringComparison.OrdinalIgnoreCase
                 )
             )
             {

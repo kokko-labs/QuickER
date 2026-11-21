@@ -355,12 +355,9 @@ public sealed partial record SyncDialectCapabilities
 
     /// <summary>上限を超える識別子を断らずに黙って切り詰める方言か（PostgreSQL）</summary>
     /// <remarks>
-    /// <c>true</c> の方言では、差分が名前の無いリレーションの外部キーを live と突き合わせるとき、live の名前が
-    /// 「縮める前の既定名を <see cref="IdentifierLengthLimit.Truncate"/> で切ったもの」と一致すれば同じ外部キーとみなす。
-    /// 旧版の QuickER は長い既定名をそのまま DDL へ書き、PostgreSQL が 63 バイトで切って保存していたため、
-    /// 吸収しないと既定名を縮めるようにした版で同期すると、同じ外部キーが追加と削除の 2 項目に化ける
-    /// （同期計画の期待の行 <c>diff-long-default-pg-legacy-truncated-fk-name-is-absorbed</c> が固定し、吸収しないと
-    /// 別の外部キーに見えることを実 DB の <c>PostgreSqlLongDefaultConstraintNameIntegrationTests</c> が対照として確かめる）。
+    /// DB の事実の宣言で、差分と同期の計画は読まない（QuickER は既定名を上限に収め、利用者が付けた名前は入口で断るので、
+    /// 切り詰められる名前を DB へ送らない）。docs の識別子の上限の表（<c>identifier-length-limits</c>）の列と、
+    /// 名前の DDL の往復の総当たりの因子が読む。
     /// </remarks>
     public required bool TruncatesLongIdentifiers { get; init; }
 

@@ -17,11 +17,9 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 版の表（<c>RemoteRowVersionEntry</c>）と列の値が運ぶのは生の <c>byte[]</c> なので、VO 有効時は
-/// <b>サーバー側の収集</b>（VO を素値へ開く）と<b>クライアント側の書き戻し</b>（素値を VO へ包む）の両方で
-/// 変換が要る。基底 <see cref="ConcurrencyRuntimeTestsBase{TEntity, TConflictException}"/> のシナリオ（子の表も版を持つ
-/// 親子のグラフ保存を含む）と、リモートの共通部 <see cref="ConcurrencyRemoteRuntimeTestsBase{TEntity, TConflictException}"/> の
-/// 応答の経路ごとの版の書き戻しが緑になること自体が、両側・両経路の変換の実証になる。
+/// 版は列の値（<c>Values</c>・<c>Saved</c>）が転送の設定（<c>RemoteJson.Options</c>）で直列化して運ぶので、VO 有効時は
+/// 版の列も値オブジェクトのまま往復する。基底 <see cref="ConcurrencyRuntimeTestsBase{TEntity, TConflictException}"/> の
+/// シナリオ（子の表も版を持つ親子のグラフ保存を含む）が緑になること自体が、その往復の実証になる。
 /// </para>
 /// <para>
 /// 派生は、サーバーの DI（どの実装先のリポジトリを置くか）と、保存先を空にする処理だけを差し込む。

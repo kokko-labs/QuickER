@@ -70,13 +70,19 @@ public class LongDefaultConstraintNameTests
                 UniqueConstraint.SynthesizeName(child.TableName, ["bill_id", "ship_id"], unlimited)
             ),
         };
-        var details = ConstraintNames.ResolveForeignKeyNameDetails(
+        // 縮める前の名前は、上限なしで求めた名前（この図では縮める前と同じ道筋で名前が決まる）
+        var foreignKeyNames = ConstraintNames.ResolveForeignKeyNames(
             diagram.Entities,
             diagram.Relationships,
             limit
         );
+        var unshortenedForeignKeyNames = ConstraintNames.ResolveForeignKeyNames(
+            diagram.Entities,
+            diagram.Relationships,
+            unlimited
+        );
         names.AddRange(
-            diagram.Relationships.Select(r => (details[r].Name, details[r].UnshortenedName))
+            diagram.Relationships.Select(r => (foreignKeyNames[r], unshortenedForeignKeyNames[r]))
         );
 
         return names;

@@ -1088,13 +1088,25 @@ internal static partial class DialectDdlRows
         var diagram = LnDiagram(dialect);
         var parent = diagram.Entities[0].TableName;
         var child = diagram.Entities[1].TableName;
-        var details = ConstraintNames.ResolveForeignKeyNameDetails(
+        var names = ConstraintNames.ResolveForeignKeyNames(
             diagram.Entities,
             diagram.Relationships,
             limit
         );
-        var bill = details[diagram.Relationships[0]];
-        var ship = details[diagram.Relationships[1]];
+        // 縮める前の名前は、上限なしで求めた名前（この図では縮める前と同じ道筋で名前が決まる）
+        var unshortenedNames = ConstraintNames.ResolveForeignKeyNames(
+            diagram.Entities,
+            diagram.Relationships,
+            unlimited
+        );
+        var bill = (
+            Name: names[diagram.Relationships[0]],
+            UnshortenedName: unshortenedNames[diagram.Relationships[0]]
+        );
+        var ship = (
+            Name: names[diagram.Relationships[1]],
+            UnshortenedName: unshortenedNames[diagram.Relationships[1]]
+        );
         var unique = UniqueConstraint.SynthesizeName(child, ["bill_id", "ship_id"], limit);
 
         e.Lines(

@@ -261,25 +261,4 @@ public class IdentifierLengthLimitTests
 
         limit.Fit(first).Should().NotBe(limit.Fit(second));
     }
-
-    [Theory(
-        DisplayName = "Truncate: PostgreSQL と同じく上限以内の最長の先頭部分（文字の途中では切らない）"
-    )]
-    [InlineData("a", 70, 63)]
-    [InlineData(Kanji, 22, 21)]
-    [InlineData(Emoji, 16, 15)]
-    public void Truncate_CutsAtCharacterBoundary(string unit, int count, int expectedUnits)
-    {
-        IdentifierLengthLimits
-            .PostgreSql.Truncate(Repeat(unit, count))
-            .Should()
-            .Be(Repeat(unit, expectedUnits));
-    }
-
-    [Fact(DisplayName = "Truncate: 上限内の名前・上限なしはそのまま")]
-    public void Truncate_WithinLimit_ReturnsSame()
-    {
-        IdentifierLengthLimits.PostgreSql.Truncate("abc").Should().Be("abc");
-        IdentifierLengthLimit.Unlimited.Truncate(Repeat("a", 500)).Should().Be(Repeat("a", 500));
-    }
 }

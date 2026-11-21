@@ -208,19 +208,15 @@
 
 ## 来歴の行
 
-- `SyncPlanHistoryRows`（PostgreSQL・登録簿の部分 `HistoryRows`）は、DB の来歴 × 子の表名の長さ × 目標の図で足す 2 本目の名前の無い外部キー（足さない・別の親・同じ親）の全積 12 行。
-  - `SyncPlanHistory.Current`：今の DDL。
-  - `SyncPlanHistory.PostgreSqlUnshortened`：旧版の DDL。名前の無い外部キーの縮める前の既定名を PostgreSQL が 63 バイトで切り詰めた名前になる（既定名を上限に収める規則は後の版から）。
+- `SyncPlanHistoryRows`（PostgreSQL・登録簿の部分 `HistoryRows`）は、DB の来歴 × 子の表名の長さ × 目標の図で足す 2 本目の名前の無い外部キー（足さない・別の親・同じ親）の全積 6 行。
+  - 来歴の水準は `SyncPlanHistory.Current`（今の DDL）だけ。以前の版の DDL の来歴（縮めない長い既定名を PostgreSQL が切り詰めた名前）は、差分がその名前を同じ外部キーとみなさなくなったので水準ごと外した（切り詰めた名前の作り直しは期待の行 `diff-long-default-pg-truncated-fk-name-is-recreated`・`realdb-long-default-pg-truncated-fk-name-is-recreated-once` が受け持つ）。
 - 来歴の規則は版ごとの規則を関数で持つ（公開版の DDL 生成器は使わない）。
   - `SyncPlanHistories.Apply`：DB 側の図の名前の無い外部キーを名付けてから DB を作る。
   - `Forget`：目標の図ではその名前を外す（利用者の図は名前を付けていない）。
-- 旧版の DDL の来歴でだけ起きる吸収（名前の無い外部キーを縮める前の名前から取り込む形）は、行 `history-PostgreSqlUnshortened-long-added` が網の静的な規則 R4 と実 PG の既定の同期の両方で固定する。
-- 来歴は現実にあり得る状態だけを作る。旧版の DB には外部キーが 1 本だけで、2 本目は後で図に足す。
-- 12 行とも、差分が来歴どおりで（図を変えない行は差分なし・2 本目の行は外部キーの追加だけ）、網では規則が失敗を予言せず、実 PG では既定の同期がコミットして取り込み直した差分が空になる。
+- 来歴は現実にあり得る状態だけを作る。DB には外部キーが 1 本だけで、2 本目は後で図に足す。
+- 6 行とも、差分が来歴どおりで（図を変えない行は差分なし・2 本目の行は外部キーの追加だけ）、網では規則が失敗を予言せず、実 PG では既定の同期がコミットして取り込み直した差分が空になる。
   - 合格側の `pass-` の行と期待が逆なので `NetProblems` / `RealProblems` は別の関数。
   - 網は行が実際に作った状態（来歴・縮める前の既定名が上限を超えたか・2 本目を足したか）を `CoverageCounter` で数えて全組を表明する。
-- 目標の図で名前を戻すことは、図を変えない行が吸収を確かめるために要る。吸収を外すうえで戻さないと、その行も緑になる。
-- mutation 実証済み。
 
 ## 網羅の行
 

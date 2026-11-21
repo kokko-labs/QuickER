@@ -288,7 +288,7 @@ internal sealed record AutoSaveOp(bool MetaLost = false) : DocOp
     public override string Kind => MetaLost ? "AutoSaveMetaLost" : "AutoSave";
 }
 
-/// <summary>保存済みのメタから AutoSaveHash を消す（ハッシュを持たない旧版のメタ）</summary>
+/// <summary>保存済みのメタから AutoSaveHash を消す（ハッシュを持たないメタ）</summary>
 internal sealed record StripMetaHashOp : DocOp
 {
     public override string Kind => "StripMetaHash";

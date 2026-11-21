@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using QuickER.Provider;
 using QuickER.Provider.SqlServer;
 
@@ -6,8 +7,8 @@ namespace QuickER.Db.UI;
 /// <summary>名前を付けて保存可能な DB 接続プロファイル（多 DBMS 対応）</summary>
 /// <remarks>
 /// パスワード以外を JSON に永続化する パスワードは <see cref="SqlConnectionProfileStore"/> が
-/// DPAPI で別途暗号化保存する。JSON プロパティ名は旧形式との互換を保つため変更しない
-/// （<see cref="Dbms"/> を欠く旧データは既定の <c>sqlserver</c> として読み込まれる）。
+/// DPAPI で別途暗号化保存する。JSON プロパティ名は connections.json の形そのもの（変えると保存済みの一覧が読めなくなる）。
+/// <see cref="Dbms"/> は JSON に必須で、欠けたプロファイルを含む connections.json は壊れたファイルとして扱う。
 /// </remarks>
 public class SqlConnectionProfile
 {
@@ -17,7 +18,12 @@ public class SqlConnectionProfile
     /// <summary>一覧での選択ラベルとなる表示名</summary>
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>ターゲット DBMS のプロバイダ識別名（欠落した旧データは既定 sqlserver）</summary>
+    /// <summary>ターゲット DBMS のプロバイダ識別名</summary>
+    /// <remarks>
+    /// JSON では必須（欠けると読み込みが <see cref="System.Text.Json.JsonException"/> になり、ストアが壊れたファイルとして退避する）。
+    /// 初期値はコードで組み立てたときの既定。
+    /// </remarks>
+    [JsonRequired]
     public string Dbms { get; set; } = SqlServerProvider.ProviderName;
 
     /// <summary>サーバー名（ホスト）</summary>
@@ -40,21 +46,20 @@ public class SqlConnectionProfile
 
     /// <summary>TLS（通信路の暗号化）の要求水準（PostgreSQL / MySQL 固有）</summary>
     /// <remarks>
-    /// キーを持たない旧プロファイル JSON は既定値（<see cref="DbSslMode.Unspecified"/>＝接続文字列へ
-    /// キーワードを載せない）で読み込まれる＝既存プロファイルの接続内容は変わらない。
+    /// キーを持たないプロファイル JSON は既定値（<see cref="DbSslMode.Unspecified"/>＝接続文字列へ
+    /// キーワードを載せない）で読み込まれる。
     /// </remarks>
     public DbSslMode SslMode { get; set; } = DbSslMode.Unspecified;
 
     /// <summary>サービス名（Oracle 固有・将来使用）</summary>
     public string ServiceName { get; set; } = string.Empty;
 
-    /// <summary>データベースファイルのパス（SQLite 固有。旧データでは欠落＝空文字）</summary>
+    /// <summary>データベースファイルのパス（SQLite 固有。キーが無ければ空文字）</summary>
     public string FilePath { get; set; } = string.Empty;
 
     /// <summary>コマンド実行タイムアウト（秒）</summary>
     /// <remarks>
-    /// キーを持たない旧プロファイル JSON は既定値（<see cref="DbCommands.DefaultTimeoutSeconds"/>）で読み込まれる
-    /// ＝従来のハードコード値と同じため、既存プロファイルの挙動は変わらない。
+    /// キーを持たないプロファイル JSON は既定値（<see cref="DbCommands.DefaultTimeoutSeconds"/>）で読み込まれる。
     /// </remarks>
     public int CommandTimeoutSeconds { get; set; } = DbCommands.DefaultTimeoutSeconds;
 

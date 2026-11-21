@@ -11,12 +11,6 @@ internal enum SyncPlanHistory
 {
     /// <summary>今の版の DDL：名前の無い外部キーは、今の DDL と同じ実効名（方言の上限に収めた既定名）で作る</summary>
     Current,
-
-    /// <summary>
-    /// v0.1.0〜v0.2.0 の DDL を PostgreSQL へ流した DB：名前の無い外部キーは縮める前の既定名で書かれ、PostgreSQL が識別子の上限
-    /// （63 バイト）で黙って切り詰めた名前で残る（既定名を上限に収める規則は v0.3.0 から）
-    /// </summary>
-    PostgreSqlUnshortened,
 }
 
 /// <summary>来歴の規則（DB 側の図の名前の無い外部キーに、その版の DDL が作る名前を付ける）</summary>
@@ -54,24 +48,29 @@ internal static class SyncPlanHistories
         IdentifierLengthLimit limit
     )
     {
-        var details = ConstraintNames.ResolveForeignKeyNameDetails(
+        var names = ConstraintNames.ResolveForeignKeyNames(
             diagram.Entities,
             diagram.Relationships,
             limit
+        );
+        // 縮める前の既定名（上限なしで求めた名前）
+        var unshortenedNames = ConstraintNames.ResolveForeignKeyNames(
+            diagram.Entities,
+            diagram.Relationships,
+            IdentifierLengthLimit.Unlimited
         );
         var named = new List<NamedForeignKey>();
 
         foreach (var relationship in diagram.Relationships.Where(r => r.ConstraintName is null))
         {
-            if (!details.TryGetValue(relationship, out var detail))
+            if (!names.TryGetValue(relationship, out var currentName))
             {
                 continue;
             }
 
             var name = history switch
             {
-                SyncPlanHistory.Current => detail.Name,
-                SyncPlanHistory.PostgreSqlUnshortened => limit.Truncate(detail.UnshortenedName),
+                SyncPlanHistory.Current => currentName,
                 _ => throw new ArgumentOutOfRangeException(nameof(history), history, null),
             };
             var child = diagram.Entities.Single(e => e.Id == relationship.TargetEntityId);
@@ -86,8 +85,8 @@ internal static class SyncPlanHistories
                     ],
                     parent.TableName,
                     name,
-                    !string.Equals(name, detail.Name, StringComparison.Ordinal),
-                    !limit.Fits(detail.UnshortenedName)
+                    !string.Equals(name, currentName, StringComparison.Ordinal),
+                    !limit.Fits(unshortenedNames[relationship])
                 )
             );
             relationship.ConstraintName = name;

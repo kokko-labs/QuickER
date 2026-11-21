@@ -58,7 +58,7 @@ public class CurrentDocumentSettings
     /// 自動保存は図（last_diagram.json）とこのメタ（gui-settings.json）を別々のファイルへ書くので、メタだけが書けない・
     /// 2 つの書き込みの間で落ちると、別の図の内容に前のファイルのパスが付いて復元される。起動時はこの値と
     /// 自動保存ファイルの内容を照らし合わせ、食い違えばパスを捨てて無題として復元する。
-    /// null（この値を持たない旧版が書いたメタ）は照合せずに信じる。
+    /// null（この値を持たないメタ）は照合できないので信じず、同じく無題として復元する。
     /// </remarks>
     public string? AutoSaveHash { get; set; }
 }

@@ -114,7 +114,7 @@ public static class JsonStorageService
     /// <remarks>
     /// null の省略（<see cref="JsonIgnoreCondition.WhenWritingNull"/>）は「値なし」をキーごと出さない
     /// 図ファイルの正準形。読み込み側は、<b>推測で埋められない必須の値を除き</b>、キー欠落を
-    /// プロパティ既定値で吸収するため相互に可換で、古い形式（null を明記した図ファイル）もそのまま読める
+    /// プロパティ既定値で吸収するため相互に可換で、null を明記した図ファイル（手書き・外部ツール）もそのまま読める
     /// （<see cref="Normalize"/> が非 null 契約のプロパティに書かれた null を既定値へ修復する）。
     /// 必須の値はキーが無ければ空のまま残し（<see cref="CreateWithRequiredValuesUnset"/>）、
     /// 明示の <c>null</c> と同じく <see cref="TryLoad"/> が断る。
@@ -869,7 +869,7 @@ public static class JsonStorageService
     /// 手書き・外部ツール生成の図ファイルでも起こり得るため、読込時に既定値へ寄せて修復する。
     /// <para>
     /// <c>System.Text.Json</c> の <c>RespectNullableAnnotations</c> による例外化は、キー欠落・
-    /// 古い形式もそのまま読めるという <see cref="Options"/> の互換契約を壊すため採らない。
+    /// null を明記した図ファイルもそのまま読めるという <see cref="Options"/> の契約を壊すため採らない。
     /// </para>
     /// <para>
     /// <b>ここで修復するのは「埋めても図の意味が変わらないもの」だけ</b>＝コレクション（空へ）・
@@ -895,7 +895,7 @@ public static class JsonStorageService
         schema.Relationships = Compact(schema.Relationships);
         schema.Queries = Compact(schema.Queries);
 
-        // 列ペアはリスト自体・要素の双方が null になりうる（旧形式・手書き JSON）ため掃除する
+        // 列ペアはリスト自体・要素の双方が null になりうる（手書き・外部ツールの JSON）ため掃除する
         foreach (var relationship in schema.Relationships)
         {
             relationship.ColumnPairs = Compact(relationship.ColumnPairs);

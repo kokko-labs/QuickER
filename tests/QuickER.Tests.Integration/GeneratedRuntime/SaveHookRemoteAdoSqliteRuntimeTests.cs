@@ -110,31 +110,6 @@ public sealed class SaveHookRemoteAdoSqliteRuntimeTests : IAsyncLifetime
         (await documents.GetByIdAsync(8, Ct)).Should().NotBeNull("再保存で行が作られる");
     }
 
-    // ── 8. 旧サーバー互換: Skipped を持たない応答ボディは「スキップなし」として読める ──
-
-    /// <summary>
-    /// 8. <c>Skipped</c> を載せる前のサーバーが返す応答ボディ（当該フィールドなし）でも、クライアントは
-    /// 「スキップなし」として解釈する（<c>RemoteSaveResult.Skipped</c> は既定 null・<c>SkippedLookup(null)</c> は null）。
-    /// </summary>
-    [Fact(
-        DisplayName = "[SaveHook/Remote] 8: Skipped 欠落の旧応答ボディはスキップなしとして読める"
-    )]
-    public void LegacySaveResponseWithoutSkipped_IsReadAsNoSkips()
-    {
-        // Skipped フィールドを持たない旧サーバーの応答ボディ
-        var legacy = System.Text.Json.JsonSerializer.Deserialize<RemoteSaveResult>(
-            """{"Affected":1,"RowVersions":[]}""",
-            RemoteJson.Options
-        );
-
-        legacy!.Affected.Should().Be(1);
-        legacy.Skipped.Should().BeNull("既定値付きのため欠落したフィールドは null になる");
-        RemoteEntityGraph
-            .SkippedLookup(legacy.Skipped)
-            .Should()
-            .BeNull("スキップなしとして扱われ、AcceptChanges は全件を確定する");
-    }
-
     /// <summary>使い終えたクライアント DI・サーバー・一時 DB を破棄する</summary>
     public async ValueTask DisposeAsync()
     {

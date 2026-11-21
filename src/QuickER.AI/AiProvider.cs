@@ -25,7 +25,7 @@ public static class LocalLlmDefaults
     /// <summary>
     /// API キー未入力時に送る代替キー。認証を要求しないローカルサーバーでも
     /// OpenAI SDK が空キーを拒否するため、無害なダミー文字列を送る
-    /// (値は Ollama 時代からの互換のため変更しない。受け側は認証不要なので内容に意味はない)。
+    /// (受け側は認証不要なので内容に意味はない)。
     /// </summary>
     public const string PlaceholderApiKey = "ollama";
 }

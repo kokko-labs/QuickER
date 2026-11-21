@@ -7,7 +7,7 @@ namespace QuickER.Tests.Document;
 
 internal static partial class DocumentFormatRows
 {
-    /// <summary>対象 DBMS の既定・旧形式・往復</summary>
+    /// <summary>対象 DBMS の既定・キーの無い JSON・往復</summary>
     private static IEnumerable<ScenarioRow<FormatCase>> TargetDbmsRows() =>
         [
             Row(
@@ -26,8 +26,8 @@ internal static partial class DocumentFormatRows
                 }
             ),
             Row(
-                "load-legacy-without-target-dbms-defaults-sqlserver",
-                "旧形式 JSON（TargetDbms 欠落）は sqlserver として読み込まれる",
+                "load-without-target-dbms-defaults-sqlserver",
+                "TargetDbms の無い JSON は sqlserver として読み込まれる",
                 new FormatCase
                 {
                     Stage = FormatStage.Load,

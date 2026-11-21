@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AwesomeAssertions;
+using QuickER.Db.UI;
 using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Db.UI;
@@ -9,21 +10,27 @@ internal static partial class ProfileStoreRows
     /// <summary>旧形式・null の要素・壊れた JSON など、手の前に connections.json を直接書いて始める行</summary>
     private static IEnumerable<ScenarioRow<ProfileScenario>> LegacyRows() =>
         [
-            // Dbms / Port / ServiceName を持たないプロファイルを新形式（profiles 配列）で直接書き出す
+            // Dbms を持たないプロファイルを新形式（profiles 配列）で直接書き出す。Dbms は必須なので、
+            // ファイルごと壊れたものとして読み（一覧は空）、次の保存の前に 1 回だけ退避する
             Row(
-                "legacy-profile-without-dbms-defaults-to-sqlserver",
-                "Dbms 欠落のプロファイルは sqlserver として読み込まれる",
-                WriteJson(
-                    "{\"profiles\":[{\"id\":\""
-                        + Guid.NewGuid().ToString()
-                        + "\",\"name\":\"Legacy\",\"server\":\"srv\",\"database\":\"db\",\"authMode\":0,\"userId\":\"\",\"trustServerCertificate\":true,\"savePassword\":false}]}"
-                ),
+                "profile-without-dbms-is-backed-up-as-corrupt",
+                "Dbms 欠落のプロファイルを含む connections.json は壊れたファイルとして読み、保存の前に退避する",
+                WriteJson(ProfileWithoutDbmsJson),
                 Read(o =>
                 {
-                    o.All.Should().ContainSingle();
-                    o.All[0].Dbms.Should().Be("sqlserver");
-                    o.All[0].Port.Should().BeNull();
-                })
+                    o.All.Should().BeEmpty();
+                    o.Status.Should().Be(ConnectionFileStatus.Corrupt);
+                }),
+                Upsert(
+                    "after",
+                    Prof("復旧", "s"),
+                    expect: o =>
+                    {
+                        o.BackupExists.Should().BeTrue();
+                        o.BackupText.Should().Be(ProfileWithoutDbmsJson);
+                    }
+                ),
+                Read(o => o.All.Should().ContainSingle().Which.Name.Should().Be("復旧"))
             ),
             // 旧構成のトップレベル配列形式（新形式のオブジェクトではない）を直接書き出す
             Row(
@@ -40,7 +47,9 @@ internal static partial class ProfileStoreRows
             Row(
                 "legacy-null-profiles-and-elements-are-normalized",
                 "一覧や要素が null の connections.json は揃えて読み、保存もできる",
-                WriteJson("{\"profiles\": [null, {\"name\": \"本番DB\"}, null]}"),
+                WriteJson(
+                    "{\"profiles\": [null, {\"name\": \"本番DB\", \"dbms\": \"sqlserver\"}, null]}"
+                ),
                 Read(o => o.All.Should().ContainSingle().Which.Name.Should().Be("本番DB")),
                 Upsert("dev", Prof("開発")),
                 Read(o =>
@@ -87,4 +96,8 @@ internal static partial class ProfileStoreRows
                 )
             ),
         ];
+
+    /// <summary>Dbms を持たないプロファイル 1 つの connections.json（退避した写しと照らすので同じ文字列を使う）</summary>
+    private const string ProfileWithoutDbmsJson =
+        "{\"profiles\":[{\"id\":\"6f1d3c2a-0b7e-4c5d-9a8f-1e2d3c4b5a69\",\"name\":\"NoDbms\",\"server\":\"srv\",\"database\":\"db\",\"authMode\":0,\"userId\":\"\",\"trustServerCertificate\":true,\"savePassword\":false}]}";
 }

@@ -89,12 +89,6 @@ internal static class SyncPlanFuzzNotGenerated
                     Expectations + " の行 `realdb-external-*`"
                 ),
                 NotGenerated.Accepted(
-                    "legacy-history",
-                    "旧版の来歴（PostgreSQL の切り詰め名）",
-                    "乱数の DB はいつも今の DDL で作る。旧版の DDL が作った名前は来歴の行が受け持つ",
-                    "`SyncPlan/HistoryRows`"
-                ),
-                NotGenerated.Accepted(
                     "duplicate-unique-column-sets",
                     "Oracle の同じ列集合の一意制約 2 つ・SQLite の同じ列集合の制約",
                     "目標の図を DB が持てない形にしない（Oracle は ORA-02261 で断る）。製品に除外の分岐が無いことは製品の課題で、生成器の水準では埋まらない",

@@ -218,14 +218,6 @@ public sealed record IdentifierLengthLimit(
         return Prefix(name, Max - Measure(suffix)) + suffix;
     }
 
-    /// <summary>名前を上限で切り詰める（文字の途中では切らない）</summary>
-    /// <remarks>
-    /// PostgreSQL が上限を超える識別子を黙って切り詰めるときと同じ切り方（UTF-8 で 63 バイト以内の最長の先頭部分）。
-    /// 旧版の QuickER が長い既定名で作った PostgreSQL の外部キーを、差分で同じ外部キーとみなすために使う
-    /// （<c>SyncDialectCapabilities.TruncatesLongIdentifiers</c>）。上限なしならそのまま返す。
-    /// </remarks>
-    public string Truncate(string name) => Fits(name) ? name : Prefix(name, Max);
-
     /// <summary>既定名を縮めるときに付けるハッシュの桁数</summary>
     private const int HashLength = 8;
 
