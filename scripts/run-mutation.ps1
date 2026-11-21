@@ -17,10 +17,18 @@
     表の変数は Stryker を呼ぶ間だけ立て（外し）、終わったら元へ戻す。
 
     結果のフォルダには、HTML・JSON の報告と logs/ のログ（-L）が書かれる。要約はそのログから Safe Mode と Dubious を読む。
-    このスクリプトは、範囲・ソリューション・立てた変数・外した変数を結果のフォルダの run-environment.json に書く（成否に依らず）。
+    このスクリプトは、範囲・ソリューション・立てた変数・外した変数・呼び直した回数を結果のフォルダの run-environment.json に書く（成否に依らず）。
     要約はそれを読んで「実行の環境」を出す。
 
     ネイティブコマンドの失敗は pwsh を止めないので、Stryker の終了コードを見て、0 でなければ失敗にする。
+
+    Stryker 5 の MTP の実行器は、テストのサーバー（テストのプロジェクトの exe）が接続して来るのを固定の 30 秒だけ待つ
+    （待つ時間を変える設定は無い）。間に合わないと、テストを 0 件と数えて止まる（終了コードは 0 でない）。
+    そこで、Stryker が失敗し、かつ、その 1 回の呼び出しがログ（結果のフォルダの logs/*.txt）に
+    「Number of tests found: 0 for project」の行を足したときだけ、同じ引数・同じ環境でもう 1 回だけ呼ぶ。
+    その行を足していない失敗（初回のテストの失敗・ビルドの失敗など）と 2 回目の失敗は、呼び直さずに失敗にする。
+    ログは日付ごとのファイルに追記されるので、行があるかでなく、呼び出しの前後の行の数を比べる。
+    呼び直した回数は、警告の行と run-environment.json の zeroTestRetries に残す（要約が読む）。-TestsOnly では呼び直さない。
 
     -TestsOnly を付けると、Stryker を呼ぶ代わりに、同じ手順で表の変数を立てて（外して）、表の TestProject を TestFilter の絞り込みで
     dotnet test --no-build で流す（ソリューションの写しは作らない）。Stryker の最初のテストの実行と同じ環境でだけ落ちるテスト
@@ -54,6 +62,29 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Stryker がテストを 0 件と数えたときにログへ書く行の決まった部分（件数が 1 以上の行には当たらない）と、呼び直す回数の上限
+$zeroTestsLogText = 'Number of tests found: 0 for project'
+$zeroTestRetryLimit = 1
+
+# 結果のフォルダの logs の直下の *.txt（Stryker の -L のログ。要約が読む範囲と同じ）にある、テストを 0 件と数えた行の数
+function Get-ZeroTestLogLineCount {
+    param([Parameter(Mandatory = $true)][string]$LogDirectory)
+
+    $count = 0
+
+    if (Test-Path -LiteralPath $LogDirectory -PathType Container) {
+        foreach ($logFile in [System.IO.Directory]::EnumerateFiles($LogDirectory, '*.txt')) {
+            foreach ($line in [System.IO.File]::ReadLines($logFile)) {
+                if ($line.Contains($zeroTestsLogText)) {
+                    $count++
+                }
+            }
+        }
+    }
+
+    return $count
+}
 
 # 範囲ごとのソリューションと環境変数（表に無い範囲は、テストだけのソリューション・環境はそのまま）。
 # 変数の名前は Integration のテストの定数と同じ（ParityTests の行 mutation-script-variables-match-test-constants が照合する）。
@@ -101,6 +132,10 @@ if ($TestsOnly -and -not ($settings -and $settings.TestProject)) {
 
 # 相対パスは呼び出し元の作業フォルダから解く（下でルートへ移るので、その前に絶対パスにする）
 $outputFullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
+$logDirectory = Join-Path $outputFullPath 'logs'
+
+# テストを 0 件と数えて止まった Stryker を呼び直した回数（run-environment.json に書く）
+$zeroTestRetries = 0
 
 # 正本のパスはどれも ../ で始まる（ParityTests の行 stryker-tests-only-solution-projects が固定する）。
 # 先頭の ../ を外すと、ルートから見た同じプロジェクトを指す
@@ -139,10 +174,28 @@ try {
     else {
         [System.IO.File]::WriteAllText($solutionCopy, $rewritten)
 
-        dotnet stryker -f $configRelative -s $solutionCopyName -O $outputFullPath -c $Concurrency --skip-version-check -L
+        while ($true) {
+            $zeroTestLinesBefore = Get-ZeroTestLogLineCount -LogDirectory $logDirectory
 
-        if ($LASTEXITCODE -ne 0) {
-            throw "Stryker が失敗した（終了コード $LASTEXITCODE）"
+            dotnet stryker -f $configRelative -s $solutionCopyName -O $outputFullPath -c $Concurrency --skip-version-check -L
+
+            $strykerExitCode = $LASTEXITCODE
+
+            if ($strykerExitCode -eq 0) {
+                break
+            }
+
+            # 呼び直すのは、この 1 回の呼び出しがテストを 0 件と数えた行をログへ足したときだけ（上限まで）
+            $foundNoTests = (Get-ZeroTestLogLineCount -LogDirectory $logDirectory) -gt $zeroTestLinesBefore
+
+            if (-not $foundNoTests -or $zeroTestRetries -ge $zeroTestRetryLimit) {
+                $afterRetry = if ($zeroTestRetries -gt 0) { '・テストを 0 件と数えて呼び直した後' } else { '' }
+
+                throw "Stryker が失敗した（終了コード $strykerExitCode$afterRetry）"
+            }
+
+            $zeroTestRetries++
+            Write-Warning "Stryker がテストを 0 件と数えて止まった（終了コード $strykerExitCode）。同じ引数でもう 1 回だけ呼び直す"
         }
     }
 }
@@ -161,6 +214,7 @@ finally {
         solution = $solutionRelative
         set = $variablesToSet
         removed = $variablesToRemove
+        zeroTestRetries = $zeroTestRetries
     }
     [System.IO.Directory]::CreateDirectory($outputFullPath) | Out-Null
     [System.IO.File]::WriteAllText(

@@ -441,7 +441,8 @@ public sealed class MutationSummaryTests
                                 .And.Contain(
                                     "Docker の要るテスト（目印 RequiresDocker=true）は流さない"
                                 )
-                                .And.Contain("種の数を明示した");
+                                .And.Contain("種の数を明示した")
+                                .And.NotContain("呼び直した");
                         }
                     )
                     {
@@ -451,6 +452,46 @@ public sealed class MutationSummaryTests
                           "solution": "stryker/QuickER.TestsWithIntegration.slnx",
                           "set": { "QUICKER_SKIP_DOCKER": "1", "QUICKER_SYNC_FUZZ_SEEDS": "100" },
                           "removed": [ "QUICKER_REQUIRE_DOCKER" ]
+                        }
+                        """,
+                    }
+                ),
+                new(
+                    "mutation-summary-zero-test-retry",
+                    null,
+                    "起動スクリプトが、テストを 0 件と数えて止まった Stryker を呼び直した回数を実行の環境に書いていれば、要約に 1 行を添える",
+                    new(
+                        Report(($"{Root}/{Model}/Column.cs", [M("Killed")])),
+                        "",
+                        NoSources,
+                        null,
+                        (summary, markdown) =>
+                        {
+                            summary
+                                .RunEnvironment.Should()
+                                .BeEquivalentTo(
+                                    new MutationRunEnvironment(
+                                        "stryker/QuickER.TestsOnly.slnx",
+                                        [],
+                                        [],
+                                        1
+                                    )
+                                );
+                            markdown
+                                .Should()
+                                .Contain(
+                                    "- 実行の環境：ソリューション `stryker/QuickER.TestsOnly.slnx`\n  - Stryker がテストを 0 件と数えて止まったので、1 回呼び直した"
+                                );
+                        }
+                    )
+                    {
+                        RunEnvironment = """
+                        {
+                          "target": "model-constraint-names",
+                          "solution": "stryker/QuickER.TestsOnly.slnx",
+                          "set": {},
+                          "removed": [],
+                          "zeroTestRetries": 1
                         }
                         """,
                     }
