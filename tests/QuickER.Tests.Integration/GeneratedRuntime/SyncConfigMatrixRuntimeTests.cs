@@ -29,7 +29,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
-[Collection(SqlServerContainerCollection.Name)]
+[Collection(SqlServerSecondContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlServer)]
 [RuntimeCell(

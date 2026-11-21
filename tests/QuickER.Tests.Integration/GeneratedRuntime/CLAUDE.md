@@ -208,11 +208,11 @@
 
 - エンジンの振る舞いの決定的なシナリオは `SyncModelScenarios.Engine*.cs` にある。対象はダウンロード・アップロードの基本・再生の判定・ack・削除伝搬・グラフ保存・後勝ち・競合と ServerWins / LocalWins・外部キー・割り込み・記録の取り消し・洗い替え・blob・フック。
 - 同期のモデルの 4 つの転送（直結・HTTP・実 SQL Server の 3 つの Theory と、HTTP × 実 SQL Server の夜間だけの Fact）が、同じ宣言 `SyncModelScenario.Transports` から行を作って流す。今はどのシナリオも全転送で流れる（サーバー役の口は SQLite の代役も実 SQL Server も同じ点で持つ）。
-- 直結と HTTP の Theory は `SyncModelScenarioParts` が行の番号の余りで 2 つ・4 つのクラスへ分けて並列に流す。xUnit は同じクラスの行を並列に流さず、HTTP の行を 1 クラスに置くと直列が同期の Theory の時間を決めるため。
-  - 分けたクラス（`SyncModelRuntimeTestsPart2`・`SyncModelHttpRuntimeTestsPart2`〜`4`）は転送の軸の目印（`ISyncModelTransportTests`・`MatrixAxisValue`）を持たない。軸の値ごとのクラスは本体の 1 つだけ。
-  - 実 SQL Server の Theory はコンテナのコレクションで 1 本ずつ流れるので分けない。
+- 直結・HTTP・実 SQL Server の Theory は `SyncModelScenarioParts` が行の番号の余りで 2 つ・4 つ・2 つのクラスへ分けて並列に流す。xUnit は同じクラスの行を並列に流さず、HTTP の行を 1 クラスに置くと直列が同期の Theory の時間を決めるため。
+  - 分けたクラス（`SyncModelRuntimeTestsPart2`・`SyncModelHttpRuntimeTestsPart2`〜`4`・`SyncSupportAdoSqlServerScenarioPart2RuntimeTests`）は転送の軸の目印（`ISyncModelTransportTests`・`MatrixAxisValue`）を持たない。軸の値ごとのクラスは本体の 1 つだけ。
+  - 実 SQL Server の 2 つの分は、SQL Server の別々のコンテナのコレクション（本体は `SqlServerSecondContainerCollection`・2 つ目は `SqlServerContainerCollection`）に置く。同じコレクションのテストは 1 本ずつ流れるので、同じコレクションに置くと分けた意味が無い（普段の SQL Server のテストの時間の半分以上をこの Theory が占める）。
   - HTTP × 実 SQL Server の決定的なシナリオは、普段の CI で流さず夜間だけ全部流す（ユーザーの決定 2026-11-13＝普段は実 SQL Server の直結が失敗の注入の行も持つ）。行ごとの Theory でなく、夜間の目印（`NightlyEngine`）を持つ 1 つの Fact `SyncSupportRemoteAdoSqlServerRuntimeTests.Scenarios_MatchDirect_Nightly` が、種の決め方（`SeedSource.Resolve`）のプロファイルが夜間のときだけ全シナリオを並列度 2 で流し、失敗をまとめて報告する。普段のプロファイルで行を出さない Theory はスキップ（スキップ 0 の原則に当たる）になるため。
-  - 分ける数とその数のクラスは別々の場所にあるので、`SyncModelRuntimeTests.ScenarioParts_CoverEveryScenarioOncePerTransport` が `SyncModelScenarioParts.Names` を呼ぶ MemberData を反射で集め、転送ごとの行の和が流すシナリオとちょうど一致し重ならないことを表明する。mutation 実証済み。
+  - 分ける数とその数のクラスは別々の場所にあるので、`SyncModelRuntimeTests.ScenarioParts_CoverEveryScenarioOncePerTransport` が `SyncModelScenarioParts.Names` を呼ぶ MemberData を反射で集め、転送ごとの行の和が流すシナリオとちょうど一致し重ならないことと、コレクションを持つ分（実 SQL Server）の分けたクラスが別々のコレクションにあることを表明する。mutation 実証済み（実 SQL Server を分ける数を 3 にする・2 つの分を同じコレクションに置く、のそれぞれで赤）。
 - 実 SQL Server の転送が見るもの：本物の rowversion の版ガード・`MIN_ACTIVE_ROWVERSION()` の上限のアンカー・TOP のページング・外部キーエラーの分類・実 `varbinary(max)`・照合順序、それらと失敗の注入・割り込みの点・HTTP のシリアライズ（版の Base64・400 / 409 / 500 の分類）との組み合わせ。
   - SQL Server に固有の事実を期待の手（結果・行・ジャーナル・受理記録・ミラー版の面）で表明し、Theory は「直結と同じ違反になる」を比べる。
   - SQL Server だけに効く壊れ方は実 SQL Server の Theory が、全転送に効く壊れ方は直結の Theory が拾う。mutation 実証済み。
@@ -514,7 +514,7 @@
   - 決まった形の行（下の節）。
 - 直結のほかの転送は、今の端末の転送のクラスと同じ本体（`SyncModelSignatures.RunSeedsAsync`・種の決め方・正規化）に新しい端末の世界の作り方（`SyncModelEngineDevice.On(...)`）を渡す 2 つのクラスが流す（`SyncModelEngineTransportRuntimeTests.cs`）。既知の失敗の一覧は今の端末と別の `SyncModelEngineTransports.Known`（空）と `SyncModelEngineTransports.SqlServerOnly`（空）。
   - `SyncSupportRemoteAdoSqliteEngineRuntimeTests`（HTTP・SQLite のサーバー役・コンテナなし）：乱数の種（転送の種の数＝既定 10＋広い世界 4）。
-  - `SyncSupportAdoSqlServerEngineRuntimeTests`（実 SQL Server・Docker・`SqlServerContainerCollection`）：乱数の種（失敗の注入なしの組と注入の組を別の Fact で流す。別表記の拒否の空振りの守りは今の端末の実 SQL Server のクラスと同じ）と、取得の上限に依る決定的なシナリオ（`CeilingScenario_MatchesDirect`。直結の新しい端末と同じ違反になる）。
+  - `SyncSupportAdoSqlServerEngineRuntimeTests`（実 SQL Server・Docker・`SqlServerSecondContainerCollection`）：乱数の種（失敗の注入なしの組と注入の組を別の Fact で流す。別表記の拒否の空振りの守りは今の端末の実 SQL Server のクラスと同じ）と、取得の上限に依る決定的なシナリオ（`CeilingScenario_MatchesDirect`。直結の新しい端末と同じ違反になる）。
   - 上限に依るシナリオは名前の一覧でなく行の中身で選ぶ（`SyncModelEngineTransports.CeilingScenarioNames`＝期待の手 `WhenServerFixesCeilingOp` を持ち〔入れ子の枝の中も見る〕、実 SQL Server の転送で流れ、控えの結果が `unsupported` でない行）。
   - どちらも夜間の目印は対象外（`NightlyEngineTrait.NotSelected`。夜間でも普段の種の数で流し、夜間の数は直結の乱数が受け持つ）。HTTP × 実 SQL Server のクラスは持たない。
 - 今のエンジンの記録の面（`ExpectFacetOp` の journal・acks）を読む洗い替えの行は新しい端末で流せないので、同じ振る舞いを、記録の面を読まない期待（実行の結果・例外の型・端末とサーバーの行・その後の同期が送るか）で書いた行が受け持つ。どれも今の端末でも緑。

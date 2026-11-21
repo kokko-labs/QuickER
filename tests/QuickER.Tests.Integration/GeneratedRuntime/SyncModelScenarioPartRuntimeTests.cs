@@ -14,12 +14,15 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <remarks>
 /// <para>
 /// シナリオは <see cref="SyncModelScenarios.All"/> の並びで、転送で流すものの番号を分ける数で割った余りで振り分ける。
-/// 余り 0 は転送の本体のクラス（<see cref="SyncModelRuntimeTests"/>・<see cref="SyncModelHttpRuntimeTests"/>）が、
+/// 余り 0 は転送の本体のクラス（<see cref="SyncModelRuntimeTests"/>・<see cref="SyncModelHttpRuntimeTests"/>・
+/// <see cref="SyncModelSqlServerRuntimeTests"/>）が、
 /// 残りはこのファイルのクラスが受け持つ。分けたクラスは転送の軸の目印（<see cref="ISyncModelTransportTests"/>・
 /// <see cref="MatrixAxisValueAttribute"/>）を持たない＝軸の値ごとのクラスは本体の 1 つだけ。
 /// </para>
 /// <para>
-/// 実 SQL Server の Theory は分けない（コンテナのコレクションに入り、どのみち 1 本ずつ流れる）。
+/// 実 SQL Server の Theory は 2 つに分け、本体と分けたクラスを SQL Server の別々のコンテナのコレクション
+/// （<see cref="SqlServerSecondContainerCollection"/> と <see cref="SqlServerContainerCollection"/>）に置く。同じコレクションに置くと
+/// 1 本ずつ流れて分けた意味が無い。
 /// </para>
 /// <para>
 /// 分ける数とその数のクラスは別々の場所にあり、片方だけを変えると余りの組のシナリオが黙って流れなくなる。
@@ -34,6 +37,9 @@ internal static class SyncModelScenarioParts
 
     /// <summary>HTTP のシナリオを分ける数</summary>
     public const int HttpParts = 4;
+
+    /// <summary>実 SQL Server のシナリオを分ける数</summary>
+    public const int SqlServerParts = 2;
 
     /// <summary><see cref="Record"/> の中で呼ばれた <see cref="Names"/> の引数（ガードが MemberData の転送と番号を知るため）</summary>
     [ThreadStatic]
@@ -69,6 +75,7 @@ internal static class SyncModelScenarioParts
         {
             SyncModelTransport.Direct => DirectParts,
             SyncModelTransport.Http => HttpParts,
+            SyncModelTransport.SqlServer => SqlServerParts,
             _ => 1,
         };
         var data = new TheoryData<string>();
@@ -152,4 +159,35 @@ public sealed class SyncModelHttpRuntimeTestsPart4
     [MemberData(nameof(ScenarioNames))]
     public Task Scenario_MatchesDirect(string name) =>
         SyncModelHttpRuntimeTests.AssertMatchesDirect(name);
+}
+
+/// <summary>実 SQL Server の決定的なシナリオの 2 つ目の分（<see cref="SyncModelScenarioParts"/>）</summary>
+/// <remarks>
+/// 本体の <see cref="SyncModelSqlServerRuntimeTests"/>（<see cref="SqlServerSecondContainerCollection"/>）と別のコンテナの
+/// コレクションに置き、2 つの分を並べて流す。名前は行列の名前の規則に従う（本体は既知の一覧に載っていて、双方向同期の作り直しでそろえる）。
+/// </remarks>
+[Trait("Category", "Integration")]
+[Trait("RequiresDocker", "true")]
+[Collection(SqlServerContainerCollection.Name)]
+[RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlServer)]
+public sealed class SyncSupportAdoSqlServerScenarioPart2RuntimeTests(
+    SqlServerContainerFixture fixture
+)
+{
+    /// <summary>このクラスが受け持つシナリオの名前</summary>
+    public static TheoryData<string> ScenarioNames() =>
+        SyncModelScenarioParts.Names(SyncModelTransport.SqlServer, 1);
+
+    [Theory(
+        DisplayName = "[Sync/モデル/SqlServer] 決定的なシナリオは、実 SQL Server でも直結と同じ違反（＋SQL Server だけの既知の失敗）になる"
+    )]
+    [MemberData(nameof(ScenarioNames))]
+    public async Task Scenario_MatchesDirect(string name)
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await SyncModelSqlServerRuntimeTests.AssertMatchesDirect(
+            name,
+            SyncModelSqlServerRuntimeTests.OptionsFor(fixture)
+        );
+    }
 }

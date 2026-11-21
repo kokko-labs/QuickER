@@ -17,7 +17,9 @@ namespace QuickER.Tests.Integration;
 /// 仕事の総量を枠に詰めた下限より大きく遅れる。長い順に先に始めると、終わりはその下限に近づく。
 /// </para>
 /// <para>
-/// 宣言の順は夜間の実測の長い順（SQL Server 約 28 分・Oracle 27 分・PostgreSQL 27 分・MySQL 24 分・SQL Server の簡易 DSL 16 分）。
+/// 宣言の順は夜間の実測の長い順（2026-11-20 の夜間の TRX のクラスごとの和を今の分け方へ寄せた値：SQL Server 約 28 分・Oracle 24 分・
+/// MySQL 23 分・SQL Server の 2 つ目 21 分・SQL Server の簡易 DSL 20 分・PostgreSQL 19 分）。普段の CI（4 枠）では、どちらも
+/// 普段に重い SQL Server の 2 つ（約 7.5 分ずつ・開発機）が最初の 4 枠に入る。
 /// コンテナのコレクション（<c>CollectionDefinition</c> を持ち <c>ICollectionFixture</c> を実装するクラス）は、どれも
 /// <see cref="Order"/> に載せる（載せ漏れと、コンテナのコレクションでない型の宣言は、照合の表の行
 /// <c>integration-container-collections-ordered</c>（QuickER.Tests の <c>ParityTests</c>）が名指しする）。
@@ -30,9 +32,10 @@ public sealed class ContainerCollectionOrderer : ITestCollectionOrderer
     [
         typeof(SqlServerContainerCollection),
         typeof(OracleContainerCollection),
-        typeof(PostgreSqlContainerCollection),
         typeof(MySqlContainerCollection),
+        typeof(SqlServerSecondContainerCollection),
         typeof(SqlServerDslFuzzContainerCollection),
+        typeof(PostgreSqlContainerCollection),
         typeof(PostGisContainerCollection),
     ];
 

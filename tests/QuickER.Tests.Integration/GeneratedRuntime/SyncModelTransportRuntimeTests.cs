@@ -347,7 +347,7 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncM
 /// </remarks>
 [Trait("Category", "Integration")]
 [Trait("RequiresDocker", "true")]
-[Collection(SqlServerContainerCollection.Name)]
+[Collection(SqlServerSecondContainerCollection.Name)]
 [MatrixAxisValue(SyncModelTransportAxis.Name, nameof(SyncModelTransport.SqlServer))]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlServer)]
 public sealed class SyncModelSqlServerRuntimeTests(
@@ -360,7 +360,10 @@ public sealed class SyncModelSqlServerRuntimeTests(
     /// <summary>SQL Server でだけ起きる既知の失敗（<see cref="SyncModelKnownFailures.Entry"/> で作る＝指摘の番号・直す区切り・シナリオ・署名）</summary>
     internal static IReadOnlyList<KnownEntry> SqlServerOnly { get; } = [];
 
-    private SyncModelWorldOptions Options =>
+    private SyncModelWorldOptions Options => OptionsFor(fixture);
+
+    /// <summary>実 SQL Server のサーバー役で世界を組む設定（分けたシナリオのクラスと共有する）</summary>
+    internal static SyncModelWorldOptions OptionsFor(SqlServerContainerFixture fixture) =>
         new()
         {
             CreateServer = async (faults, ct) =>
@@ -371,21 +374,12 @@ public sealed class SyncModelSqlServerRuntimeTests(
     /// <summary>世界の組み方（コンテナにはサーバー役を作るときにだけ触れる）</summary>
     SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => Options;
 
-    public static TheoryData<string> ScenarioNames()
-    {
-        var data = new TheoryData<string>();
-
-        foreach (
-            var scenario in SyncModelScenarios.All.Where(s =>
-                s.RunsOn(SyncModelTransport.SqlServer)
-            )
-        )
-        {
-            data.Add(scenario.Name);
-        }
-
-        return data;
-    }
+    /// <summary>
+    /// 実 SQL Server で流す決定的なシナリオの名前のうち、このクラスが受け持つ分（残りは <see cref="SyncModelScenarioParts"/> の
+    /// 分けたクラス）
+    /// </summary>
+    public static TheoryData<string> ScenarioNames() =>
+        SyncModelScenarioParts.Names(SyncModelTransport.SqlServer, 0);
 
     [Theory(
         DisplayName = "[Sync/モデル/SqlServer] 決定的なシナリオは、実 SQL Server でも直結と同じ違反（＋SQL Server だけの既知の失敗）になる"

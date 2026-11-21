@@ -673,7 +673,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     public void ScenarioParts_CoverEveryScenarioOncePerTransport()
     {
         // この名前空間の Theory の MemberData のうち、SyncModelScenarioParts.Names を呼ぶものを集める（分けたクラスと
-        // 転送の本体のクラス）。分ける数を変えてクラスを足し忘れる・クラスを消す・同じ番号を 2 つ書く、のどれでも赤になる
+        // 転送の本体のクラス）。分ける数を変えてクラスを足し忘れる・クラスを消す・同じ番号を 2 つ書く・コンテナの分を同じ
+        // コレクションに置く、のどれでも赤になる
         var parts = typeof(SyncModelRuntimeTests)
             .Assembly.GetTypes()
             .Where(type =>
@@ -698,7 +699,12 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                         var calls = SyncModelScenarioParts.Record(() =>
                             rows = (TheoryData<string>)member!.Invoke(null, null)!
                         );
-                        return (Class: type.Name, Calls: calls, Rows: rows!);
+                        return (
+                            Class: type.Name,
+                            Collection: type.GetCustomAttribute<CollectionAttribute>()?.Name,
+                            Calls: calls,
+                            Rows: rows!
+                        );
                     })
             )
             .Where(part => part.Calls.Count > 0)
@@ -711,7 +717,14 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                 .Select(part => $"{part.Class}: calls Names {part.Calls.Count} times")
         );
 
-        foreach (var transport in new[] { SyncModelTransport.Direct, SyncModelTransport.Http })
+        foreach (
+            var transport in new[]
+            {
+                SyncModelTransport.Direct,
+                SyncModelTransport.Http,
+                SyncModelTransport.SqlServer,
+            }
+        )
         {
             var mine = parts
                 .Where(part => part.Calls.Count == 1 && part.Calls[0].Transport == transport)
@@ -733,6 +746,19 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                     .Select(group =>
                         $"{transport}: part {group.Key} is taken by "
                         + string.Join(", ", group.Select(part => part.Class))
+                    )
+            );
+
+            // コンテナのコレクションに入る分（実 SQL Server）は、分けたクラスを別々のコレクションに置く（同じコレクションは
+            // 1 本ずつ流れ、分けた意味が無い）。コレクションを持たない分（直結・HTTP）はクラスごとに並ぶ
+            problems.AddRange(
+                mine.Where(part => part.Collection is not null)
+                    .GroupBy(part => part.Collection, StringComparer.Ordinal)
+                    .Where(group => group.Count() > 1)
+                    .Select(group =>
+                        $"{transport}: parts "
+                        + string.Join(", ", group.Select(part => part.Class))
+                        + $" share the collection '{group.Key}'"
                     )
             );
             problems.AddRange(
