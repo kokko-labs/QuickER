@@ -30,6 +30,15 @@ namespace QuickER.Tests.Integration;
 /// </remarks>
 public sealed class SqlServerContainerFixture : IAsyncLifetime
 {
+    /// <summary>
+    /// SQL Server が使ってよいメモリの上限（MB・環境変数 <c>MSSQL_MEMORY_LIMIT_MB</c>）
+    /// </summary>
+    /// <remarks>
+    /// 付けないと SQL Server は VM のメモリの 80% までを使ってよいことになり、SQL Server のコンテナが 3 つ（主の 2 つと簡易 DSL）
+    /// 同時に動く最初の数分に、開発機の WSL2 の VM（上限 10 GB）を取り合う。2048 は SQL Server の Linux 版が起動に要る最小の値。
+    /// </remarks>
+    private const string MemoryLimitMegabytes = "2048";
+
     /// <summary>共有する SQL Server コンテナ（Docker 不在時は起動されないため <c>null</c>）</summary>
     private MsSqlContainer? _container;
 
@@ -54,7 +63,9 @@ public sealed class SqlServerContainerFixture : IAsyncLifetime
 
         try
         {
-            _container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
+            _container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest")
+                .WithEnvironment("MSSQL_MEMORY_LIMIT_MB", MemoryLimitMegabytes)
+                .Build();
             await _container.StartAsync().ConfigureAwait(false);
             // 開発用の自己署名証明書のため、暗号化は要求しつつサーバー証明書を信頼する
             var b = new SqlConnectionStringBuilder(_container.GetConnectionString())
@@ -144,11 +155,45 @@ public sealed class SqlServerContainerFixture : IAsyncLifetime
 }
 
 /// <summary>SQL Server 統合テスト用のコレクション定義（コンテナをコレクション内で共有する）</summary>
+/// <remarks>
+/// SQL Server のテストは、このコレクションと <see cref="SqlServerSecondContainerCollection"/> に分けて、別々のコンテナで並べて流す
+/// （分け方は <see cref="SqlServerSecondContainerCollection"/> の remarks）。
+/// </remarks>
 [CollectionDefinition(Name)]
 public sealed class SqlServerContainerCollection : ICollectionFixture<SqlServerContainerFixture>
 {
     /// <summary>コレクション名（各統合テストクラスの <c>[Collection]</c> で参照する）</summary>
     public const string Name = "SQL Server Integration";
+}
+
+/// <summary>
+/// SQL Server 統合テストの 2 つ目のコレクション定義（<see cref="SqlServerContainerCollection"/> と別の SQL Server のコンテナを持つ）
+/// </summary>
+/// <remarks>
+/// <para>
+/// xunit は同じコレクションのテストを 1 本ずつ流すので、SQL Server のテストを 1 つのコレクションに置くと、ほかのコンテナの
+/// コレクションが終わった後もそれだけが直列で流れ、普段の実行も夜間のジョブも終わりの時刻を決める（2026-11-21 の測定：開発機の
+/// Docker の部分で SQL Server だけが 15 分・ほかは 5.5 分で終わる。夜間は SQL Server だけで 49 分）。
+/// </para>
+/// <para>
+/// 中身は内容でなく測った時間で分ける。普段の時間を 2 つで釣り合わせ、夜間に重い 2 つ（実 SQL Server の同期のモデル
+/// <c>SyncModelSqlServerRuntimeTests</c> と、HTTP 越しの実 SQL Server の <c>SyncSupportRemoteAdoSqlServerRuntimeTests</c>）を
+/// 別々のコレクションに置く。普段に一番重い実 SQL Server の決定的なシナリオの Theory は 2 つのクラスに分け
+/// （<c>SyncModelScenarioParts</c>）、片方ずつを置く。このコレクションの中身：<c>SyncModelSqlServerRuntimeTests</c>・
+/// <c>SqlServerSyncPlanFuzzTests</c>・<c>SqlServerNameFuzzDdlRoundTripIntegrationTests</c>・<c>SyncSupportAdoSqlServerEngineRuntimeTests</c>・
+/// <c>ConcurrencyVoRemoteAdoSqlServerRuntimeTests</c>・<c>SyncConfigMatrixRuntimeTests</c>。
+/// </para>
+/// <para>
+/// このコレクションのクラスはどれも、冒頭でスキーマを捨てる（<see cref="SqlServerContainerFixture.ResetSchemaAsync"/>）か自分の
+/// データベースを作るので、どちらのコンテナで流しても結果は変わらない。
+/// </para>
+/// </remarks>
+[CollectionDefinition(Name)]
+public sealed class SqlServerSecondContainerCollection
+    : ICollectionFixture<SqlServerContainerFixture>
+{
+    /// <summary>コレクション名（受け持つテストクラスの <c>[Collection]</c> で参照する）</summary>
+    public const string Name = "SQL Server Integration 2";
 }
 
 /// <summary>

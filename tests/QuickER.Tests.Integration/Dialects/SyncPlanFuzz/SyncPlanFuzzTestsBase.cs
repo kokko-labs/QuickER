@@ -778,7 +778,7 @@ public sealed class MySqlSyncPlanFuzzTests(MySqlContainerFixture fixture) : Sync
 
 /// <summary>SQL Server 2022（Testcontainers）</summary>
 [MatrixAxisValue(SyncPlanFuzzTestsBase.DialectAxis, DialectNames.SqlServer)]
-[Collection(SqlServerContainerCollection.Name)]
+[Collection(SqlServerSecondContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
 public sealed class SqlServerSyncPlanFuzzTests(SqlServerContainerFixture fixture)
     : SyncPlanFuzzTestsBase

@@ -21,7 +21,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// Docker 不在時は <see cref="SqlServerContainerFixture"/> の検出でスキップされる。
 /// </para>
 /// </remarks>
-[Collection(SqlServerContainerCollection.Name)]
+[Collection(SqlServerSecondContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
 [RuntimeCell(
     RuntimeFeatures.ConcurrencyVo,

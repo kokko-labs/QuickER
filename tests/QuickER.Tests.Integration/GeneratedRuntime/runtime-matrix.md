@@ -425,7 +425,7 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 
 双方向同期支援（差分ダウンロード・ジャーナル再生・削除伝搬・競合収集・ループ防止）
 
-- QuickER 版 SQL Server：担当＝`SyncConfigMatrixRuntimeTests`・`SyncModelSqlServerRuntimeTests`・`SyncSqlServerRuntimeTests`・`SyncSupportAdoSqlServerEngineRuntimeTests`
+- QuickER 版 SQL Server：担当＝`SyncConfigMatrixRuntimeTests`・`SyncModelSqlServerRuntimeTests`・`SyncSqlServerRuntimeTests`・`SyncSupportAdoSqlServerEngineRuntimeTests`・`SyncSupportAdoSqlServerScenarioPart2RuntimeTests`
 - QuickER 版 SQLite：担当＝`SyncConstructionExclusionTests`・`SyncKeyTextRuntimeTests`・`SyncLocalSaveHookRegistrationTests`・`SyncModelRuntimeTests`・`SyncModelRuntimeTestsPart2`・`SyncNullKeyRuntimeTests`・`SyncSqliteRuntimeTests`・`SyncSupportAdoSqliteEngineRuntimeTests`・`SyncSupportAdoSqliteTriggerRuntimeTests`・`SyncVoRuntimeTests`
 - EF Core SQL Server：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core SQLite：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他

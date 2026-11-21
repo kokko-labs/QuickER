@@ -158,7 +158,7 @@ public sealed class SyncSupportRemoteAdoSqliteEngineRuntimeTests(ITestOutputHelp
 /// </remarks>
 [Trait("Category", "Integration")]
 [Trait("RequiresDocker", "true")]
-[Collection(SqlServerContainerCollection.Name)]
+[Collection(SqlServerSecondContainerCollection.Name)]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlServer)]
 public sealed class SyncSupportAdoSqlServerEngineRuntimeTests(
     SqlServerContainerFixture fixture,

@@ -53,9 +53,9 @@ internal static partial class ParityRows
                 }
             )
             {
-                // いまのコンテナのコレクションは 6 つ（SQL Server・SQL Server の簡易 DSL・Oracle・PostgreSQL・MySQL・PostGIS）。
+                // いまのコンテナのコレクションは 7 つ（SQL Server の 2 つ・SQL Server の簡易 DSL・Oracle・PostgreSQL・MySQL・PostGIS）。
                 // 拾い方が外れて正本が減ったら赤にする
-                MinimumCanon = 6,
+                MinimumCanon = 7,
             },
         ];
 

@@ -334,7 +334,7 @@ public sealed class SqliteNameFuzzDdlRoundTripIntegrationTests
 /// <summary>SQL Server（Testcontainers）の名前の総当たりの DDL の往復</summary>
 [Trait("Category", "Integration")]
 [Trait("RequiresDocker", "true")]
-[Collection(SqlServerContainerCollection.Name)]
+[Collection(SqlServerSecondContainerCollection.Name)]
 [MatrixAxisValue(NameFuzzDdlRoundTripTestsBase.DialectAxis, DialectNames.SqlServer)]
 public sealed class SqlServerNameFuzzDdlRoundTripIntegrationTests(SqlServerContainerFixture fixture)
     : NameFuzzDdlRoundTripTestsBase
