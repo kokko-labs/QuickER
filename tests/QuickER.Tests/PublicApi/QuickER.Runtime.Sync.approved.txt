@@ -195,6 +195,13 @@ public struct QuickER.Runtime.Sync.SyncDownloadOutcome : System.IEquatable<Quick
     public string MissingParentTableName { get; init; }
     public string TruncatedAtKeyText { get; init; }
 
+public sealed class QuickER.Runtime.Sync.SyncDownloadTooLargeException : System.InvalidOperationException, System.Runtime.Serialization.ISerializable
+    public .ctor(int fetchedRowCount, int rowLimit, System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncPendingChange> pendingChanges)
+    public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncPendingChange> PendingChanges { get; }
+    public int FetchedRowCount { get; }
+    public int PendingCount { get; }
+    public int RowLimit { get; }
+
 public sealed class QuickER.Runtime.Sync.SyncDownloadTruncation : System.IEquatable<QuickER.Runtime.Sync.SyncDownloadTruncation>
     public .ctor(string TableName, string PendingKeyText, string TruncatedByTableName)
     public bool SkippedBySaveHook { get; init; }
@@ -310,6 +317,7 @@ public sealed class QuickER.Runtime.Sync.SyncOptions
     public bool IncludeUnboundedBinary { get; init; }
     public bool PropagateDeletes { get; init; }
     public int DownloadBatchSize { get; init; }
+    public int DownloadRowLimit { get; init; }
 
 public sealed class QuickER.Runtime.Sync.SyncParentReference<TEntity> : System.IEquatable<QuickER.Runtime.Sync.SyncParentReference<TEntity>>
     public .ctor(string ParentTableName, System.Func<TEntity, string> ReadParentKeyText)
@@ -334,6 +342,7 @@ public sealed class QuickER.Runtime.Sync.SyncRefreshOptions
     public bool Force { get; init; }
     public bool IncludeUnboundedBinary { get; init; }
     public int BatchSize { get; init; }
+    public int DownloadRowLimit { get; init; }
 
 public sealed class QuickER.Runtime.Sync.SyncRefreshResult : System.IEquatable<QuickER.Runtime.Sync.SyncRefreshResult>
     public .ctor(System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncRefreshTableResult> Tables, int DiscardedChanges, System.TimeSpan Elapsed)

@@ -8,8 +8,9 @@ using QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 // 決定的なシナリオだけが使う手（生成器は出さない＝種の指紋に触れない）。生成器が出す手（書き込み・ModelSyncOp・
-// ModelRefreshOp・ArmFaultOp）にはプロパティを足さず、新しい振る舞いはここの新しい型にする（SeedSummary が公開
-// プロパティを全部書くので、足すと指紋が変わる）。
+// ModelRefreshOp・ArmFaultOp）には公開のプロパティを足さず、新しい振る舞いはここの新しい型にする（SeedSummary が公開
+// プロパティを全部書くので、足すと指紋が変わる）。生成器が出す手に、決定的なシナリオだけが設定する口が要るときは
+// internal にする（指紋に載らない。例：ModelSyncOp.DownloadRowLimit）。
 
 /// <summary>期待の手が照合する面</summary>
 internal static class ExpectFacets
@@ -157,6 +158,12 @@ internal enum EngineDeclaration
     /// その間にサーバーで変わった行もその実行に入る
     /// </summary>
     RefetchesHeldRowsInSameRun,
+
+    /// <summary>
+    /// <see cref="IModelDeviceSync.RefusesDownloadOverRowLimit"/>：真のエンジンは、降ろす行が上限を超え範囲の表に未送信があると
+    /// 何も適用せずに断る。偽のエンジンは上限を見ずに降ろす
+    /// </summary>
+    RefusesDownloadOverRowLimit,
 }
 
 /// <summary>
@@ -182,6 +189,7 @@ internal sealed record WhenEngineDeclaresOp(
             EngineDeclaration.DerivesResumePointFromLocalVersions =>
                 engine.DerivesResumePointFromLocalVersions,
             EngineDeclaration.RefetchesHeldRowsInSameRun => engine.RefetchesHeldRowsInSameRun,
+            EngineDeclaration.RefusesDownloadOverRowLimit => engine.RefusesDownloadOverRowLimit,
             _ => throw new ArgumentOutOfRangeException(nameof(Declaration), Declaration, null),
         };
 
@@ -357,6 +365,12 @@ internal sealed record RefreshWithOptionsOp(
         );
     }
 
+    /// <summary>
+    /// エンジンへ渡す降ろす行の上限（<c>SyncRefreshOptions.DownloadRowLimit</c>。null は製品の既定）。決まった形の行だけが使う。
+    /// 種の指紋の要約（公開のプロパティ）に載せないため internal にする
+    /// </summary>
+    internal int? DownloadRowLimit { get; init; }
+
     /// <summary>エンジンへ渡すオプション</summary>
     public SyncRefreshOptions ToOptions() =>
         new()
@@ -367,12 +381,18 @@ internal sealed record RefreshWithOptionsOp(
             Force = Force,
             ExcludedEntityTypes = Excluded.Select(ModelTables.EntityType).ToArray(),
             BatchSize = BatchSize,
+            DownloadRowLimit = DownloadRowLimit ?? new SyncRefreshOptions().DownloadRowLimit,
         };
 
     public override string Describe() =>
         $"{Who(Device)} RefreshWith mode={Mode} blobs={IncludeBlobs} discard-blobs={DiscardLocalBlobs} "
         + $"force={Force} excluded=[{string.Join(",", Excluded.Select(ModelTables.Short))}] batch={BatchSize}"
-        + (OmitOptions ? " options=omitted" : "");
+        + (OmitOptions ? " options=omitted" : "")
+        + (
+            DownloadRowLimit is { } limit
+                ? $" row-limit={limit.ToString(CultureInfo.InvariantCulture)}"
+                : ""
+        );
 }
 
 /// <summary>キーの並びを短く書く（連続する範囲は <c>a..b</c>）</summary>

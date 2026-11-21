@@ -394,6 +394,12 @@ internal sealed record ModelSyncOp(
     bool PropagateDeletes = true
 ) : ModelOp
 {
+    /// <summary>
+    /// エンジンへ渡す降ろす行の上限（<c>SyncOptions.DownloadRowLimit</c>。null は製品の既定）。決まった形の行だけが使う。
+    /// 種の指紋の要約（公開のプロパティ）に載せないため internal にする
+    /// </summary>
+    internal int? DownloadRowLimit { get; init; }
+
     /// <summary>エンジンへ渡すオプション</summary>
     public SyncOptions ToOptions() =>
         new()
@@ -404,13 +410,19 @@ internal sealed record ModelSyncOp(
             IncludeUnboundedBinary = IncludeBlobs,
             DownloadBatchSize = BatchSize,
             PropagateDeletes = PropagateDeletes,
+            DownloadRowLimit = DownloadRowLimit ?? new SyncOptions().DownloadRowLimit,
         };
 
     public override string Describe() =>
         $"{Who(Device)} {Kind} mode={Mode} policy={Policy} "
         + $"excluded=[{string.Join(",", Excluded.Select(ModelTables.Short))}] "
         + $"blobs={IncludeBlobs} batch={BatchSize}"
-        + (PropagateDeletes ? "" : " propagate=False");
+        + (PropagateDeletes ? "" : " propagate=False")
+        + (
+            DownloadRowLimit is { } limit
+                ? $" row-limit={limit.ToString(CultureInfo.InvariantCulture)}"
+                : ""
+        );
 }
 
 /// <summary>端末の洗い替え 1 回（未送信のジャーナルがあれば拒否される＝Force は使わない）</summary>

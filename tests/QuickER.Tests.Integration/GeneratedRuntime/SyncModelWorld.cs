@@ -593,11 +593,19 @@ internal sealed class SyncModelServer : ISyncModelServerRole
 {
     private readonly SqliteTempDatabase _db = SqliteTempDatabase.Create();
 
+    private readonly SyncTestVersionSequence _versions = new();
+
     private SyncModelServer() { }
 
     public string ConnectionString => _db.ReadWriteCreateConnectionString;
 
     public string? SqliteConnectionString => ConnectionString;
+
+    /// <summary>
+    /// 版を 1 つ採って返す。これより前の書き込みの版はどれも小さく、後の書き込みの版はどれも大きい（決まった形の行が、取得の
+    /// 上限をこの時点に固定するのに使う）
+    /// </summary>
+    public byte[] TakeVersion() => _versions.Next();
 
     /// <summary>SQLite の一意制約は既定の照合順序（BINARY）＝序数で比べる（図の DDL は列に COLLATE を付けない）</summary>
     public IEqualityComparer<string> UniqueValues => StringComparer.Ordinal;
@@ -634,7 +642,7 @@ internal sealed class SyncModelServer : ISyncModelServerRole
         var server = new SyncModelServer();
         await server._db.ApplyDdlAsync(SyncModelFixtureDefinition.BuildSqliteMirror(), ct);
 
-        var versions = new SyncTestVersionSequence();
+        var versions = server._versions;
         var factory = new LightJournalSyncModelConnectionFactory(
             server._db.ReadWriteCreateConnectionString
         );

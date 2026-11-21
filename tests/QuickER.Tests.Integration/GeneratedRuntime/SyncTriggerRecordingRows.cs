@@ -123,6 +123,15 @@ internal static class SyncTriggerRecordingRows
                 blobColumns
             ),
             string text => new(table, "text", text, 1, deleted, blobColumns),
+            double real => new(
+                table,
+                "real",
+                real.ToString("R", CultureInfo.InvariantCulture),
+                1,
+                deleted,
+                blobColumns
+            ),
+            byte[] bytes => new(table, "blob", Convert.ToHexString(bytes), 1, deleted, blobColumns),
             _ => throw new ArgumentException($"知らないキーの型 {key.GetType()}", nameof(key)),
         };
 
@@ -220,6 +229,23 @@ internal static class SyncTriggerRecordingRows
                     .OnDelete = onDelete;
             }
         };
+
+    /// <summary>SQLite 方言の図の写しで、表の列の型を書き換える（キーの列を別の格納の型にする）</summary>
+    /// <param name="tableName">表の名前</param>
+    /// <param name="columnName">列の名前</param>
+    /// <param name="dataType">SQLite の型の表記</param>
+    private static Action<ErDiagram> WithColumnType(
+        string tableName,
+        string columnName,
+        string dataType
+    ) =>
+        diagram =>
+            diagram
+                .Entities.Single(e =>
+                    string.Equals(e.TableName, tableName, StringComparison.Ordinal)
+                )
+                .Columns.Single(c => string.Equals(c.Name, columnName, StringComparison.Ordinal))
+                .DataType = dataType;
 
     /// <summary>
     /// 前段の書き込みで記録した行のエンジンだけが書く列へ値を入れてから手を流し、手の後も前段で記録した行（表とキー）の
@@ -402,6 +428,66 @@ internal static class SyncTriggerRecordingRows
                     async (h, ct) =>
                         (await h.Model.Events.DeleteAsync(EventAt, ct)).Should().BeTrue(),
                     [Gone(Events, EventAtText)]
+                )
+            ),
+            Row(
+                "real-stored-key-insert-and-update",
+                "数の親和性のキーの列（NUMERIC）へテキストで入れた小数のキーは、表が実数で格納し、記録も同じ実数で残る"
+                    + "（記録したキーと表のキーの列を SQLite の = で突き合わせて元の行を引ける）",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    PrepareItemAsync,
+                    async (h, ct) =>
+                    {
+                        (
+                            await h.Model.Sql.ExecuteSqlAsync(
+                                "INSERT INTO model_events (event_at, item_id, memo) VALUES ('12.50', 10, 'first')",
+                                cancellationToken: ct
+                            )
+                        )
+                            .Should()
+                            .Be(1);
+                        (
+                            await h.Model.Sql.ExecuteSqlAsync(
+                                "UPDATE model_events SET memo = 'changed' WHERE event_at = 12.5",
+                                cancellationToken: ct
+                            )
+                        )
+                            .Should()
+                            .Be(1);
+                    },
+                    [Live(Events, 12.5)],
+                    AlterDiagram: WithColumnType(Events, "event_at", "NUMERIC")
+                )
+            ),
+            Row(
+                "blob-stored-key-insert-and-update",
+                "blob で格納するキーの列（BLOB）のキーは、記録も同じ blob で残る"
+                    + "（記録したキーと表のキーの列を SQLite の = で突き合わせて元の行を引ける）",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    PrepareItemAsync,
+                    async (h, ct) =>
+                    {
+                        (
+                            await h.Model.Sql.ExecuteSqlAsync(
+                                "INSERT INTO model_events (event_at, item_id, memo) VALUES (x'0A0B00', 10, 'first')",
+                                cancellationToken: ct
+                            )
+                        )
+                            .Should()
+                            .Be(1);
+                        (
+                            await h.Model.Sql.ExecuteSqlAsync(
+                                "UPDATE model_events SET memo = 'changed' WHERE event_at = x'0A0B00'",
+                                cancellationToken: ct
+                            )
+                        )
+                            .Should()
+                            .Be(1);
+                    },
+                    [Live(Events, new byte[] { 0x0A, 0x0B, 0x00 })],
+                    AlterDiagram: WithColumnType(Events, "event_at", "BLOB")
                 )
             ),
             Row(

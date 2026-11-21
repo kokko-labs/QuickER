@@ -185,6 +185,19 @@ public sealed class SyncOptions
     /// <summary>How many rows one download batch fetches and applies in a single local transaction (default 500).</summary>
     public int DownloadBatchSize { get; init; } = 500;
 
+    /// <summary>
+    /// How many rows one fetch and apply of <see cref="TrackedSyncEngine"/> may bring down before it checks for unsent
+    /// changes (default 300,000; must be greater than zero).
+    /// </summary>
+    /// <remarks>
+    /// The fetched rows are held in memory until they are applied. When the rows fetched exceed this limit and the tables
+    /// of the run hold unsent local changes, the run throws <see cref="SyncDownloadTooLargeException"/> and applies
+    /// nothing. Without unsent changes it applies the rest of the download a chunk at a time, committing as it goes (see
+    /// <see cref="TrackedSyncEngine"/>), as a fetch over 50,000 rows without unsent changes does even below this limit.
+    /// <see cref="SyncEngine"/> does not read this setting.
+    /// </remarks>
+    public int DownloadRowLimit { get; init; } = 300_000;
+
     /// <summary>Whether to delete local rows whose key no longer exists on the server (default true).</summary>
     /// <remarks>
     /// <para>
@@ -407,6 +420,20 @@ public sealed class SyncRefreshOptions
     /// </para>
     /// </remarks>
     public int BatchSize { get; init; } = 2000;
+
+    /// <summary>
+    /// How many rows one fetch and apply of <see cref="TrackedSyncEngine"/> may bring down before it checks for unsent
+    /// changes (default 300,000; must be greater than zero).
+    /// </summary>
+    /// <remarks>
+    /// The fetched rows are held in memory until they are applied. When the rows fetched exceed this limit and the tables
+    /// of the refresh hold unsent local changes other than the ones <see cref="Force"/> discards (changes written while
+    /// the refresh runs), the run throws <see cref="SyncDownloadTooLargeException"/> and applies nothing. Otherwise it
+    /// applies the rest of the refresh a chunk at a time, committing as it goes (see <see cref="TrackedSyncEngine"/>), as
+    /// a fetch over 50,000 rows without such changes does even below this limit. <see cref="SyncEngine"/> does not read
+    /// this setting.
+    /// </remarks>
+    public int DownloadRowLimit { get; init; } = 300_000;
 
     /// <summary>Whether to discard the unsent local changes instead of refusing to run (default false).</summary>
     /// <remarks>
@@ -12579,6 +12606,62 @@ public sealed class SyncLocalTableEmptiedException : InvalidOperationException
     }
 }
 
+/// <summary>
+/// Thrown when one fetch of <see cref="TrackedSyncEngine"/> brings down more rows than
+/// <see cref="SyncOptions.DownloadRowLimit"/> (or <see cref="SyncRefreshOptions.DownloadRowLimit"/>) while the tables of
+/// the run hold unsent local changes.
+/// </summary>
+/// <remarks>
+/// The rows fetched are dropped. The local database, the row state and the resume points are left unchanged, so the
+/// unsent changes are still there to be sent and the next run fetches the same rows again.
+/// </remarks>
+public sealed class SyncDownloadTooLargeException : InvalidOperationException
+{
+    /// <summary>Creates the exception from the rows fetched, the limit and the per-table breakdown of the unsent changes.</summary>
+    /// <param name="fetchedRowCount">The rows fetched when the run stopped.</param>
+    /// <param name="rowLimit">The limit the fetch went over.</param>
+    /// <param name="pendingChanges">The unsent local changes of the run's tables, grouped by table.</param>
+    public SyncDownloadTooLargeException(
+        int fetchedRowCount,
+        int rowLimit,
+        IReadOnlyList<SyncPendingChange> pendingChanges
+    )
+        : base(BuildMessage(fetchedRowCount, rowLimit, pendingChanges))
+    {
+        FetchedRowCount = fetchedRowCount;
+        RowLimit = rowLimit;
+        PendingChanges = pendingChanges;
+        PendingCount = pendingChanges.Sum(change => change.Count);
+    }
+
+    /// <summary>The rows fetched when the run stopped.</summary>
+    public int FetchedRowCount { get; }
+
+    /// <summary>The limit the fetch went over.</summary>
+    public int RowLimit { get; }
+
+    /// <summary>The unsent local changes of the run's tables, grouped by table.</summary>
+    public IReadOnlyList<SyncPendingChange> PendingChanges { get; }
+
+    /// <summary>The total number of unsent local changes.</summary>
+    public int PendingCount { get; }
+
+    /// <summary>Builds the message, which names the counts, the tables and the ways out.</summary>
+    private static string BuildMessage(int fetchedRowCount, int rowLimit, IReadOnlyList<SyncPendingChange> pendingChanges)
+    {
+        ArgumentNullException.ThrowIfNull(pendingChanges);
+        var breakdown = string.Join(
+            ", ",
+            pendingChanges.Select(change => $"{change.TableName}: {change.Count}")
+        );
+
+        return $"The download fetched {fetchedRowCount} row(s), more than the limit of {rowLimit}, while "
+            + $"{pendingChanges.Sum(change => change.Count)} unsent local change(s) wait ({breakdown}). Nothing was "
+            + "applied. Send the changes first with UploadAsync (and resolve any conflicts it reports), raise "
+            + "DownloadRowLimit, or - if the local changes may be discarded - refresh with SyncRefreshOptions.Force.";
+    }
+}
+
 /// <summary>One unsent row of the row state table of <see cref="SyncLocalTracking"/> (a row whose <c>dirty</c> is set).</summary>
 /// <param name="TableName">The synchronised table the row belongs to.</param>
 /// <param name="RawKey">The key exactly as the row state table stores it (the value the synchronised table stores).</param>
@@ -12983,6 +13066,144 @@ internal static class TrackedSyncState
         return rows;
     }
 
+    /// <summary>The temporary table <see cref="ReadRowsByKeyAsync"/> turns keys into stored keys through.</summary>
+    private const string StoredKeyTableName = "quicker_sync_stored_keys";
+
+    /// <summary>The most keys bound in one statement (well under SQLite's limit on the number of parameters).</summary>
+    private const int MaxKeysPerStatement = 500;
+
+    /// <summary>
+    /// Reads the states of the rows with the given keys only (never every row state of the table), by the key text the
+    /// table gives each raw key, together with each key exactly as the synchronised table stores it, by key text.
+    /// </summary>
+    /// <remarks>
+    /// Each key is bound the way the local row store binds a key (a value object as its underlying value) into a temporary
+    /// table whose column takes the affinity of the synchronised table's key column, so the value read back is the key as
+    /// that table stores it - and as the row state table, which copies it, stores it. The row states are then read by those
+    /// values, a bounded number at a time.
+    /// </remarks>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="qualifiedLocalName">The synchronised table's local name, quoted.</param>
+    /// <param name="quotedKeyColumn">The synchronised table's key column, quoted.</param>
+    /// <param name="keys">The keys, of the table's key type.</param>
+    /// <param name="keyText">Renders a raw key into the table's key text.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static async Task<(
+        Dictionary<string, TrackedSyncRowState> States,
+        Dictionary<string, object> RawKeys
+    )> ReadRowsByKeyAsync(
+        DbConnection connection,
+        string tableName,
+        string qualifiedLocalName,
+        string quotedKeyColumn,
+        IReadOnlyList<object> keys,
+        Func<object, string> keyText,
+        CancellationToken cancellationToken
+    )
+    {
+        var states = new Dictionary<string, TrackedSyncRowState>(StringComparer.Ordinal);
+        var rawKeys = new Dictionary<string, object>(StringComparer.Ordinal);
+
+        if (keys.Count == 0)
+        {
+            return (states, rawKeys);
+        }
+
+        await ExecuteAsync(connection, "DROP TABLE IF EXISTS temp." + StoredKeyTableName, cancellationToken)
+            .ConfigureAwait(false);
+        await ExecuteAsync(
+                connection,
+                "CREATE TEMP TABLE "
+                    + StoredKeyTableName
+                    + " AS SELECT "
+                    + quotedKeyColumn
+                    + " AS k FROM "
+                    + qualifiedLocalName
+                    + " WHERE 0",
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+
+        for (var start = 0; start < keys.Count; start += MaxKeysPerStatement)
+        {
+            var count = Math.Min(MaxKeysPerStatement, keys.Count - start);
+            await using var insert = connection.CreateCommand();
+            insert.CommandText =
+                "INSERT INTO temp."
+                + StoredKeyTableName
+                + " (k) VALUES "
+                + string.Join(
+                    ", ",
+                    Enumerable.Range(0, count).Select(index => "(@k" + index.ToString(CultureInfo.InvariantCulture) + ")")
+                );
+
+            for (var index = 0; index < count; index++)
+            {
+                AddParameter(
+                    insert,
+                    "@k" + index.ToString(CultureInfo.InvariantCulture),
+                    SqlParameterValue.Unwrap(keys[start + index])
+                );
+            }
+
+            await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var stored = new List<object>(keys.Count);
+
+        await using (var read = connection.CreateCommand())
+        {
+            read.CommandText = "SELECT k FROM temp." + StoredKeyTableName;
+            await using var reader = await read.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (!reader.IsDBNull(0))
+                {
+                    var rawKey = reader.GetValue(0);
+                    stored.Add(rawKey);
+                    rawKeys[keyText(rawKey)] = rawKey;
+                }
+            }
+        }
+
+        await ExecuteAsync(connection, "DROP TABLE temp." + StoredKeyTableName, cancellationToken).ConfigureAwait(false);
+
+        for (var start = 0; start < stored.Count; start += MaxKeysPerStatement)
+        {
+            var count = Math.Min(MaxKeysPerStatement, stored.Count - start);
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT "
+                + RowStateColumns
+                + " FROM "
+                + SyncLocalTracking.RowTableName
+                + " WHERE table_name = @table AND \"key\" IN ("
+                + string.Join(
+                    ", ",
+                    Enumerable.Range(0, count).Select(index => "@k" + index.ToString(CultureInfo.InvariantCulture))
+                )
+                + ")";
+            AddParameter(command, "@table", tableName);
+
+            for (var index = 0; index < count; index++)
+            {
+                AddParameter(command, "@k" + index.ToString(CultureInfo.InvariantCulture), stored[start + index]);
+            }
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var state = ReadRowState(reader);
+                states[keyText(state.RawKey)] = state;
+            }
+        }
+
+        return (states, rawKeys);
+    }
+
     /// <summary>Reads the state of one row (null when the row state table has no row for it).</summary>
     /// <param name="connection">An open connection to the local database.</param>
     /// <param name="tableName">The synchronised table.</param>
@@ -13239,11 +13460,6 @@ internal static class TrackedSyncState
         };
 }
 
-/// <summary>What one table's fetch brought into memory before an apply.</summary>
-/// <param name="Rows">The server rows, in the order they came (ascending version, or ascending key for a table without a version column).</param>
-/// <param name="ServerKeys">The key texts of every row the server holds, or null when delete propagation is off.</param>
-internal sealed record TrackedSyncFetch(IReadOnlyList<EntityBaseCore> Rows, IReadOnlySet<string>? ServerKeys);
-
 /// <summary>How one write of an unsent row to the server ended.</summary>
 internal enum TrackedSyncSendKind
 {
@@ -13402,14 +13618,20 @@ internal interface ITrackedSyncTable
     /// <summary>Gets the server's change ceiling (null for a table without a version column).</summary>
     Task<byte[]?> GetCeilingAsync(CancellationToken cancellationToken);
 
-    /// <summary>Fetches every server row above the anchor and below the ceiling (every row for a table without a version column), and the server's keys when asked.</summary>
-    Task<TrackedSyncFetch> FetchAsync(
+    /// <summary>
+    /// Fetches every server row above the anchor and below the ceiling (every row for a table without a version column),
+    /// one page at a time, in the order they come (ascending version, or ascending key for a table without a version
+    /// column). Empty pages are not returned.
+    /// </summary>
+    IAsyncEnumerable<IReadOnlyList<EntityBaseCore>> FetchPagesAsync(
         byte[]? anchor,
         byte[]? ceiling,
         int batchSize,
-        bool readKeys,
         CancellationToken cancellationToken
     );
+
+    /// <summary>Fetches the key texts of every row the server holds.</summary>
+    Task<IReadOnlySet<string>> FetchServerKeysAsync(CancellationToken cancellationToken);
 
     /// <summary>Whether the local table has a row with the key.</summary>
     Task<bool> ExistsAsync(DbConnection connection, object key, CancellationToken cancellationToken);
@@ -13711,27 +13933,32 @@ public sealed class TrackedSyncTable<TEntity, TKey> : ITrackedSyncTable
             ? null
             : await _source.GetChangeCeilingAsync(cancellationToken).ConfigureAwait(false);
 
-    async Task<TrackedSyncFetch> ITrackedSyncTable.FetchAsync(
+    async IAsyncEnumerable<IReadOnlyList<EntityBaseCore>> ITrackedSyncTable.FetchPagesAsync(
         byte[]? anchor,
         byte[]? ceiling,
         int batchSize,
-        bool readKeys,
-        CancellationToken cancellationToken
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken
     )
     {
-        var rows = new List<EntityBaseCore>();
-
         if (_descriptor.IsVersionless)
         {
             var page = await _source.GetFirstPageAsync(batchSize, cancellationToken).ConfigureAwait(false);
-            rows.AddRange(page.Rows);
+
+            if (page.Rows.Count > 0)
+            {
+                yield return page.Rows;
+            }
 
             while (page.HasMore && page.Rows.Count > 0)
             {
                 page = await _source
                     .GetPageAfterAsync(_descriptor.ReadKey(page.Rows[^1]), batchSize, cancellationToken)
                     .ConfigureAwait(false);
-                rows.AddRange(page.Rows);
+
+                if (page.Rows.Count > 0)
+                {
+                    yield return page.Rows;
+                }
             }
         }
         else
@@ -13743,7 +13970,11 @@ public sealed class TrackedSyncTable<TEntity, TKey> : ITrackedSyncTable
                 var batch = await _source
                     .GetChangesAsync(resume, ceiling, batchSize, cancellationToken)
                     .ConfigureAwait(false);
-                rows.AddRange(batch.Rows);
+
+                if (batch.Rows.Count > 0)
+                {
+                    yield return batch.Rows;
+                }
 
                 if (!batch.HasMore || batch.Rows.Count == 0)
                 {
@@ -13753,16 +13984,13 @@ public sealed class TrackedSyncTable<TEntity, TKey> : ITrackedSyncTable
                 resume = _descriptor.ReadRowVersion(batch.Rows[^1]);
             }
         }
+    }
 
-        IReadOnlySet<string>? serverKeys = null;
+    async Task<IReadOnlySet<string>> ITrackedSyncTable.FetchServerKeysAsync(CancellationToken cancellationToken)
+    {
+        var keys = await _source.GetAllKeysAsync(cancellationToken).ConfigureAwait(false);
 
-        if (readKeys)
-        {
-            var keys = await _source.GetAllKeysAsync(cancellationToken).ConfigureAwait(false);
-            serverKeys = keys.Select(_descriptor.FormatKey).ToHashSet(StringComparer.Ordinal);
-        }
-
-        return new TrackedSyncFetch(rows, serverKeys);
+        return keys.Select(_descriptor.FormatKey).ToHashSet(StringComparer.Ordinal);
     }
 
     Task<bool> ITrackedSyncTable.ExistsAsync(
@@ -13959,6 +14187,23 @@ public sealed class TrackedSyncTable<TEntity, TKey> : ITrackedSyncTable
 /// points.
 /// </para>
 /// <para>
+/// A sync, a download-only run or a refresh whose fetch brings more than 50,000 rows down while the run's tables hold no
+/// unsent change (or more than the download row limit with none; a forced refresh does not count the rows it discards)
+/// applies the download a chunk at a time instead: every 10,000 rows of a table are committed in a transaction of their
+/// own, so the state in between is visible to other connections (it never leaves a foreign key violation: a row whose
+/// parent or unique value is not in place yet is held back and written, with the other rows held back, in one last
+/// transaction). Such a run is not all or nothing: one that fails half-way keeps the chunks it committed, and the next
+/// run goes on from the resume points, which never pass a row held back (a failed refresh is run again to finish the
+/// rebuild; a sync after it goes on downloading from where the refresh stopped, and sends a row it was discarding and had
+/// not yet replaced as an ordinary unsent change). Before the first chunk, the run takes the server keys of the tables it
+/// has not fetched yet and removes the local rows the server no longer holds, in a transaction of its own: a row the
+/// server deletes between those keys and its rows stays on the device until the next run's delete propagation, and so
+/// does a parent that still has a local child the server moved elsewhere (the child moves in a later chunk). For a
+/// refresh, that transaction also forgets the rows neither side holds, empties every unbounded binary column of the
+/// scope's tables when the refresh gives them up, settles the rows it discards that the server no longer holds, and sets
+/// every table's resume point back to nothing fetched, from which the chunks move it.
+/// </para>
+/// <para>
 /// The apply never calls the local save hooks. It writes rows through <see cref="ILocalRowStore"/>, which leaves the
 /// excluded unbounded binary columns alone on an update; when the run carries those columns, each row the apply wrote
 /// owes them, and they are copied down from the server afterwards, each through a temporary file and a short transaction
@@ -13988,6 +14233,27 @@ public sealed class TrackedSyncEngine
     private readonly IReadOnlyList<ITrackedSyncTable> _tables;
     private readonly ILocalRowStore _rows;
 
+    /// <summary>
+    /// The number of rows one fetch of a sync or a download-only run may hold before it reads the unsent changes of the
+    /// run's tables, and - when there are none - applies the rest of the download a chunk at a time (default 50,000).
+    /// </summary>
+    internal int ChunkThreshold { get; set; } = 50_000;
+
+    /// <summary>The most rows one chunk of a download applied a chunk at a time holds (default 10,000).</summary>
+    internal int ChunkSize { get; set; } = 10_000;
+
+    /// <summary>
+    /// Called once for every fetch of a run, as soon as the way it is applied is decided: in one transaction, a chunk at
+    /// a time, or refused (null calls nothing).
+    /// </summary>
+    internal Action<TrackedSyncDownloadRoute>? DownloadRouteObserved { get; set; }
+
+    /// <summary>
+    /// Called with the number of carried rows each time a download applied a chunk at a time runs its last apply (the
+    /// rows its chunks held back; not called when they held none back). Null calls nothing.
+    /// </summary>
+    internal Action<int>? CarriedRowsApplied { get; set; }
+
     /// <summary>Creates the engine over the synchronised tables, ordered parents first.</summary>
     /// <param name="tables">The synchronised tables in foreign-key order; every one shares the same local row store.</param>
     /// <exception cref="ArgumentException">No table is given, or the tables do not share one local row store.</exception>
@@ -14016,6 +14282,7 @@ public sealed class TrackedSyncEngine
     /// A run that throws hands the local rows it had changed on its own on in the exception's
     /// <see cref="Exception.Data"/>, under <see cref="SyncEngine.LocalRowChangesDataKey"/>.
     /// </remarks>
+    /// <exception cref="SyncDownloadTooLargeException">The fetch went over <see cref="SyncOptions.DownloadRowLimit"/> while the run's tables held unsent changes, including the ones the run discards.</exception>
     public async Task<SyncResult> SyncAsync(
         SyncOptions? options = null,
         CancellationToken cancellationToken = default
@@ -14130,6 +14397,7 @@ public sealed class TrackedSyncEngine
     /// <summary>Pulls the server's changes down and, unless it is turned off, removes the local rows the server dropped.</summary>
     /// <param name="options">The knobs for this run.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
+    /// <exception cref="SyncDownloadTooLargeException">The fetch went over <see cref="SyncOptions.DownloadRowLimit"/> while the run's tables held unsent changes, including the ones the run discards.</exception>
     public async Task<(int Downloaded, int DeletedLocally)> DownloadAsync(
         SyncOptions options,
         CancellationToken cancellationToken = default
@@ -14165,18 +14433,28 @@ public sealed class TrackedSyncEngine
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <remarks>
     /// <para>
-    /// The refusals come first, in this order, each before anything is read or written: a batch size that is not greater
-    /// than zero, an excluded type the engine does not synchronise, unbounded binary columns neither carried nor given up
-    /// (decided from the tables alone, without reading the database), a local row of a table outside the scope referring
-    /// to a row of a table inside it, and unsent changes in the scope's tables unless <see cref="SyncRefreshOptions.Force"/>
-    /// is set. A table found emptied outside a run is not refused: the refresh is what rebuilds it.
+    /// The refusals come first, in this order, each before anything is read or written: a batch size or a download row
+    /// limit that is not greater than zero, an excluded type the engine does not synchronise, unbounded binary columns
+    /// neither carried nor given up (decided from the tables alone, without reading the database), a local row of a table
+    /// outside the scope referring to a row of a table inside it, and unsent changes in the scope's tables unless
+    /// <see cref="SyncRefreshOptions.Force"/> is set. A table found emptied outside a run is not refused: the refresh is
+    /// what rebuilds it.
     /// </para>
     /// <para>
     /// The refresh then fetches every row of the scope's tables below one change ceiling and applies them the way a
     /// download does - one transaction, the same holding back for missing parents and colliding unique values - except
     /// that no row is skipped as an echo, every local row the server does not hold goes, and the unsent changes are
     /// discarded when forced. Rows held back are fetched once more from the resume points; when some are still held, the
-    /// run throws. A row the server changed after the ceiling is left to the next run.
+    /// run throws. A row the server changed after the ceiling is left to the next run. A row being discarded whose server
+    /// row cannot be put in place (a local row the refresh does not replace holds its unique value) is left as it is: it
+    /// stays unsent with its local content, its unbounded binary columns included, also when the refresh gives those
+    /// columns up.
+    /// </para>
+    /// <para>
+    /// A refresh whose fetch goes over 50,000 rows (or over <see cref="SyncRefreshOptions.DownloadRowLimit"/>) while the
+    /// scope's tables hold no unsent change other than the rows it discards applies a chunk at a time instead, as a
+    /// download does (see the remarks of <see cref="TrackedSyncEngine"/>). It is then not all or nothing: a refresh that
+    /// fails keeps what it committed, and is run again to finish the rebuild.
     /// </para>
     /// <para>
     /// The counts are per table: <see cref="SyncRefreshTableResult.Deleted"/> is the local rows removed because the server
@@ -14188,6 +14466,7 @@ public sealed class TrackedSyncEngine
     /// <exception cref="SyncUnboundedBinaryLossException">A table of the scope has unbounded binary columns and neither <see cref="SyncRefreshOptions.IncludeUnboundedBinary"/> nor <see cref="SyncRefreshOptions.DiscardLocalUnboundedBinaries"/> was set.</exception>
     /// <exception cref="SyncRefreshScopeException">A local row of a table outside the refresh refers to a row of a table it rebuilds.</exception>
     /// <exception cref="SyncPendingChangesException">The scope's tables hold unsent local changes and <see cref="SyncRefreshOptions.Force"/> was not set.</exception>
+    /// <exception cref="SyncDownloadTooLargeException">The fetch went over <see cref="SyncRefreshOptions.DownloadRowLimit"/> while the scope's tables held unsent changes written during the refresh.</exception>
     public async Task<SyncRefreshResult> RefreshAsync(
         SyncRefreshOptions? options = null,
         CancellationToken cancellationToken = default
@@ -14201,6 +14480,15 @@ public sealed class TrackedSyncEngine
                 nameof(options),
                 options.BatchSize,
                 "The refresh batch size must be greater than zero."
+            );
+        }
+
+        if (options.DownloadRowLimit <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.DownloadRowLimit,
+                "The download row limit must be greater than zero."
             );
         }
 
@@ -14293,18 +14581,36 @@ public sealed class TrackedSyncEngine
         {
             Mode = options.Mode,
             DownloadBatchSize = options.BatchSize,
+            DownloadRowLimit = options.DownloadRowLimit,
             PropagateDeletes = true,
             IncludeUnboundedBinary = options.IncludeUnboundedBinary,
         };
         var refresh = new TrackedSyncRefresh(BlankBinaries: !options.IncludeUnboundedBinary);
-        var first = await DownloadOnceAsync(scope, syncOptions, discards, true, null, cancellationToken, refresh)
+        var first = await DownloadOnceAsync(
+                scope,
+                syncOptions,
+                discards,
+                true,
+                null,
+                cancellationToken,
+                refresh,
+                chunkable: true
+            )
             .ConfigureAwait(false);
         var outcome = first;
 
         if (first.Truncations.Count > 0)
         {
             // The rows held back are fetched once more from the resume points the refresh left
-            var second = await DownloadOnceAsync(scope, syncOptions, [], true, null, cancellationToken)
+            var second = await DownloadOnceAsync(
+                    scope,
+                    syncOptions,
+                    [],
+                    true,
+                    null,
+                    cancellationToken,
+                    chunkable: true
+                )
                 .ConfigureAwait(false);
             outcome = new TrackedSyncDownload(
                 first.Downloaded + second.Downloaded,
@@ -14363,6 +14669,15 @@ public sealed class TrackedSyncEngine
                 nameof(options),
                 options.DownloadBatchSize,
                 "The download batch size must be greater than zero."
+            );
+        }
+
+        if (options.DownloadRowLimit <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.DownloadRowLimit,
+                "The download row limit must be greater than zero."
             );
         }
 
@@ -14999,7 +15314,15 @@ public sealed class TrackedSyncEngine
         CancellationToken cancellationToken
     )
     {
-        var first = await DownloadOnceAsync(scope, options, discards, fetch, changes, cancellationToken)
+        var first = await DownloadOnceAsync(
+                scope,
+                options,
+                discards,
+                fetch,
+                changes,
+                cancellationToken,
+                chunkable: true
+            )
             .ConfigureAwait(false);
 
         if (first.Truncations.Count == 0)
@@ -15008,7 +15331,7 @@ public sealed class TrackedSyncEngine
         }
 
         // The second pass does not discard again: the rows the first pass could not put back are marked and carried
-        var second = await DownloadOnceAsync(scope, options, [], fetch, changes, cancellationToken)
+        var second = await DownloadOnceAsync(scope, options, [], fetch, changes, cancellationToken, chunkable: true)
             .ConfigureAwait(false);
 
         return new TrackedSyncDownload(
@@ -15026,6 +15349,11 @@ public sealed class TrackedSyncEngine
     /// fetch, only the rows being discarded are put back, each read from the server by key. A refresh fetches every row
     /// from the start and reads no row by key: a row being discarded that the fetch did not bring only loses its change.
     /// </summary>
+    /// <remarks>
+    /// When <paramref name="chunkable"/> is set and the rows fetched go over <see cref="ChunkThreshold"/> while the run's
+    /// tables hold no unsent change (or over the download row limit with none), the rest of the download is applied a
+    /// chunk at a time instead (<see cref="ChunkedDownload"/>).
+    /// </remarks>
     private async Task<TrackedSyncDownload> DownloadOnceAsync(
         List<ITrackedSyncTable> scope,
         SyncOptions options,
@@ -15033,7 +15361,8 @@ public sealed class TrackedSyncEngine
         bool fetch,
         SyncLocalRowChangeLog? changes,
         CancellationToken cancellationToken,
-        TrackedSyncRefresh? refresh = null
+        TrackedSyncRefresh? refresh = null,
+        bool chunkable = false
     )
     {
         if (fetch && options.IncludeUnboundedBinary)
@@ -15057,14 +15386,117 @@ public sealed class TrackedSyncEngine
                 : await versioned.GetCeilingAsync(cancellationToken).ConfigureAwait(false);
         var plans = new List<TrackedSyncPlan>(scope.Count);
 
-        foreach (var table in scope)
+        // The rows fetched are counted across the tables; the first time the count goes over the limit the unsent
+        // changes are read once, and the run is refused before anything is applied when there are any
+        var fetchedRowCount = 0;
+        var limitChecked = false;
+
+        // A fetch past the chunk threshold reads the unsent changes once (a refresh leaves out the rows it discards): with
+        // none, the rest of the download is applied a chunk at a time
+        chunkable = chunkable && fetch;
+        var thresholdChecked = false;
+        ChunkedDownload? chunked = null;
+
+        for (var index = 0; index < scope.Count; index++)
         {
+            var table = scope[index];
             var anchor = table.IsVersionless || refresh is not null ? null : anchors.GetValueOrDefault(table.TableName);
-            var fetched = fetch
-                ? await table
-                    .FetchAsync(anchor, ceiling, options.DownloadBatchSize, options.PropagateDeletes, cancellationToken)
-                    .ConfigureAwait(false)
-                : new TrackedSyncFetch([], null);
+            var rows = new List<EntityBaseCore>();
+            IReadOnlySet<string>? serverKeys = null;
+
+            if (fetch)
+            {
+                await foreach (
+                    var page in table
+                        .FetchPagesAsync(anchor, ceiling, options.DownloadBatchSize, cancellationToken)
+                        .ConfigureAwait(false)
+                )
+                {
+                    if (chunked is not null)
+                    {
+                        await chunked.AddAsync(table, page, cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    rows.AddRange(page);
+                    fetchedRowCount += page.Count;
+
+                    if (chunkable && !thresholdChecked && fetchedRowCount > ChunkThreshold)
+                    {
+                        thresholdChecked = true;
+
+                        if (
+                            (
+                                await ReadUnsentInScopeAsync(scope, discards, refresh is not null, cancellationToken)
+                                    .ConfigureAwait(false)
+                            ).Count == 0
+                        )
+                        {
+                            chunked = await EnterChunkedDownloadAsync(
+                                    scope,
+                                    index,
+                                    plans,
+                                    rows,
+                                    refresh is null ? anchors : [],
+                                    options,
+                                    changes,
+                                    refresh,
+                                    discards,
+                                    cancellationToken
+                                )
+                                .ConfigureAwait(false);
+                            continue;
+                        }
+                    }
+
+                    if (!limitChecked && fetchedRowCount > options.DownloadRowLimit)
+                    {
+                        limitChecked = true;
+                        var unsent = await ReadUnsentInScopeAsync(
+                                scope,
+                                discards,
+                                refresh is not null,
+                                cancellationToken
+                            )
+                            .ConfigureAwait(false);
+
+                        if (unsent.Count > 0)
+                        {
+                            DownloadRouteObserved?.Invoke(TrackedSyncDownloadRoute.Refused);
+
+                            throw DownloadTooLarge(scope, unsent, fetchedRowCount, options.DownloadRowLimit);
+                        }
+
+                        if (chunkable)
+                        {
+                            chunked = await EnterChunkedDownloadAsync(
+                                    scope,
+                                    index,
+                                    plans,
+                                    rows,
+                                    refresh is null ? anchors : [],
+                                    options,
+                                    changes,
+                                    refresh,
+                                    discards,
+                                    cancellationToken
+                                )
+                                .ConfigureAwait(false);
+                        }
+                    }
+                }
+
+                if (chunked is not null)
+                {
+                    await chunked.FinishTableAsync(table, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                if (options.PropagateDeletes)
+                {
+                    serverKeys = await table.FetchServerKeysAsync(cancellationToken).ConfigureAwait(false);
+                }
+            }
 
             // A row being discarded takes the server's row from what was fetched, or else is read from the server by key
             // (a row nobody else changed is not among the changes)
@@ -15077,7 +15509,7 @@ public sealed class TrackedSyncEngine
             {
                 var fetchedByKey = new Dictionary<string, EntityBaseCore>(StringComparer.Ordinal);
 
-                foreach (var row in fetched.Rows)
+                foreach (var row in rows)
                 {
                     var keyText = table.KeyText(table.KeyOf(row));
 
@@ -15100,12 +15532,29 @@ public sealed class TrackedSyncEngine
             }
 
             plans.Add(
-                new TrackedSyncPlan(table, fetched.Rows, fetched.ServerKeys, anchor)
+                new TrackedSyncPlan(table, rows, serverKeys, anchor)
                 {
                     Discards = tableDiscards,
                     Refresh = refresh,
                 }
             );
+        }
+
+        if (chunked is not null)
+        {
+            var chunkedOutcome = await chunked.FinishAsync(cancellationToken).ConfigureAwait(false);
+
+            if (options.IncludeUnboundedBinary)
+            {
+                await CopyOwedBinariesAsync(scope, cancellationToken).ConfigureAwait(false);
+            }
+
+            return chunkedOutcome;
+        }
+
+        if (fetch)
+        {
+            DownloadRouteObserved?.Invoke(TrackedSyncDownloadRoute.Single);
         }
 
         var outcome = await ApplyAsync(plans, options.IncludeUnboundedBinary, advanceAnchors: fetch, cancellationToken)
@@ -15125,6 +15574,158 @@ public sealed class TrackedSyncEngine
 
         return outcome;
     }
+
+    /// <summary>
+    /// Switches a fetch to applying a chunk at a time: takes the server keys of the tables not keyed yet (the table being
+    /// fetched and the ones after it, in order, when delete propagation is on), runs the delete propagation of every table
+    /// in a transaction of its own, and then applies the rows fetched so far as chunks, table by table.
+    /// </summary>
+    /// <remarks>
+    /// For a refresh, that transaction also does what a refresh does to the whole of each table: it forgets the rows
+    /// neither side holds, gives the unbounded binary columns up when the refresh does, settles the rows it discards that
+    /// the server no longer holds, and sets every table's resume point back to nothing fetched, from which the chunks move
+    /// it.
+    /// </remarks>
+    /// <param name="scope">The tables of the run.</param>
+    /// <param name="index">The position in <paramref name="scope"/> of the table being fetched.</param>
+    /// <param name="plans">The tables fetched in full so far, with their rows and server keys.</param>
+    /// <param name="rows">The rows of the table being fetched, so far.</param>
+    /// <param name="anchors">The resume points the fetch started from, by table name (empty for a refresh).</param>
+    /// <param name="options">The knobs for this run.</param>
+    /// <param name="changes">Where the rows the run changes on its own are noted (null for nowhere).</param>
+    /// <param name="refresh">The refresh the fetch belongs to (null for an ordinary download).</param>
+    /// <param name="discards">The rows the run discards (only a refresh enters with any).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    private async Task<ChunkedDownload> EnterChunkedDownloadAsync(
+        List<ITrackedSyncTable> scope,
+        int index,
+        List<TrackedSyncPlan> plans,
+        List<EntityBaseCore> rows,
+        Dictionary<string, byte[]?> anchors,
+        SyncOptions options,
+        SyncLocalRowChangeLog? changes,
+        TrackedSyncRefresh? refresh,
+        Dictionary<(string Table, string Key), TrackedSyncDiscard> discards,
+        CancellationToken cancellationToken
+    )
+    {
+        DownloadRouteObserved?.Invoke(TrackedSyncDownloadRoute.Chunked);
+        var chunked = new ChunkedDownload(this, anchors, options.IncludeUnboundedBinary, changes, refresh, discards);
+
+        if (options.PropagateDeletes)
+        {
+            var deletions = plans.Select(plan => chunked.DeletionPlan(plan.Table, plan.ServerKeys)).ToList();
+
+            // The keys of the table being fetched and of the ones after it are taken before the rest of their rows
+            for (var later = index; later < scope.Count; later++)
+            {
+                deletions.Add(
+                    chunked.DeletionPlan(
+                        scope[later],
+                        await scope[later].FetchServerKeysAsync(cancellationToken).ConfigureAwait(false)
+                    )
+                );
+            }
+
+            await chunked.ApplyDeletionsAsync(deletions, cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach (var plan in plans)
+        {
+            await chunked.AddAsync(plan.Table, plan.Rows, cancellationToken).ConfigureAwait(false);
+            await chunked.FinishTableAsync(plan.Table, cancellationToken).ConfigureAwait(false);
+        }
+
+        await chunked.AddAsync(scope[index], rows, cancellationToken).ConfigureAwait(false);
+
+        return chunked;
+    }
+
+    /// <summary>
+    /// Reads the unsent changes of the tables of the run (table and key text). The unsent rows of tables outside the run
+    /// are not counted. A run counts the rows it is about to discard as unsent; a refresh does not count the rows it
+    /// discards when forced, unless they were written again since (their change number is no longer the one the discard
+    /// was decided on, so the apply keeps them).
+    /// </summary>
+    /// <param name="scope">The tables of the run.</param>
+    /// <param name="discards">The rows the run discards.</param>
+    /// <param name="refreshing">Whether the run is a refresh.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    private async Task<HashSet<(string Table, string Key)>> ReadUnsentInScopeAsync(
+        List<ITrackedSyncTable> scope,
+        Dictionary<(string Table, string Key), TrackedSyncDiscard> discards,
+        bool refreshing,
+        CancellationToken cancellationToken
+    )
+    {
+        var unsent = new HashSet<(string Table, string Key)>();
+
+        await using (var connection = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false))
+        {
+            foreach (var row in await TrackedSyncState.ReadPendingAsync(connection, cancellationToken).ConfigureAwait(false))
+            {
+                var table = scope.FirstOrDefault(candidate =>
+                    string.Equals(candidate.TableName, row.TableName, StringComparison.Ordinal)
+                );
+
+                if (table is null)
+                {
+                    continue;
+                }
+
+                var key = (table.TableName, table.KeyText(table.KeyOfRaw(row.RawKey)));
+
+                // A refresh leaves out a row it discards when forced, only while the row is still at the change the
+                // discard was decided on: a row written again since is kept by the apply, so it is unsent
+                if (
+                    refreshing
+                    && discards.TryGetValue(key, out var discard)
+                    && discard.Sequence == row.ChangeSequence
+                )
+                {
+                    continue;
+                }
+
+                unsent.Add(key);
+            }
+        }
+
+        if (!refreshing)
+        {
+            foreach (var key in discards.Keys)
+            {
+                if (scope.Exists(table => string.Equals(table.TableName, key.Table, StringComparison.Ordinal)))
+                {
+                    unsent.Add(key);
+                }
+            }
+        }
+
+        return unsent;
+    }
+
+    /// <summary>The refusal of a fetch that went over the download row limit while the tables of the run held unsent changes.</summary>
+    /// <param name="scope">The tables of the run.</param>
+    /// <param name="unsent">The unsent changes of the tables of the run (<see cref="ReadUnsentInScopeAsync"/>).</param>
+    /// <param name="fetchedRowCount">The rows fetched so far.</param>
+    /// <param name="rowLimit">The limit the fetch went over.</param>
+    private static SyncDownloadTooLargeException DownloadTooLarge(
+        List<ITrackedSyncTable> scope,
+        HashSet<(string Table, string Key)> unsent,
+        int fetchedRowCount,
+        int rowLimit
+    ) =>
+        new(
+            fetchedRowCount,
+            rowLimit,
+            scope
+                .Select(table => new SyncPendingChange(
+                    table.TableName,
+                    unsent.Count(key => string.Equals(key.Table, table.TableName, StringComparison.Ordinal))
+                ))
+                .Where(change => change.Count > 0)
+                .ToList()
+        );
 
     /// <summary>
     /// Applies the fetched rows in one transaction. A foreign key violation rolls the attempt back and starts it again
@@ -15162,13 +15763,37 @@ public sealed class TrackedSyncEngine
                 // free for the server row that takes it
                 foreach (var plan in plans)
                 {
-                    run.States[plan.Table.TableName] = await TrackedSyncState
-                        .ReadRowsAsync(connection, plan.Table.TableName, plan.Table.KeyTextOfRaw, cancellationToken)
-                        .ConfigureAwait(false);
+                    if (plan.ReadsStatesByKey)
+                    {
+                        // Only the plan's own rows: the transaction reads nothing in proportion to the table
+                        var (states, rawKeys) = await TrackedSyncState
+                            .ReadRowsByKeyAsync(
+                                connection,
+                                plan.Table.TableName,
+                                QualifiedName(plan.Table),
+                                Identifier(plan.Table.LocalKeyColumnName),
+                                plan
+                                    .Rows.Select(plan.Table.KeyOf)
+                                    .Concat(plan.Discards.Values.Select(discard => discard.Key))
+                                    .ToList(),
+                                plan.Table.KeyTextOfRaw,
+                                cancellationToken
+                            )
+                            .ConfigureAwait(false);
+                        run.States[plan.Table.TableName] = states;
+                        run.KnowRawKeys(plan.Table, rawKeys);
+                    }
+                    else
+                    {
+                        run.States[plan.Table.TableName] = await TrackedSyncState
+                            .ReadRowsAsync(connection, plan.Table.TableName, plan.Table.KeyTextOfRaw, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+
                     await SettleDiscardsWithoutServerRowAsync(run, plan, cancellationToken).ConfigureAwait(false);
                     await PropagateDeletesAsync(run, plan, cancellationToken).ConfigureAwait(false);
 
-                    if (plan.Refresh is not null)
+                    if (plan.Refresh is not null && plan.RunsTableWideSteps)
                     {
                         await ForgetRowsGoneOnBothSidesAsync(run, plan, cancellationToken).ConfigureAwait(false);
                     }
@@ -15394,16 +16019,22 @@ public sealed class TrackedSyncEngine
 
         if (plan.Refresh is { BlankBinaries: true } && table.UnboundedBinaryColumnNames.Count > 0)
         {
-            // Every local row of the table loses its columns here, in the apply's transaction - also a row the refresh does
-            // not write (one the server changed after the ceiling) and a row written later by a fetch held back: what a row
-            // written afterwards brings carries no columns either. A row with an unsent change the refresh does not discard
-            // keeps them (it was written while the refresh ran)
-            var discarding = run.LiveDiscards[table.TableName];
-            var kept = states
-                .Where(pair => pair.Value.Dirty && !discarding.ContainsKey(pair.Key))
-                .Select(pair => pair.Value.RawKey)
-                .ToList();
-            await BlankLocalBinariesAsync(run.Connection, table, kept, cancellationToken).ConfigureAwait(false);
+            // Every local row of the table without an unsent change loses its columns here, in the apply's transaction - also
+            // a row the refresh does not write (one the server changed after the ceiling) and a row written later by a fetch
+            // held back: what a row written afterwards brings carries no columns either. A row with an unsent change keeps
+            // them: one the refresh does not discard (it was written while the refresh ran), and one being discarded that
+            // the server still holds - whether the server's row can be put over it is not known yet, so it stays as it is,
+            // columns and all, until the write that puts the server's row over it empties them (a row that cannot be placed
+            // stays unsent with its columns). The rows being discarded the server no longer holds were settled just before,
+            // so they are no longer unsent
+            await BlankLocalBinariesAsync(
+                    run.Connection,
+                    table,
+                    states.Values.Any(state => state.Dirty),
+                    null,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
             await TrackedSyncState
                 .ClearTableOwedAsync(run.Connection, table.TableName, cancellationToken)
                 .ConfigureAwait(false);
@@ -15411,16 +16042,30 @@ public sealed class TrackedSyncEngine
     }
 
     /// <summary>
-    /// Empties the unbounded binary columns of every local row of a table but the given ones: NULL in a column that allows
-    /// it, an empty value in a NOT NULL column (what a row written without the columns holds).
+    /// Empties the unbounded binary columns of the local rows of a table: NULL in a column that allows it, an empty value
+    /// in a NOT NULL column (what a row written without the columns holds).
     /// </summary>
+    /// <param name="connection">The apply's connection.</param>
+    /// <param name="table">The table.</param>
+    /// <param name="keepUnsent">
+    /// With no rows given: whether the rows the row state table marks as unsent keep their columns (false when the table
+    /// has none, which spares the look-up).
+    /// </param>
+    /// <param name="onlyRawKeys">The rows to empty, by key as stored; null for every row of the table.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     private static async Task BlankLocalBinariesAsync(
         DbConnection connection,
         ITrackedSyncTable table,
-        IReadOnlyList<object> keptRawKeys,
+        bool keepUnsent,
+        IReadOnlyList<object>? onlyRawKeys,
         CancellationToken cancellationToken
     )
     {
+        if (onlyRawKeys is { Count: 0 })
+        {
+            return;
+        }
+
         var notNull = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         await using (var info = connection.CreateCommand())
@@ -15442,8 +16087,7 @@ public sealed class TrackedSyncEngine
             }
         }
 
-        await using var blank = connection.CreateCommand();
-        blank.CommandText =
+        var update =
             "UPDATE "
             + QualifiedName(table)
             + " SET "
@@ -15453,34 +16097,80 @@ public sealed class TrackedSyncEngine
                     Identifier(column) + " = " + (notNull.Contains(column) ? "X''" : "NULL")
                 )
             );
+        var keyColumn = QualifiedName(table) + "." + Identifier(table.LocalKeyColumnName);
 
-        if (keptRawKeys.Count > 0)
+        if (onlyRawKeys is null)
         {
-            blank.CommandText +=
-                " WHERE "
-                + Identifier(table.LocalKeyColumnName)
-                + " NOT IN ("
-                + string.Join(", ", keptRawKeys.Select((_, index) => "@k" + index.ToString(CultureInfo.InvariantCulture)))
+            await using var blank = connection.CreateCommand();
+            blank.CommandText = update;
+
+            if (keepUnsent)
+            {
+                blank.CommandText += " WHERE " + NotUnsentCondition(keyColumn);
+                TrackedSyncState.AddParameter(blank, "@table", table.TableName);
+            }
+
+            await blank.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+
+            return;
+        }
+
+        for (var start = 0; start < onlyRawKeys.Count; start += MaxBlankedKeysPerStatement)
+        {
+            var count = Math.Min(MaxBlankedKeysPerStatement, onlyRawKeys.Count - start);
+            await using var blank = connection.CreateCommand();
+            blank.CommandText =
+                update
+                + " WHERE "
+                + keyColumn
+                + " IN ("
+                + string.Join(
+                    ", ",
+                    Enumerable.Range(0, count).Select(index => "@k" + index.ToString(CultureInfo.InvariantCulture))
+                )
                 + ")";
 
-            for (var index = 0; index < keptRawKeys.Count; index++)
+            for (var index = 0; index < count; index++)
             {
                 TrackedSyncState.AddParameter(
                     blank,
                     "@k" + index.ToString(CultureInfo.InvariantCulture),
-                    keptRawKeys[index]
+                    onlyRawKeys[start + index]
                 );
             }
-        }
 
-        await blank.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            await blank.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
+
+    /// <summary>The most keys <see cref="BlankLocalBinariesAsync"/> binds in one statement (well under SQLite's limit on the number of parameters).</summary>
+    private const int MaxBlankedKeysPerStatement = 500;
+
+    /// <summary>
+    /// The condition that is true for the rows of a synchronised table the row state table does not mark as unsent (the
+    /// statement binds the table's name as <c>@table</c>).
+    /// </summary>
+    /// <remarks>
+    /// The unsent rows are read from the row state table inside the statement (it stores each key as the table does), so
+    /// their number is never bound as parameters. The subquery does not refer to the outer row: it runs once, and each row
+    /// of the table is looked up in its result. Comparing the table's key column against the state table's untyped key
+    /// column row by row cannot use the state table's index, and reads every state row of the table for every row of the
+    /// table. A NULL among the keys would make the condition true for no row, so the subquery leaves NULL out. A row of
+    /// the table whose own key is NULL satisfies the condition only while the table has no unsent row.
+    /// </remarks>
+    /// <param name="quotedKeyColumn">The synchronised table's key column, quoted (and qualified where needed).</param>
+    internal static string NotUnsentCondition(string quotedKeyColumn) =>
+        quotedKeyColumn
+        + " NOT IN (SELECT s.\"key\" FROM "
+        + SyncLocalTracking.RowTableName
+        + " AS s WHERE s.table_name = @table AND s.dirty = 1 AND s.\"key\" IS NOT NULL)";
 
     /// <summary>
     /// Settles the rows of one table that <see cref="SyncConflictPolicy.ServerWins"/> is discarding: only the rows still at
     /// the change number read at the start of the run are discarded (a row written again in the meantime keeps its local
     /// content), and a row the server no longer has only loses its unsent change - the row itself is left to the delete
-    /// propagation.
+    /// propagation. After the chunks of a refresh that gives the unbounded binary columns up, such a row loses those
+    /// columns along with its change.
     /// </summary>
     private static async Task SettleDiscardsWithoutServerRowAsync(
         ApplyAttempt run,
@@ -15506,7 +16196,12 @@ public sealed class TrackedSyncEngine
 
         foreach (var (keyText, discard) in live)
         {
-            if (discard.Server is not null || run.Held.ContainsKey((table.TableName, keyText)))
+            // A plan that settles only the rows the server no longer holds leaves the others to the chunk that brings them
+            if (
+                discard.Server is not null
+                || run.Held.ContainsKey((table.TableName, keyText))
+                || plan.KeepsDiscardsTheServerHas && plan.ServerKeys is { } serverKeys && serverKeys.Contains(keyText)
+            )
             {
                 continue;
             }
@@ -15517,6 +16212,19 @@ public sealed class TrackedSyncEngine
                     .ClearDiscardedAsync(run.Connection, table.TableName, state.RawKey, cancellationToken)
                     .ConfigureAwait(false);
                 states[keyText] = state with { Dirty = false };
+
+                // After the chunks of a refresh that gives the unbounded binary columns up, a row being discarded that no
+                // chunk brought (the server changed it after the ceiling, or deleted it after its key was read) still
+                // holds the columns the transaction before the chunks left it: they go with its change, on this row alone
+                if (
+                    plan.Refresh is { BlankBinaries: true }
+                    && !plan.RunsTableWideSteps
+                    && table.UnboundedBinaryColumnNames.Count > 0
+                )
+                {
+                    await BlankLocalBinariesAsync(run.Connection, table, false, [state.RawKey], cancellationToken)
+                        .ConfigureAwait(false);
+                }
             }
 
             run.NoteDiscarded(table.TableName, keyText);
@@ -15646,25 +16354,37 @@ public sealed class TrackedSyncEngine
             remaining = deferred;
         }
 
-        if (remaining.Count == 0)
+        if (remaining.Count > 0)
         {
-            return;
+            // The rows left take values from one another (a swap or a rotation): they are deleted and inserted again
+            // together, and a row that still collides is held back
+            var stillHeld = await RotateAsync(run, table, remaining, owed, cancellationToken).ConfigureAwait(false);
+
+            foreach (var write in remaining)
+            {
+                if (stillHeld.Contains(write))
+                {
+                    run.UniqueHeld.Add((table.TableName, write.KeyText));
+                }
+                else
+                {
+                    run.Note(table, write);
+                }
+            }
         }
 
-        // The rows left take values from one another (a swap or a rotation): they are deleted and inserted again together,
-        // and a row that still collides is held back
-        var stillHeld = await RotateAsync(run, table, remaining, owed, cancellationToken).ConfigureAwait(false);
-
-        foreach (var write in remaining)
+        // A refresh that gives the unbounded binary columns up empties them on each row being discarded this apply put the
+        // server's row over (until then such a row kept them: it was still unsent). A row being discarded that could not be
+        // placed is left as it is - unsent, with its columns
+        if (plan.Refresh is { BlankBinaries: true } && table.UnboundedBinaryColumnNames.Count > 0)
         {
-            if (stillHeld.Contains(write))
-            {
-                run.UniqueHeld.Add((table.TableName, write.KeyText));
-            }
-            else
-            {
-                run.Note(table, write);
-            }
+            var replaced = writes
+                .Where(write =>
+                    write.Discard && write.State is not null && run.Written.Contains((table.TableName, write.KeyText))
+                )
+                .Select(write => write.State!.RawKey)
+                .ToList();
+            await BlankLocalBinariesAsync(run.Connection, table, false, replaced, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -15969,15 +16689,14 @@ public sealed class TrackedSyncEngine
             }
         }
 
-        if (!advanceAnchors || table.IsVersionless)
+        if (!advanceAnchors || table.IsVersionless || !plan.AdvancesAnchor)
         {
             return;
         }
 
         var anchor =
-            firstHeld == 0 ? plan.OldAnchor
-            : firstHeld > 0 ? table.VersionOf(plan.Rows[firstHeld - 1])
-            : plan.Rows.Count > 0 ? table.VersionOf(plan.Rows[^1])
+            firstHeld >= 0 ? plan.VersionBefore(firstHeld)
+            : plan.Rows.Count > 0 ? plan.ThroughVersion ?? table.VersionOf(plan.Rows[^1])
             : plan.OldAnchor;
 
         await TrackedSyncState
@@ -16322,6 +17041,336 @@ public sealed class TrackedSyncEngine
             ? Identifier(database) + "." + Identifier(table.LocalTableName)
             : Identifier(table.LocalTableName);
 
+    /// <summary>
+    /// A download applied a chunk at a time: each chunk - at most <see cref="ChunkSize"/> consecutive fetched rows of one
+    /// table, in fetch order - is applied in a transaction of its own with the parts of a single apply, and the rows a
+    /// chunk holds back are carried in memory to one last apply of them all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A chunk reads the row states of its own rows only, and gets no server keys (the delete propagation ran before the
+    /// first chunk). A row it holds back - for a missing parent, for a unique value, or as an unsent local row under a key
+    /// the server does not know - is not written; it is carried, together with the version just before it in fetch order.
+    /// </para>
+    /// <para>
+    /// A chunk moves its table's resume point while the table carries no row: to the last row it wrote or skipped, or to
+    /// just before the first row it holds back. Once the table carries a row, the later chunks leave the resume point there,
+    /// so a run that stops half-way fetches the carried rows again (the rows written after them come back as echoes).
+    /// </para>
+    /// <para>
+    /// The last apply writes the carried rows of every table in one transaction, the way a single apply writes a download,
+    /// so a cycle or a swap of unique values across chunks is settled there. It moves the resume point of each table it
+    /// writes to the table's last fetched version, or to just before the first row it still holds back; those rows are the
+    /// download's truncations.
+    /// </para>
+    /// <para>
+    /// A refresh does what it does to the whole of a table in the transaction before the first chunk, which also sets
+    /// every table's resume point back to nothing fetched; its chunks rewrite every row (none is skipped as an echo) and
+    /// put the server's row over a row it discards in the chunk that brings it. The last apply also settles the rows it
+    /// discards that neither a chunk brought nor that transaction settled (the server held them then): they only lose
+    /// their change.
+    /// </para>
+    /// </remarks>
+    /// <param name="engine">The engine applying the download.</param>
+    /// <param name="anchors">The resume points the fetch started from, by table name (empty for a refresh).</param>
+    /// <param name="owesBinaries">Whether the rows written owe their unbounded binary columns.</param>
+    /// <param name="changes">Where the rows the run changes on its own are noted, right after each commit (null for nowhere).</param>
+    /// <param name="refresh">The refresh the download belongs to (null for an ordinary download).</param>
+    /// <param name="discards">The rows the run discards (only a refresh has any here).</param>
+    private sealed class ChunkedDownload(
+        TrackedSyncEngine engine,
+        Dictionary<string, byte[]?> anchors,
+        bool owesBinaries,
+        SyncLocalRowChangeLog? changes,
+        TrackedSyncRefresh? refresh,
+        Dictionary<(string Table, string Key), TrackedSyncDiscard> discards
+    )
+    {
+        /// <summary>The discards of each table the server held when the transaction before the first chunk ran, by table name.</summary>
+        private readonly Dictionary<string, HashSet<string>> _discardsTheServerHad = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// The plan of one table for the transaction before the first chunk: its server keys (the delete propagation),
+        /// and for a refresh what it does to the whole table and its discards, settling those the server no longer holds.
+        /// </summary>
+        public TrackedSyncPlan DeletionPlan(ITrackedSyncTable table, IReadOnlySet<string>? serverKeys)
+        {
+            var tableDiscards = DiscardsOf(table, keyText => true, keyText => null);
+
+            if (serverKeys is not null)
+            {
+                _discardsTheServerHad[table.TableName] = tableDiscards
+                    .Keys.Where(serverKeys.Contains)
+                    .ToHashSet(StringComparer.Ordinal);
+            }
+
+            return new TrackedSyncPlan(table, [], serverKeys, null)
+            {
+                Refresh = refresh,
+                Discards = tableDiscards,
+                KeepsDiscardsTheServerHas = true,
+            };
+        }
+
+        /// <summary>The discards of a table whose key text the filter takes, each with the server row the lookup gives.</summary>
+        private Dictionary<string, TrackedSyncPlanDiscard> DiscardsOf(
+            ITrackedSyncTable table,
+            Func<string, bool> takes,
+            Func<string, EntityBaseCore?> server
+        )
+        {
+            var found = new Dictionary<string, TrackedSyncPlanDiscard>(StringComparer.Ordinal);
+
+            foreach (var ((tableName, keyText), discard) in discards)
+            {
+                if (string.Equals(tableName, table.TableName, StringComparison.Ordinal) && takes(keyText))
+                {
+                    found[keyText] = new TrackedSyncPlanDiscard(discard.Key, discard.Sequence, server(keyText));
+                }
+            }
+
+            return found;
+        }
+        /// <summary>Each table's progress, by table name.</summary>
+        private readonly Dictionary<string, TableProgress> _progress = new(StringComparer.Ordinal);
+
+        /// <summary>The tables in the order they were first given (the run's order).</summary>
+        private readonly List<TableProgress> _order = [];
+
+        /// <summary>The local rows the applies changed on their own, in order.</summary>
+        private readonly List<SyncLocalRowChange> _changes = [];
+
+        /// <summary>The rows deleted and written in each table by every apply so far.</summary>
+        private readonly Dictionary<string, (int Deleted, int Written)> _perTable = new(StringComparer.Ordinal);
+
+        private int _downloaded;
+        private int _deletedLocally;
+        private int _discarded;
+
+        /// <summary>
+        /// Runs the delete propagation of every table in one transaction (no row is written). The resume points do not move,
+        /// except that a refresh sets them back to nothing fetched.
+        /// </summary>
+        public async Task ApplyDeletionsAsync(List<TrackedSyncPlan> plans, CancellationToken cancellationToken) =>
+            Take(
+                await engine
+                    .ApplyAsync(plans, owesBinaries, advanceAnchors: refresh is not null, cancellationToken)
+                    .ConfigureAwait(false)
+            );
+
+        /// <summary>Adds fetched rows of a table, applying a chunk each time the table's buffer is full.</summary>
+        public async Task AddAsync(
+            ITrackedSyncTable table,
+            IReadOnlyList<EntityBaseCore> rows,
+            CancellationToken cancellationToken
+        )
+        {
+            var progress = ProgressOf(table);
+
+            foreach (var row in rows)
+            {
+                progress.Buffer.Add(new CarriedRow(row, progress.LastVersion));
+                progress.LastVersion = table.VersionOf(row);
+                progress.Fetched.Add(table.KeyText(table.KeyOf(row)));
+
+                if (progress.Buffer.Count >= engine.ChunkSize)
+                {
+                    await FlushAsync(progress, cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+
+        /// <summary>Applies what is left in the table's buffer once its rows are all fetched (a chunk never spans tables).</summary>
+        public Task FinishTableAsync(ITrackedSyncTable table, CancellationToken cancellationToken) =>
+            FlushAsync(ProgressOf(table), cancellationToken);
+
+        /// <summary>
+        /// Applies the carried rows of every table in one transaction (with a refresh's discards no chunk brought), and
+        /// returns what the whole download did.
+        /// </summary>
+        public async Task<TrackedSyncDownload> FinishAsync(CancellationToken cancellationToken)
+        {
+            var plans = new List<TrackedSyncPlan>();
+
+            foreach (var progress in _order)
+            {
+                var table = progress.Table;
+                var carriedKeys = progress
+                    .Carried.Select(carried => table.KeyText(table.KeyOf(carried.Row)))
+                    .ToHashSet(StringComparer.Ordinal);
+                var serverHad = _discardsTheServerHad.GetValueOrDefault(table.TableName);
+
+                // A carried row being discarded takes its fetched row; a discard the server held but no chunk brought only
+                // loses its change (and, in a refresh that gives the unbounded binary columns up, those columns)
+                var tableDiscards = DiscardsOf(
+                    table,
+                    keyText =>
+                        carriedKeys.Contains(keyText)
+                        || serverHad is not null && serverHad.Contains(keyText) && !progress.Fetched.Contains(keyText),
+                    keyText =>
+                        progress
+                            .Carried.FirstOrDefault(carried =>
+                                string.Equals(table.KeyText(table.KeyOf(carried.Row)), keyText, StringComparison.Ordinal)
+                            )
+                            ?.Row
+                );
+
+                if (progress.Carried.Count == 0 && tableDiscards.Count == 0)
+                {
+                    continue;
+                }
+
+                plans.Add(
+                    new TrackedSyncPlan(
+                        table,
+                        progress.Carried.Select(carried => carried.Row).ToList(),
+                        null,
+                        progress.Carried.Count > 0 ? progress.Carried[0].Before : null
+                    )
+                    {
+                        Refresh = refresh,
+                        Discards = tableDiscards,
+                        ReadsStatesByKey = true,
+                        RunsTableWideSteps = false,
+                        AdvancesAnchor = progress.Carried.Count > 0,
+                        BeforeVersions = progress.Carried.Select(carried => carried.Before).ToList(),
+                        ThroughVersion = progress.LastVersion,
+                    }
+                );
+            }
+
+            IReadOnlyList<SyncDownloadTruncation> truncations = [];
+
+            if (plans.Count > 0)
+            {
+                if (plans.Sum(plan => plan.Rows.Count) is var carriedRows and > 0)
+                {
+                    engine.CarriedRowsApplied?.Invoke(carriedRows);
+                }
+
+                var outcome = await engine
+                    .ApplyAsync(plans, owesBinaries, advanceAnchors: true, cancellationToken)
+                    .ConfigureAwait(false);
+                Take(outcome);
+                truncations = outcome.Truncations;
+            }
+
+            return new TrackedSyncDownload(_downloaded, _deletedLocally, truncations)
+            {
+                Discarded = _discarded,
+                Changes = _changes,
+                PerTable = _perTable,
+            };
+        }
+
+        /// <summary>Applies the table's buffered rows as one chunk, and carries the rows it held back.</summary>
+        private async Task FlushAsync(TableProgress progress, CancellationToken cancellationToken)
+        {
+            if (progress.Buffer.Count == 0)
+            {
+                return;
+            }
+
+            var table = progress.Table;
+            var chunk = progress.Buffer.ToList();
+            progress.Buffer.Clear();
+
+            var rowsByKey = chunk.ToDictionary(
+                carried => table.KeyText(table.KeyOf(carried.Row)),
+                carried => carried.Row,
+                StringComparer.Ordinal
+            );
+            var plan = new TrackedSyncPlan(table, chunk.Select(carried => carried.Row).ToList(), null, chunk[0].Before)
+            {
+                Refresh = refresh,
+                Discards = DiscardsOf(table, rowsByKey.ContainsKey, keyText => rowsByKey[keyText]),
+                ReadsStatesByKey = true,
+                RunsTableWideSteps = false,
+                AdvancesAnchor = progress.Carried.Count == 0,
+            };
+            var outcome = await engine
+                .ApplyAsync([plan], owesBinaries, advanceAnchors: true, cancellationToken)
+                .ConfigureAwait(false);
+            Take(outcome);
+
+            var held = outcome
+                .Truncations.Where(truncation =>
+                    string.Equals(truncation.TableName, table.TableName, StringComparison.Ordinal)
+                )
+                .Select(truncation => truncation.PendingKeyText)
+                .ToHashSet(StringComparer.Ordinal);
+
+            foreach (var carried in chunk)
+            {
+                if (held.Contains(table.KeyText(table.KeyOf(carried.Row))))
+                {
+                    progress.Carried.Add(carried);
+                }
+            }
+        }
+
+        /// <summary>Adds what one committed apply did to the totals, and notes the rows it changed on its own.</summary>
+        private void Take(TrackedSyncDownload outcome)
+        {
+            _downloaded += outcome.Downloaded;
+            _deletedLocally += outcome.DeletedLocally;
+            _discarded += outcome.Discarded;
+
+            foreach (var change in outcome.Changes)
+            {
+                _changes.Add(change);
+                changes?.Add(change.TableName, change.KeyText, change.Reason);
+            }
+
+            foreach (var (tableName, (deleted, written)) in outcome.PerTable)
+            {
+                var sum = _perTable.GetValueOrDefault(tableName);
+                _perTable[tableName] = (sum.Deleted + deleted, sum.Written + written);
+            }
+        }
+
+        /// <summary>The progress of a table, created the first time the table is given.</summary>
+        private TableProgress ProgressOf(ITrackedSyncTable table)
+        {
+            if (!_progress.TryGetValue(table.TableName, out var progress))
+            {
+                progress = new TableProgress(table)
+                {
+                    LastVersion =
+                        table.IsVersionless || refresh is not null ? null : anchors.GetValueOrDefault(table.TableName),
+                };
+                _progress[table.TableName] = progress;
+                _order.Add(progress);
+            }
+
+            return progress;
+        }
+
+        /// <summary>One table's rows waiting for their chunk, the rows it carries, and the version last fetched.</summary>
+        private sealed class TableProgress(ITrackedSyncTable table)
+        {
+            /// <summary>The table.</summary>
+            public ITrackedSyncTable Table { get; } = table;
+
+            /// <summary>The fetched rows waiting for their chunk, in fetch order.</summary>
+            public List<CarriedRow> Buffer { get; } = [];
+
+            /// <summary>The rows the chunks held back, in fetch order.</summary>
+            public List<CarriedRow> Carried { get; } = [];
+
+            /// <summary>The key texts of every row fetched for the table.</summary>
+            public HashSet<string> Fetched { get; } = new(StringComparer.Ordinal);
+
+            /// <summary>The version of the last fetched row (the resume point the fetch started from before any row).</summary>
+            public byte[]? LastVersion { get; set; }
+        }
+
+        /// <summary>A fetched row and the version just before it in fetch order.</summary>
+        /// <param name="Row">The server row.</param>
+        /// <param name="Before">The version of the row fetched just before it in its table (the resume point the fetch started from for the first row).</param>
+        private sealed record CarriedRow(EntityBaseCore Row, byte[]? Before);
+    }
+
     /// <summary>What one apply attempt has done so far, on its connection.</summary>
     private sealed class ApplyAttempt(
         DbConnection connection,
@@ -16359,6 +17408,13 @@ public sealed class TrackedSyncEngine
 
         /// <summary>The raw keys of each table's rows read so far, by key text.</summary>
         private readonly Dictionary<string, Dictionary<string, object>> _rawKeys = new(StringComparer.Ordinal);
+
+        /// <summary>The raw keys of the rows of a plan read by key, by table name and key text (read before every table's keys).</summary>
+        private readonly Dictionary<string, Dictionary<string, object>> _knownRawKeys = new(StringComparer.Ordinal);
+
+        /// <summary>Records the raw keys of a plan's rows, read with their row states, so that no write needs every key of the table.</summary>
+        public void KnowRawKeys(ITrackedSyncTable table, Dictionary<string, object> rawKeys) =>
+            _knownRawKeys[table.TableName] = rawKeys;
 
         /// <summary>The rows ServerWins discards in this attempt, by table name and key text (still at the change number read).</summary>
         public Dictionary<string, Dictionary<string, TrackedSyncPlanDiscard>> LiveDiscards { get; } =
@@ -16422,6 +17478,14 @@ public sealed class TrackedSyncEngine
                 }
             }
 
+            if (
+                _knownRawKeys.TryGetValue(table.TableName, out var known)
+                && known.TryGetValue(keyText, out var knownRawKey)
+            )
+            {
+                return knownRawKey;
+            }
+
             if (!_rawKeys.TryGetValue(table.TableName, out var keys))
             {
                 keys = new Dictionary<string, object>(StringComparer.Ordinal);
@@ -16467,6 +17531,53 @@ internal sealed record TrackedSyncPlan(
 
     /// <summary>The refresh the plan belongs to (null for an ordinary download).</summary>
     public TrackedSyncRefresh? Refresh { get; init; }
+
+    /// <summary>Whether the apply reads the row states of the plan's rows and discards only (by key), rather than every row state of the table.</summary>
+    public bool ReadsStatesByKey { get; init; }
+
+    /// <summary>
+    /// Whether a refresh's apply does what it does to the whole of the table (forgets the rows neither side holds, gives
+    /// the unbounded binary columns up); false for a chunk, whose download did that before its first chunk.
+    /// </summary>
+    public bool RunsTableWideSteps { get; init; } = true;
+
+    /// <summary>
+    /// Whether the apply settles only the discards the server no longer holds (their keys are not in
+    /// <see cref="ServerKeys"/>), leaving the others to the chunk that brings their server rows.
+    /// </summary>
+    public bool KeepsDiscardsTheServerHas { get; init; }
+
+    /// <summary>Whether the apply saves the table's resume point (when the apply moves resume points at all).</summary>
+    public bool AdvancesAnchor { get; init; } = true;
+
+    /// <summary>
+    /// The version just before each row, in the same order as <see cref="Rows"/> (null: the version of the row before it,
+    /// and <see cref="OldAnchor"/> for the first).
+    /// </summary>
+    public IReadOnlyList<byte[]?>? BeforeVersions { get; init; }
+
+    /// <summary>The version the resume point moves to when no row is held back (null: the version of the last row).</summary>
+    public byte[]? ThroughVersion { get; init; }
+
+    /// <summary>The version just before the row at the index (where the resume point stops when that row is held back).</summary>
+    /// <param name="index">The row's index in <see cref="Rows"/>.</param>
+    public byte[]? VersionBefore(int index) =>
+        BeforeVersions is { } before ? before[index]
+        : index == 0 ? OldAnchor
+        : Table.VersionOf(Rows[index - 1]);
+}
+
+/// <summary>How one fetch of a run is applied, once that is decided.</summary>
+internal enum TrackedSyncDownloadRoute
+{
+    /// <summary>Every fetched row is applied in one transaction.</summary>
+    Single,
+
+    /// <summary>The fetched rows are applied a chunk at a time.</summary>
+    Chunked,
+
+    /// <summary>The fetch went over the download row limit while the run's tables held unsent changes, and is refused.</summary>
+    Refused,
 }
 
 /// <summary>How a refresh writes the rows it fetched.</summary>

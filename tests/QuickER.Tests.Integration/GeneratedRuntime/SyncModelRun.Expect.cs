@@ -707,6 +707,23 @@ internal sealed partial class SyncModelRun
                 );
                 break;
 
+            case SyncDownloadTooLargeException tooLarge:
+                lines.Add(
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"row-limit fetched={tooLarge.FetchedRowCount} limit={tooLarge.RowLimit} pending-count={tooLarge.PendingCount}"
+                    )
+                );
+                lines.AddRange(
+                    tooLarge.PendingChanges.Select(p =>
+                        string.Create(
+                            CultureInfo.InvariantCulture,
+                            $"pending {p.TableName} count={p.Count}"
+                        )
+                    )
+                );
+                break;
+
             case SyncRefreshScopeException scope:
                 lines.AddRange(
                     scope.References.Select(r =>

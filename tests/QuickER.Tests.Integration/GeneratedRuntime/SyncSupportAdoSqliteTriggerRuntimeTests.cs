@@ -131,6 +131,17 @@ public sealed class SyncSupportAdoSqliteTriggerRuntimeTests
                     $"行 {id} の記録したキー {row.Table}/{row.KeyText} で元の表を引き直せる（送る行は 1 行・削除は 0 行）"
                 );
         }
+
+        // エンジンが「未送信の行を残す」ときの条件（製品の NOT IN の形）でも、記録した行がちょうど残る
+        foreach (var table in rows.Select(r => r.Table).Distinct())
+        {
+            (await harness.CountRowsKeptAsUnsentAsync(table, Ct))
+                .Should()
+                .Be(
+                    rows.Count(r => r.Table == table && r.Dirty == 1 && r.Deleted == 0),
+                    $"行 {id} の表 {table} で、製品の未送信の行を外す条件が、記録した送る行だけを残す（実際：{actualText}）"
+                );
+        }
     }
 
     [Theory(

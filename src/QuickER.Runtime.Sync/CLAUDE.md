@@ -566,21 +566,87 @@
 
 - 拒否の順は、引数（取得の大きさ・除外の型）→ blob の損失 → 範囲の外からの参照 → 未送信（`Force` で捨てる）。`Force` で抜けられない拒否を先に出し、どれも何も変えない。
 - 表を空にせず、上限までのサーバーの行で置き換える（同じ適用でサーバーに無い行を消す）。件数は、消した行（サーバーに無かった行）・書いた行・捨てた未送信の行を数える。
-- blob を捨てる洗い替えは、範囲の表の全行の除外した無制限バイナリ列を適用の中で空にし（NOT NULL の列は空の値、ほかは NULL）、写し待ちを消す。洗い替えが捨てない未送信の行だけは残す。
+- blob を捨てる洗い替えは、範囲の表の、未送信の無い全行の除外した無制限バイナリ列を適用の中で空にし（NOT NULL の列は空の値、ほかは NULL）、写し待ちを消す。未送信の行は、行の状態の表の印で文の中から外す（未送信の行の数をパラメータに束縛しない）。
+  - 未送信の行を外す条件は `TrackedSyncEngine.NotUnsentCondition` の 1 か所が組む：`<表のキーの列> NOT IN (SELECT s."key" FROM quicker_sync_row AS s WHERE s.table_name = @table AND s.dirty = 1 AND s."key" IS NOT NULL)`。
+    - 行の状態の表のキーは、トリガーが表のキーの列の値をそのまま写した値（キーのテキストではない）なので、格納の型ごと同じ値どうしの比較になる。比較の左辺は表のキーの列で、親和性と照合順序は表の列のもの。
+    - 副問い合わせは表の行に依らない形にする（1 回だけ流れて、表の行ごとには結果を引くだけ）。表のキーの列と状態の表のキーを行ごとに比べる形（`NOT EXISTS (… <表のキーの列> = s."key")`）にしない。状態の表のキーの列は型の宣言が無く、比較のたびに数の親和性が当たるので、状態の表の主キーの索引をキーで引けない。表の行ごとにその表の状態の行を全部読み、10 万行の表で未送信が 1 行でもあると洗い替えが数分かかって、その間ほかの接続の書き込みが待ち切れずに失敗する。
+    - `IS NOT NULL` は外さない（`NOT IN` の相手に NULL が混ざると、どの行にも真にならない）。QuickER の DDL は主キーの列を NOT NULL で作るので、状態の表のキーが NULL になるのは、主キーに NULL を許す手書きの表のときだけ。
+    - この条件で記録した送る行だけが残ることは、`table:SyncTriggerRecording` の全行に共通の表明（`SyncTriggerHarness.CountRowsKeptAsUnsentAsync`＝製品の条件をそのまま使う）が、整数・テキスト（文字列・日時）・値オブジェクト・実数（行 `real-stored-key-insert-and-update`）・blob（行 `blob-stored-key-insert-and-update`）で格納するキーについて見る。条件の形（表の行ごとに流し直す副問い合わせが無い）は、`SyncEngineFixedRows` の行 `unsent-rows-condition-reads-state-table-once` が実行計画で見る。
+  - 洗い替えが捨てない未送信の行（洗い替えの間に書かれた行）は、blob を残す。
+  - `Force` で捨てる行のうち、サーバーに行の無いものは、先に未送信を外しているので一緒に空になる。サーバーに行のあるものは、サーバーの行を置けるかがこの時点ではまだ分からないので残し、その適用がサーバーの行に置き換えた時点で、置き換えた行の除外列だけを空にする（`WriteRowsAsync` の終わり。回転で入れ直した行にも効くよう回転の後）。
+  - 置けなかった捨てる行（そのサーバーの一意な値を、洗い替えが置き換えない端末の行が持つ）は、行も blob も触らず、未送信のまま残す。先に空にすると、未送信の記録（blob の書き込みを含む）だけが残り、その行を端末がもう一度書いた後の同期が、空の blob をサーバーへ送ってサーバーの blob を消す。
 - 端末とサーバーの両方に無い行の状態を消す（残すと、同じキーで作った行を更新として送り、MissingOnServer になる）。
+- ここまでの「1 つの適用で全部」「取得の失敗は端末を前のまま残す」は、1 回で全部の道（降ろす行が塊の閾値以下か、捨てる行以外の未送信がある洗い替え）の性質。降ろす行が閾値を超える洗い替えは塊ごとに確定し、全部か無しかでない（「新しいエンジンの塊ごとに確定する経路」）。
 - 保留で取り残した行は、もう 1 回の取得で取り直す。取り直しても残れば `InvalidOperationException`。取得の失敗は、端末・未送信・行の状態の表を洗い替えの前のまま残す。もう 1 回の取得は上限を取り直すので、上限を実行の始めに固定するサーバーでも、最初の取得の後に変わった保留の相手の行が同じ洗い替えに入る（ガード：`SyncSupportAdoSqlServerEngineRuntimeTests.CeilingScenario_MatchesDirect` の割り込みの網の行 `interrupt-server-BeforeServerFetch-unique-holder-after-taker-update-*-refresh` の族＝エンジンの宣言 `RefetchesHeldRowsInSameRun` の真の枝）。
-- ガード：控えの `refresh-*`・`blob-refresh-*` の行（`refresh-refusal-order-outside-reference-before-pending`・`refresh-refusal-order-blob-loss-before-outside-reference`・`refresh-force-forgets-row-gone-on-both-sides-and-same-key-is-inserted`・`blob-refresh-discard-leaves-no-blob-on-row-changed-after-ceiling` ほか）・`SyncEngineFixedRows`（行 `refresh-fetch-failure-leaves-device-as-before`・`invalid-arguments-refuse-before-anything`）。
+- ガード：控えの `refresh-*`・`blob-refresh-*` の行（`refresh-refusal-order-outside-reference-before-pending`・`refresh-refusal-order-blob-loss-before-outside-reference`・`refresh-force-forgets-row-gone-on-both-sides-and-same-key-is-inserted`・`blob-refresh-discard-leaves-no-blob-on-row-changed-after-ceiling` ほか）・`SyncEngineFixedRows`（行 `refresh-fetch-failure-leaves-device-as-before`・`invalid-arguments-refuse-before-anything`・`refresh-force-discard-blobs-discard-held-back-is-not-left-unsent-with-empty-blob`・`unsent-rows-condition-reads-state-table-once`）。blob を空にする処理は mutation 実証済み（表の全体の処理で、置けるかが分かる前に捨てる行の blob も空にする・1 回で全部の道で置き換えた捨てる行の blob を空にしない・未送信の行の blob も空にする・行の状態の表の未送信の印を見ずに状態の行があれば残す・未送信の行を外す条件を行ごとに状態の表を引く形にする、のそれぞれで対応する行が赤。条件の `IS NOT NULL` を外す変異は赤にならない＝状態の表のキーが NULL になる表を QuickER の DDL は作らない）。
+
+### 新しいエンジンの取得と降ろす行の上限
+
+- 取得は表ごとにページを 1 つずつ流す（`ITrackedSyncTable.FetchPagesAsync`）。サーバーの全キーは別の呼び出し（`FetchServerKeysAsync`）で、削除伝搬を使う実行だけが取る。
+  - サーバーの差分ソースへの呼び出しの順は「表ごとに、行のページを全部取ってから、その表のキー」。同期のモデルの割り込みの点と失敗の注入がこの順に依るので、変えない。
+- 1 回の取得と適用（`DownloadOnceAsync`）ごとに、取得した行を範囲の表の全部を通して数える（版なしの表の行も数える）。
+- 合計が `DownloadRowLimit`（`SyncOptions`・`SyncRefreshOptions`。既定 300,000）を初めて超えた時点で 1 回だけ、範囲の表の未送信の行を読む（`ReadUnsentInScopeAsync`）。未送信があれば、適用の前に `SyncDownloadTooLargeException`（取得した行数・上限・表ごとの未送信の行の数）で断る。
+  - 断った実行は取得した行を捨て、端末の行・行の状態の表・再開点を変えない。取得の前の blob の写しと、同期の送信の段は、断る前に流れている。
+  - 同期と受信だけの実行は、その実行が ServerWins で捨てる行も未送信に数える。洗い替えは `Force` で捨てる行を数えない（数えると、例外の文が抜け出す道に挙げる「`Force` の洗い替え」が同じ例外で断られる）。洗い替えで数えられるのは、洗い替えの途中に端末で書かれた未送信だけ。
+  - 洗い替えが捨てる行を外すのは、行の連番が捨てると決めたときのまま（`TrackedSyncDiscard.Sequence` と同じ）のときだけ。捨てると決めた後に端末で書き直された行は、適用も捨てずに残す（連番で見分ける）ので、未送信に数える。キーだけで外すと、その書き直しがあっても上限を超えた洗い替えが断られない。
+  - 範囲の外の表の未送信は数えない。上限ちょうどは断らない（断るのは超えたとき）。
+  - 未送信が無ければ、塊ごとに確定する経路へ入る（下の節）。
+- 今のエンジン（`SyncEngine`）は `DownloadRowLimit` を読まない。
+- ガード：同期のモデルの決定的なシナリオ（`SyncModelRuntimeTests` の行 `dl-row-limit-exceeded-with-unsent-change-refuses-and-applies-nothing`・`dl-row-limit-exceeded-after-upload-applies-everything`・`dl-row-limit-equal-to-fetched-rows-is-not-refused`・`refresh-force-over-row-limit-discards-unsent-and-is-not-refused`）・`SyncEngineFixedRows`（行 `refresh-over-row-limit-with-change-written-during-fetch-is-refused`・`refresh-force-over-row-limit-with-discarded-key-rewritten-during-fetch-is-refused`）。mutation 実証済み（未送信があっても断らない・未送信が無くても断る・「超えたら」を「以上なら」にする・洗い替えでも捨てる行を未送信に数える・洗い替えのときは断らない・洗い替えが捨てる行をキーだけで外す・行を表ごとに数え直す、のそれぞれで対応する行が赤）。
+
+### 新しいエンジンの塊ごとに確定する経路
+
+同期・受信だけの実行・洗い替えは、降ろす行が多く、範囲の表に未送信が無いとき、適用を 1 つのトランザクションにせず、塊ごとに確定する。1 回で全部の適用は、行の数に比例してメモリを持ち、その間ずっと書き込みのロックを持つため。
+
+- 道の決め方（1 回の取得と適用ごと。`DownloadOnceAsync`）：
+  - 取得した行の合計が閾値（`TrackedSyncEngine.ChunkThreshold`・internal・既定 50,000）を初めて超えた時点で、範囲の表の未送信を 1 回読む（上限の判定と同じ `ReadUnsentInScopeAsync`。同期はその実行が ServerWins で捨てる行も未送信に数え、洗い替えは `Force` で捨てる行を、連番が捨てると決めたときのままなら数えない）。無ければ塊の経路へ入る。洗い替えの 2 回目の取得（保留が残ったときの再開点からの取得）も同じ入口を通る。
+  - 未送信があれば、行をためて 1 回で全部の道を続ける。上限（`DownloadRowLimit`）を超えた時点でもう 1 回読み、あれば断り、無ければそこで塊の経路へ入る。
+  - 未送信のある同期は塊に入らないので、未送信の行の規則（ServerWins が捨てる記録・戻せなかった行の決定の持ち越し）は同期の塊の経路に現れない。塊の経路が捨てる行を持つのは、`Force` の洗い替えだけ。
+  - 閾値・塊の大きさ（`ChunkSize`・既定 10,000）・道を知らせる口（`DownloadRouteObserved`）・最後の段の持ち越しの行数を知らせる口（`CarriedRowsApplied`）は internal で、テストだけが使う。公開の面には無い。
+- 進み方：
+  - 入口（`EnterChunkedDownloadAsync`）：まだキーを取っていない表（いま行を取っている表とその後ろの表）のサーバーのキーを表の順に取り、削除の段を流し、それまでにためた行を表の順に塊として流す。
+  - 削除の段：範囲の全部の表を「行なし・キーつき」の計画にして、1 つのトランザクションで今の適用（`ApplyAsync`）に通す（削除伝搬と、外部キーの違反なら親を残すやり直し）。行は書かず、再開点は進めない。削除伝搬を使わない実行では流さない。
+  - 塊の段（`ChunkedDownload`）：表ごとに、塊の大きさの行がたまるか表の行を取り終えたら、その行だけの計画を `ApplyAsync` に 1 回通す（1 塊＝1 トランザクション。塊は表をまたがない）。行の状態は塊の行のキーの分だけ読み（`TrackedSyncState.ReadRowsByKeyAsync`）、表の全行・全キーを読まない。表の大きさに比例するのは、DB 全体の外部キーの確かめだけ。
+  - 持ち越し：塊の適用が保留にした行（親が無い・一意な値が空かない・サーバーが知らないキーの未送信のローカル行）は、書かずにメモリへ持ち越す。行は「取得の順でその手前の版」を連れる。
+  - 塊ごとの再開点：その表に持ち越しが無い間は、塊の最後の行（か最初に保留した行の手前）まで進める。持ち越しがある表は、最初に持ち越した行の手前で止めたままにする（`TrackedSyncPlan.AdvancesAnchor`）。後ろの塊を書いても進めない。
+  - 最後の段：持ち越した行の全部を、表の順の計画にして `ApplyAsync` に 1 回通す（1 回で全部の適用と同じ部品。塊をまたぐ循環と一意な値の入れ替えは、両方の行がこのトランザクションに入るので解ける）。保留が残らなかった表の再開点は最後に取得した行まで、残った表は残った最初の行の手前まで（`BeforeVersions`・`ThroughVersion`）。残った保留だけを打ち切りとして報告する。持ち越しが無ければ流さない。
+  - 未送信・エコー・一意な値の後回しと回転・外部キーの扱いは、1 回で全部の適用の部品（`ApplyAsync`・`WriteRowsAsync`・`SaveResumePointAsync`）をそのまま使い、写しを持たない。段ごとの違い（状態の読み方・再開点の決め方）は計画（`TrackedSyncPlan`）の値で渡す。
+- 洗い替えの塊の経路（同期と同じ進み方に、洗い替えの分を足す）：
+  - 削除の段（計画の印 `KeepsDiscardsTheServerHas`）：削除伝搬に加えて、両方に無い行の状態を消し、blob を捨てる洗い替えなら範囲の表の未送信の無い全行の除外列を空にして写し待ちを消し（1 回で全部の道と同じ処理）、`Force` で捨てる行のうちサーバーに行の無いもの（キーがサーバーのキーの集合に無い）を片付ける。範囲の表の再開点を「何も取っていない」（null）に戻す。
+    - 再開点を戻すのは、どこで落ちても、次の同期が洗い替えの止まった所の続きから降ろせるようにするため。前の再開点を残すと、書いていない行の先に再開点が残りうる。
+    - `Force` で捨てる行のうちサーバーにまだ行があるものは、削除の段では触らない（未送信の印も blob も）。その行を持ってくる塊がサーバーの行に置き換える。
+  - 塊の段（計画の印 `RunsTableWideSteps` が偽）：エコーを飛ばさずに全行を書き直す。`Force` で捨てる行（連番が捨てると決めたときのままの行）は、その行の塊の中でサーバーの行に置き換えて未送信を外し、blob を捨てる洗い替えならその行の除外列だけを空にする。連番の変わった行と、途中に端末で書かれた未送信の行は、ローカルの内容を blob ごと残す。表の全体に掛かる段（両方に無い行の状態を消す・全行の blob を空にする・削除伝搬）は塊ごとに繰り返さない。
+  - 最後の段：持ち越した行に加えて、削除の段の時点でサーバーにあったのに取得が持ってこなかった捨てる行（取得の上限の後にサーバーで書き直された行・キーを取った後にサーバーで消えた行）を、変更だけを失う形で片付ける。blob を捨てる洗い替えなら、未送信を外すのと同じ所でその行の除外列も空にする（削除の段はこの行の blob を残し、どの塊もこの行を書かないので、ここで空にしないと残る）。
+  - 途中で落ちた洗い替えは、そこまでに確定した段を残して例外で終わる（捨てたとは報告しない）。流し直せば 0 から全部を書き直してそろう。その後の同期は続きから降ろし、まだ置き換えていなかった捨てる行は、行も blob も端末の内容のまま未送信で残って、その同期が普通に送る。
+- 塊の経路だけの規則は 3 つ：保留の持ち越しと最後の段／塊ごとの再開点（最初に持ち越した行の手前で止める。洗い替えは削除の段で戻してから進める）／途中で落ちた実行の再開（前の 2 つから出る）。増やすときは、1 回で全部の道と結果が割れないことを、小さい塊の端末の照合で確かめる。
+- 1 回で全部の道と違うこと：
+  - 途中の状態がほかの接続から見える（削除の段の後・塊の間）。どの時点でも外部キーの違反は作らない。
+  - 途中で失敗した実行は、そこまでの塊を残す。次の実行は再開点から続ける。再開点より後ろで書き済みの行は取り直されるが、基準の版が同じ行はエコーとして飛ばされ（行の状態・未送信の印を変えない）、その間に端末で編集された行は未送信としてローカルの内容が残る。
+  - 塊の途中に端末で書かれた未送信の行は、塊のトランザクションの中で行の状態を読むので、1 回で全部の道の「取得と適用の間の編集」と同じに扱う（ローカルの内容を残す）。
+- 壊すと起きること：
+  - 持ち越しを捨てる・最後の段を行ごとの別のトランザクションにすると、塊をまたぐ循環と入れ替えが降りない。
+  - 再開点を持ち越し中の行の先へ進めると、途中で落ちた実行の後、持ち越していた行が二度と降りない（最後まで流れた実行では最後の段が再開点を書き直すので見えない）。
+  - 削除の段を塊の後へ回すと、消える行が持つ一意な値を塊が取れない。入口の後ろの表のキーを取らないと、その表の削除伝搬が流れない。
+  - 未送信があるのに塊へ入ると、未送信の行の規則が塊の経路に持ち込まれる。
+  - 洗い替えが削除の段で再開点を戻さないと、途中で落ちた洗い替えの後の同期が、まだ書き直していない表を前の再開点から降ろす。
+  - 削除の段で、サーバーにまだ行がある捨てる行の blob まで空にすると、その行を置き換える前に落ちた洗い替えの後、未送信の記録（blob の書き込みを含む）だけが残って、次の同期が空の blob をサーバーへ送る。
+  - 最後の段で、取得が持ってこなかった捨てる行の blob を空にしないと、blob を捨てる洗い替えの後も、利用者が捨てると選んだ blob が未送信の印の無い行に残る。blob を運ばない同期はその行を書き直しても除外列に触らないので、残り続ける（1 回で全部の道では空になる）。
+  - 表の全体に掛かる段を塊ごとに繰り返しても結果は変わらない（性能の退行で、行では捕まえられない。塊のトランザクションの時間は大きさの実測で見る）。
+- ガード：`SyncSupportAdoSqliteEngineRuntimeTests.SmallChunkScenarios_MatchLedger`（小さい塊の端末で決定的なシナリオを全部流し、1 回で全部の道の控えと行ごとに照らす）・`SyncSupportAdoSqliteEngineRuntimeTests.SmallChunkRandomSeeds_ConvergeWithoutLoss`・同期のモデルの決定的なシナリオ（`SyncModelRuntimeTests` の行 `chunk-selfref-parent-in-later-chunk`・`chunk-cross-table-cycle-both-new`・`chunk-selfref-cycle-across-chunks`・`chunk-unique-swap-across-chunks`・`chunk-taker-before-releaser`・`chunk-delete-stage-parent-gone-after-next-sync`）・`SyncEngineFixedRows`（行 `chunk-failure-between-chunks-keeps-first-chunk-and-next-sync-resumes`・`chunk-failure-after-carry-keeps-resume-point-before-carried-row`・`chunk-unsent-edit-between-chunks-kept-then-serverwins-restores`・`chunk-unsent-edit-between-chunks-kept-then-localwins-uploads`・`chunk-row-gone-after-keys-stays-until-next-sync`・`chunk-download-route-cells`・途中で落ちた洗い替えの `chunk-refresh-*-failure-then-*` の 6 行・`chunk-refresh-force-discard-gone-after-keys-only-loses-change`・`chunk-refresh-force-discard-blobs-failure-keeps-blob-of-unreplaced-discard`・`chunk-refresh-force-discard-blobs-completes-with-every-blob-empty`・`chunk-refresh-force-discard-blobs-empties-blob-of-discard-changed-after-ceiling`）。仕組みは `tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`「小さい塊の端末」。mutation 実証済み（持ち越しを捨てる・最後の段を行ごとの別のトランザクションにする・再開点を持ち越し中の行の先へ進める・削除の段を最後の段の前へ回す・削除の段を外す・閾値の時点の未送信を無視する・入口の後ろの表のキーを取らない・塊の計画で行の状態を読まない・入口までにためた行を塊へ流さない。洗い替え：削除の段で再開点を戻さない・塊で捨てる行を置き換えない・塊の洗い替えでエコーを飛ばす・削除の段の blob を空にする処理を外す・削除の段から両方に無い行の状態を消す処理を外す・最後の段で取得が持ってこなかった捨てる行を片付けない・削除の段で捨てる行の blob も空にする・置き換えの時点で blob を空にしない・最後の段で取得が持ってこなかった捨てる行の blob を空にしない、のそれぞれで対応する行が赤）。
 
 ### 新しいエンジンの実行の入口
 
 - 同じ DB への実行は、プロセスの中で DB のファイルごとのロックで 1 本ずつ流す（メモリの DB はエンジンごと）。
 - 実行の前に、同期する表が同期の外で空にされていないかを確かめ、空なら `SyncLocalTableEmptiedException` で断る（再開点が進んだまま空の表を受け入れると、サーバーの行が端末へ二度と降りない。洗い替えで抜ける）。
-- 引数（取得の大きさが 0 以下・同期しない型の除外）は、同期・送信だけ・受信だけ・洗い替えの全部の入口で、何かをする前に断る。
+- 引数（取得の大きさが 0 以下・降ろす行の上限が 0 以下・同期しない型の除外）は、同期・送信だけ・受信だけ・洗い替えの全部の入口で、何かをする前に断る。
 - ガード：`SyncEngineFixedRows`（行 `runs-on-same-database-are-serialized`・`emptied-table-refuses-every-entry`・`sync-inside-save-hook-fails-on-lock-wait-and-leaves-nothing`・`invalid-arguments-refuse-before-anything`）。
 
 ### 新しいエンジンの既知の限界
 
 - 同じ DB へ 2 つのプロセスから同時に同期する形は直列にしない（ロックはプロセスの中だけ）。
+- 塊ごとに確定する経路は、入口の時点で行を取り終えていない表のサーバーのキーを、行より先に取る（削除の段が全部の表のキーを使うため）。キーを取った後・その表の行を取る前にサーバーで消えた行は、その実行では端末に残り、次の実行の削除伝搬で消える。ガード：`SyncEngineFixedRows`（行 `chunk-row-gone-after-keys-stays-until-next-sync`）。
+- 塊ごとに確定する経路の削除の段は、塊より前に流れる。サーバーに無い親を消すと、端末の子（サーバーでは別の親へ付け替わっているが、その行は後の塊で降りる）が外部キーの違反になる形では、親を残す。1 回で全部の道なら同じ適用で消える親が、その実行の後も端末に残り、次の実行の削除伝搬で消える。ガード：同期のモデルの決定的なシナリオ（`SyncModelRuntimeTests` の行 `chunk-delete-stage-parent-gone-after-next-sync`。小さい塊の端末と控えの違いは `SyncModelSmallChunkScenarioDifferences` が理由つきで宣言する）。
+- 塊ごとに確定する経路の持ち越しの行は、最後の段まで全部メモリに持つ（数の上限は無い）。
 - サーバーへの書き込みが通った後に決着が失敗すると、次の Collect は自分が書いた行を相手に ModifiedOnServer を報告し続け、LocalWins の同期で収束する（docs の既知の制限）。ガード：`SyncEngineFixedRows`（行 `failure-after-server-write-before-settle-is-reported-until-local-wins`）。
 
 ## ガードテストの一覧

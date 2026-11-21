@@ -117,29 +117,60 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
     }
 
     /// <summary>同じ端末の DB を使う、別のエンジンのインスタンスを作る</summary>
-    public TrackedSyncEngine CreateEngine() =>
+    public TrackedSyncEngine CreateEngine() => CreateEngine(observe: null);
+
+    /// <summary>
+    /// 同じ端末の DB を使い、サーバーの差分ソースへの行とキーの取得を <paramref name="observe"/> が観測する（呼び出しの前と、行が
+    /// 返った後に呼ぶ。投げれば取得の失敗になる）エンジンのインスタンスを作る
+    /// </summary>
+    /// <param name="observe">取得の観測（null なら観測しない）</param>
+    /// <param name="ceiling">
+    /// 取得の上限を答える関数（null なら差分ソースの答え＝代役は上限なし）。上限を実行の始めに固定するサーバーの形
+    /// （<see cref="SyncModelServer.TakeVersion"/> の版を返すと、その後にサーバーで書かれた行はその実行の取得に入らない）を作る
+    /// </param>
+    public TrackedSyncEngine CreateEngine(
+        Func<SyncEngineSourceCall, Task>? observe,
+        Func<Task<byte[]?>>? ceiling = null
+    ) =>
         new([
             new TrackedSyncTable<ModelFolderEntity, int>(
                 GeneratedSyncTables.ModelFolder,
-                Server.FolderSource,
+                Observed(Server.FolderSource, ModelTables.Folders, observe, ceiling),
                 Rows
             ),
             new TrackedSyncTable<ModelLabelEntity, string>(
                 GeneratedSyncTables.ModelLabel,
-                Server.LabelSource,
+                Observed(Server.LabelSource, ModelTables.Labels, observe, ceiling),
                 Rows
             ),
             new TrackedSyncTable<ModelItemEntity, int>(
                 GeneratedSyncTables.ModelItem,
-                Server.ItemSource,
+                Observed(Server.ItemSource, ModelTables.Items, observe, ceiling),
                 Rows
             ),
             new TrackedSyncTable<ModelEventEntity, DateTime>(
                 GeneratedSyncTables.ModelEvent,
-                Server.EventSource,
+                Observed(Server.EventSource, ModelTables.Events, observe, ceiling),
                 Rows
             ),
         ]);
+
+    /// <summary>観測も上限の関数も無ければ差分ソースをそのまま、あれば観測の包みで返す</summary>
+    private static ISyncServerSource<TEntity, TKey> Observed<TEntity, TKey>(
+        ISyncServerSource<TEntity, TKey> source,
+        string table,
+        Func<SyncEngineSourceCall, Task>? observe,
+        Func<Task<byte[]?>>? ceiling
+    )
+        where TEntity : EntityBaseCore, new() =>
+        observe is null && ceiling is null
+            ? source
+            : new ObservedSyncServerSource<TEntity, TKey>(
+                source,
+                table,
+                observe ?? (_ => Task.CompletedTask),
+                ceiling
+            );
 
     /// <summary>同期を 1 回流す（同期中の端末の印を立てる。<paramref name="engine"/> が null なら端末のエンジン）</summary>
     public async Task<SyncResult> SyncAsync(
@@ -160,10 +191,11 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
         }
     }
 
-    /// <summary>洗い替えを 1 回流す（同期中の端末の印を立てる）</summary>
+    /// <summary>洗い替えを 1 回流す（同期中の端末の印を立てる。<paramref name="engine"/> が null なら端末のエンジン）</summary>
     public async Task<SyncRefreshResult> RefreshAsync(
         SyncRefreshOptions? options,
-        CancellationToken ct
+        CancellationToken ct,
+        TrackedSyncEngine? engine = null
     )
     {
         Faults.Syncing = ModelActor.Device1;
@@ -171,7 +203,7 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
 
         try
         {
-            return await Engine.RefreshAsync(options, ct);
+            return await (engine ?? Engine).RefreshAsync(options, ct);
         }
         finally
         {
@@ -229,6 +261,38 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
         return value is null or DBNull
             ? null
             : Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// 端末の DB で、文の実行計画（<c>EXPLAIN QUERY PLAN</c> の detail の列）を行ごとに読む。文は表の名前を
+    /// <c>@table</c> で束縛できる
+    /// </summary>
+    /// <param name="sql">計画を読む文</param>
+    /// <param name="tableName"><c>@table</c> に束縛する表の名前</param>
+    /// <param name="ct">キャンセルトークン</param>
+    public async Task<IReadOnlyList<string>> QueryPlanAsync(
+        string sql,
+        string tableName,
+        CancellationToken ct
+    )
+    {
+        var lines = new List<string>();
+        await using var connection = _plain.CreateConnection();
+        await connection.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "EXPLAIN QUERY PLAN " + sql;
+        var table = command.CreateParameter();
+        table.ParameterName = "@table";
+        table.Value = tableName;
+        command.Parameters.Add(table);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+
+        while (await reader.ReadAsync(ct))
+        {
+            lines.Add(reader.GetString(reader.GetOrdinal("detail")));
+        }
+
+        return lines;
     }
 
     /// <summary>行の状態の表と再開点の表の全部（行を序数の順に並べた文字列。途中の状態が残っていないことを比べる）</summary>
@@ -299,4 +363,92 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
             }
         }
     }
+}
+
+/// <summary>サーバーの差分ソースへの取得 1 回の観測</summary>
+/// <param name="Table">表の名前</param>
+/// <param name="Call">取得の種類（<see cref="RowsBefore"/>・<see cref="RowsReturned"/>・<see cref="KeysBefore"/>）</param>
+/// <param name="Rows">返った行の数（<see cref="RowsReturned"/> だけ。ほかは null）</param>
+internal sealed record SyncEngineSourceCall(string Table, string Call, int? Rows)
+{
+    /// <summary>行のページの取得の前</summary>
+    public const string RowsBefore = "rows";
+
+    /// <summary>行のページが返った後（エンジンへ渡す前）</summary>
+    public const string RowsReturned = "rows-returned";
+
+    /// <summary>全キーの取得の前</summary>
+    public const string KeysBefore = "keys";
+}
+
+/// <summary>
+/// サーバーの差分ソースを包み、行のページとキーの取得を観測へ知らせる（ほかはそのまま転送する）。観測が投げれば、その取得の失敗
+/// としてエンジンへ届く。上限の関数があれば、取得の上限はその答えにする
+/// </summary>
+/// <param name="inner">包む差分ソース</param>
+/// <param name="table">表の名前</param>
+/// <param name="observe">観測</param>
+/// <param name="ceiling">取得の上限を答える関数（null なら包む差分ソースの答え）</param>
+internal sealed class ObservedSyncServerSource<TEntity, TKey>(
+    ISyncServerSource<TEntity, TKey> inner,
+    string table,
+    Func<SyncEngineSourceCall, Task> observe,
+    Func<Task<byte[]?>>? ceiling = null
+) : ISyncServerSource<TEntity, TKey>
+    where TEntity : EntityBaseCore, new()
+{
+    public Task<byte[]?> GetChangeCeilingAsync(CancellationToken cancellationToken = default) =>
+        ceiling is null ? inner.GetChangeCeilingAsync(cancellationToken) : ceiling();
+
+    public async Task<SyncChangeBatch<TEntity>> GetChangesAsync(
+        byte[]? anchor,
+        byte[]? ceiling,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await observe(new(table, SyncEngineSourceCall.RowsBefore, null));
+        var batch = await inner.GetChangesAsync(anchor, ceiling, batchSize, cancellationToken);
+        await observe(new(table, SyncEngineSourceCall.RowsReturned, batch.Rows.Count));
+
+        return batch;
+    }
+
+    public async Task<SyncChangeBatch<TEntity>> GetFirstPageAsync(
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await observe(new(table, SyncEngineSourceCall.RowsBefore, null));
+        var batch = await inner.GetFirstPageAsync(batchSize, cancellationToken);
+        await observe(new(table, SyncEngineSourceCall.RowsReturned, batch.Rows.Count));
+
+        return batch;
+    }
+
+    public async Task<SyncChangeBatch<TEntity>> GetPageAfterAsync(
+        TKey afterKey,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await observe(new(table, SyncEngineSourceCall.RowsBefore, null));
+        var batch = await inner.GetPageAfterAsync(afterKey, batchSize, cancellationToken);
+        await observe(new(table, SyncEngineSourceCall.RowsReturned, batch.Rows.Count));
+
+        return batch;
+    }
+
+    public async Task<IReadOnlyList<TKey>> GetAllKeysAsync(
+        CancellationToken cancellationToken = default
+    )
+    {
+        await observe(new(table, SyncEngineSourceCall.KeysBefore, null));
+
+        return await inner.GetAllKeysAsync(cancellationToken);
+    }
+
+    public IRemoteRepositoryCore<TEntity, TKey> Writer => inner.Writer;
+
+    public ISyncBinaryColumns<TKey>? BinaryColumns => inner.BinaryColumns;
 }
