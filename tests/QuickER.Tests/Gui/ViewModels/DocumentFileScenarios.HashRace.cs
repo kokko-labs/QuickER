@@ -116,7 +116,7 @@ internal static partial class DocumentFileScenarios
             Doc.Open(B).Expect(o => o.Path.Should().Be(o.PathOf(B))),
         ];
 
-    /// <summary>自動保存の図とメタの照合（メタだけ書けない・両方書けた・旧版のメタ）</summary>
+    /// <summary>自動保存の図とメタの照合（メタだけ書けない・両方書けた・ハッシュを持たないメタ）</summary>
     private static IEnumerable<ScenarioRow<DocScenario>> AutoSaveMetaRows() =>
         [
             Row(
@@ -157,8 +157,8 @@ internal static partial class DocumentFileScenarios
                 ]
             ),
             Row(
-                "meta-legacy-without-hash-trusted",
-                "図のハッシュを持たない旧版のメタは、照合せずに信じる",
+                "meta-without-hash-restores-untitled",
+                "図のハッシュを持たないメタは照合できないので、無題・未保存として復元する",
                 [
                     .. SaveAThenOpenB(),
                     Doc.AutoSave(),
@@ -166,16 +166,18 @@ internal static partial class DocumentFileScenarios
                     Doc.Restart()
                         .Expect(o =>
                         {
-                            o.Path.Should().Be(o.PathOf(B));
-                            o.IsDirty.Should().BeFalse();
+                            o.Tables.Should().Equal("OnlyInB");
+                            o.Path.Should().BeNull("ハッシュの無いメタのパスは信じない");
+                            o.IsDirty.Should().BeTrue("ファイルへ保存されていない内容として開く");
+                            o.Status.Should().Be(Strings.Status_AutoSaveRestoredUntitled);
                         }),
                 ]
             ),
             // メタのハッシュを消す手は自動保存の記録だけを書き換え、図のファイルを読まない。ディスクの図が Id 重複に
-            // 書き換わっていても、旧版のメタは照合せずに信じてパスを付けて復元する（読み込むのは自動保存の図）
+            // 書き換わっていても、ハッシュの無いメタはパスを捨てて自動保存の図を無題で復元する
             Row(
-                "meta-legacy-without-hash-trusted-while-disk-is-duplicate-id",
-                "図のハッシュを持たない旧版のメタは、図のファイルが Id 重複に書き換わっていても照合せずに信じる",
+                "meta-without-hash-restores-untitled-while-disk-is-duplicate-id",
+                "図のハッシュを持たないメタは、図のファイルが Id 重複に書き換わっていても、自動保存の図を無題で復元する",
                 [
                     .. SaveAThenOpenB(),
                     Doc.AutoSave(),
@@ -184,7 +186,7 @@ internal static partial class DocumentFileScenarios
                     Doc.Restart()
                         .Expect(o =>
                         {
-                            o.Path.Should().Be(o.PathOf(B));
+                            o.Path.Should().BeNull("ハッシュの無いメタのパスは信じない");
                             o.Tables.Should()
                                 .ContainSingle()
                                 .Which.Should()

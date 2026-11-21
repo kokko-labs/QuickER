@@ -39,7 +39,7 @@
 ## 識別子の長さの上限
 
 - 上限の正本は `IdentifierLengthLimits`（方言名の表。実 DB で確かめた値）。各方言の識別子クラスの `Limit` と `SyncDialectCapabilities.IdentifierLengthLimit` はそれを指すだけ。
-- `IdentifierLengthLimit` は Unit / Max / TableFileNameMax（MySQL の表の名前のファイル名での 251 バイト）/ `RepresentsSupplementaryCharacters` を持ち、`Fit` / `Truncate` / `Accepts` / `AcceptsTableName` / `DescribeViolation` / `CanRepresent` / `StoredText` を提供する。
+- `IdentifierLengthLimit` は Unit / Max / TableFileNameMax（MySQL の表の名前のファイル名での 251 バイト）/ `RepresentsSupplementaryCharacters` を持ち、`Fit` / `Accepts` / `AcceptsTableName` / `DescribeViolation` / `CanRepresent` / `StoredText` を提供する。
 - `RepresentsSupplementaryCharacters` は MySQL だけ false。MySQL は識別子・説明の BMP の外の文字を断らずに黙って `?` へ置き換えて保存する（実測：サロゲート対は 1 つの `?`、対になっていないサロゲートはクライアントが U+FFFD にする。規則の正本は `IdentifierLengthLimit.StoredText`）。方言名で分岐せず、この宣言で扱う。
 - 既定の制約名を上限に収める経路（省略できない引数・図の対象 DBMS か DDL・同期の方言か）は `src/QuickER.Model/CLAUDE.md`「識別子の長さの上限」。
 - 利用者が付けた名前は縮めずに、DDL・同期の入口（`SqlNameText.Validate`）が上限と表せない文字を名指しして断る。ガードは `src/QuickER.Provider/CLAUDE.md`「利用者が付けた名前の上限」を参照する。

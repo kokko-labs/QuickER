@@ -110,7 +110,7 @@ internal static partial class ConnectionDialogRows
             NullProfilesRow("open-null-profiles-list-in-file", "{\"profiles\": null}", 0),
             NullProfilesRow(
                 "open-null-profile-element-in-file",
-                "{\"profiles\": [null, {\"name\": \"本番DB\", \"server\": \"srv\"}]}",
+                "{\"profiles\": [null, {\"name\": \"本番DB\", \"dbms\": \"sqlserver\", \"server\": \"srv\"}]}",
                 1
             ),
             Row(
@@ -254,8 +254,8 @@ internal static partial class ConnectionDialogRows
                 }
             ),
             Row(
-                "select-legacy-profile-command-timeout-defaults",
-                "コマンドタイムアウトを持たない旧プロファイルは既定値で読み込まれる",
+                "select-profile-without-command-timeout-defaults",
+                "コマンドタイムアウトを持たないプロファイルは既定値で読み込まれる",
                 [(Profiles, Select)],
                 h =>
                 {

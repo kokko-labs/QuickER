@@ -42,7 +42,7 @@ internal sealed record DocVersion(DocContentKind Content, IReadOnlyList<string> 
 /// <param name="Path">紐づくファイル</param>
 /// <param name="LastKnown">最終既知の版</param>
 /// <param name="IsDirty">未保存か</param>
-/// <param name="AutoSave">一緒に書いた自動保存の図の版（旧版のメタは null）</param>
+/// <param name="AutoSave">一緒に書いた自動保存の図の版（ハッシュを持たないメタは null）</param>
 /// <param name="PathUpper">パスを大文字の綴りで持っているか</param>
 internal sealed record DocMeta(
     DocFile? Path,
@@ -747,7 +747,8 @@ internal sealed class DocumentFileModel
             LoadInto(version.Tables, version.Queries, fit: true);
             var meta = Meta ?? new DocMeta(null, null, false, null);
 
-            if (meta.AutoSave is not null && !_same(meta.AutoSave, autoSaved))
+            // ハッシュを持たないメタ（AutoSave が null）も照合できないので信じない
+            if (meta.AutoSave is null || !_same(meta.AutoSave, autoSaved))
             {
                 Dirty = true;
                 Notify(Strings.Status_AutoSaveRestoredUntitled);

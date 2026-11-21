@@ -310,10 +310,9 @@
 - `SchemaDiffService.Compute` の入口の `MatchSchemas`（`NameMatching`）で組んだ表・列だけを揃える。表と列の組み合わせは 1 度だけ行い、差分・列順の案内・綴りの揃えが同じ組を使う（`SchemaDiffServiceMatchingCountTests`）。
 - 複製は Id を保った `Entity.Clone(preserveId: true)` で作り、図そのものは書き換えない。揃える組が無い表は元のオブジェクトのまま返す（出力はバイト不変）。
 - 図にしか無い表・列は図の綴りで作る。
-- 外部キーの既定名（`ResolveTargetForeignKeyNames`）と一意制約の合成名（`ResolveUniqueConstraintNames`）は、揃える前の図（DDL と同じ入力＝図の綴り）から求める。一意制約の名前は、複製の表の一意制約（Id を保った別のオブジェクト）へ Id で写す（`OntoMatchedTargets`）。
+- 外部キーの既定名（`ConstraintNames.ResolveForeignKeyNames` を揃える前の図へ）と一意制約の合成名（`ResolveUniqueConstraintNames`）は、揃える前の図（DDL と同じ入力＝図の綴り）から求める。一意制約の名前は、複製の表の一意制約（Id を保った別のオブジェクト）へ Id で写す（`OntoMatchedTargets`）。
   - 揃えた複製から求めると、識別子の上限で縮めた既定名の末尾のハッシュが DDL と変わり、DDL が作った DB との差分に偽の作り直しが出る（DB が名前を大文字小文字で畳む・別の道具で作った DB など）。
   - 引き換え：DB を作った後に図の表名を大文字小文字だけ変えると、縮めた既定名の制約だけ名前の変わる作り直しが出る。今の DDL がその図から作る名前と一致するので、正しい差分とみなす。
-  - PostgreSQL の旧版の切り詰めの吸収の照合は、揃えた表のまま。
   - ガード：期待の行 `diff-long-default-fk-name-with-case-folded-live-matches-ddl`（上限のある 4 方言）と、能力の組の網の関係 N2（DB 側の図の名前を ASCII の小文字へ畳んでも差分・警告・外した項目が変わらない＝`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/CLAUDE.md`「能力の組の網」）。
 - 固定は期待の行 `diff-case-only-matched-names-use-live-spelling`・`SchemaDiffServiceTests.Items_CarryDiagramObjects`・実 DB の行 `realdb-oracle-case-only-names-sync-to-uppercase-table`／`realdb-pg-case-only-names-sync-to-lowercase-table`。mutation 実証済み。
 

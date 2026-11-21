@@ -92,17 +92,15 @@ QuickER が付ける既定の制約名は識別子の長さの上限に収め、
   - GUI は `MainViewModel.CurrentIdentifierLimit()`。図を受け取る `CollectExisting` / `IsTaken` / `ResolveForeignKeyNamesById` と `NameLimitNotes.Find` も上限を引数で受ける。Model は方言名から上限を引かない（`SourceRuleTests` の規則 `model-dialect-lookups`＝Model のソースの `IdentifierLengthLimits` の参照を構文木で数える。既知の一覧なし）。
   - DBML・Mermaid の取込は対象 DBMS を引数で受けて返す図の `TargetDbms` にする。Excel 定義書は宣言が無ければ取込先の図の対象 DBMS。
   - 経路の正本は `ConstraintNames` の XmlDoc。
-- PostgreSQL の既存 DB の吸収：長い既定名をそのまま DDL へ書くと PostgreSQL が 63 バイトで切り詰めて保存する。差分は、名前の無いリレーションに限り、live の名前が「縮める前の名前を `IdentifierLengthLimit.Truncate` で切ったもの」なら同じ外部キーとみなす。
-  - 宣言は `SyncDialectCapabilities.TruncatesLongIdentifiers`（PostgreSQL だけ）、判定は `SchemaDiffService.ResolveTargetForeignKeyNames`。主キー・一意制約は差分が名前で突き合わせないので要らない。
-  - 吸収するのは live の外部キーと同じ子・同じ親の表の外部キーだけで、live の外部キー 1 本につき 1 本（候補が複数なら列ペアが一致するもの、無ければ図の並びの先）。子の表名が長いと、親の違う外部キーや同じ親への 2 本目の縮める前の名前も切り詰めると同じ名前になる。子と名前だけで吸収すると、後から図に足した 2 本目にも DB の 1 本目と同じ名前を与えて 42710 で断られる。「同じ親だけ」と「列ペアの一致を先に」は互いを補う二重の守りで、片方だけを外しても来歴の行は緑のままになる。
+- 差分は名前の無い外部キーを、DDL と同じ縮めた既定名だけで live と照合する。長い既定名を縮めずに書いた DDL（以前の版の QuickER）で作った PostgreSQL の外部キー（PostgreSQL が 63 バイトで黙って切り詰めた名前）は同じ外部キーとみなさず、縮めた既定名の外部キーの追加と、切り詰めた名前の外部キーの削除になる（両方を選んで 1 度同期すれば以後は差分が出ない）。PostgreSQL が黙って切り詰めることは DB の事実の宣言 `SyncDialectCapabilities.TruncatesLongIdentifiers` が持ち、差分と同期の計画は読まない。
 - 差分の live 側の上限は外しても緑のまま。取込の外部キーは必ず DB の名前を持つので、名前を求め直さない。
 
 ガード：
 
-- `LongDefaultConstraintNameTests`（4 方言の既定名の関数が上限以内で互いに違う名前を返す）・`DialectDdlTableTests` の行 `ddl-long-default-names-are-shortened`・`sync-add-table-long-default-names-are-shortened`（DDL・同期スクリプトが同じ縮めた名前を使い、縮める前の名前を出さない。SQLite は縮めない）・`SyncPlanExpectationRows` の行 `diff-long-default-fk-names-match-shortened-live`（4 方言の差分が縮めた名前の live を同じ外部キーとみなす）・`diff-long-default-pg-legacy-truncated-fk-name-is-absorbed`（PostgreSQL の吸収と、合成の能力 `PostgreSql-NoTruncation` で吸収しない対照）・`diff-pg-user-named-fk-equal-to-shortened-default-is-not-absorbed`（利用者の名前は吸収しない）。期待の行は DB を使わない。
-- `PostgreSqlLongDefaultConstraintNameIntegrationTests`（能力を差し替えて吸収しない対照）。実 DB の期待の行 `realdb-long-default-names-apply-and-round-trip-no-diff` / `realdb-long-default-pg-legacy-truncated-fk-name-is-absorbed`（`SyncPlanExpectationRows.RealCrossDialect.cs`）。同期計画の来歴の行 `SyncPlanHistoryRows`。
+- `LongDefaultConstraintNameTests`（4 方言の既定名の関数が上限以内で互いに違う名前を返す）・`DialectDdlTableTests` の行 `ddl-long-default-names-are-shortened`・`sync-add-table-long-default-names-are-shortened`（DDL・同期スクリプトが同じ縮めた名前を使い、縮める前の名前を出さない。SQLite は縮めない）・`SyncPlanExpectationRows` の行 `diff-long-default-fk-names-match-shortened-live`（4 方言の差分が縮めた名前の live を同じ外部キーとみなす）・`diff-long-default-pg-truncated-fk-name-is-recreated`（PostgreSQL が切り詰めた名前の live は追加と削除になる）。期待の行は DB を使わない。
+- 実 DB の期待の行 `realdb-long-default-names-apply-and-round-trip-no-diff` / `realdb-long-default-pg-truncated-fk-name-is-recreated-once`（`SyncPlanExpectationRows.RealCrossDialect.cs`＝両方を選んだ同期の後は差分が出ない）。同期計画の来歴の行 `SyncPlanHistoryRows`。
 - `ToolScenarioTests`（行 `long-default-name-*`＝両ホストの保存名と要約・縮めた既定名との衝突・名前の無い外部キーの要約と削除と重複の名指し）・`MainViewModelRelationshipConstraintNameTests`（GUI の手作成）・`FormatRoundTripTests`（DBML・Mermaid の取込＝規則の行 `dbml-rule-long-default-name-*`・`mermaid-rule-carries-target-dbms`、形の行 `dbml-long-default-name-*`）。
-- `CodegenCaseTests` の行 `code-unique-constraint-name-*`・`UniqueConstraintResolvedNameLimitTests`（方言の切替で表示し直す。`ResolvedName_FollowsCollisionsAcrossTables`）・`IdentifierLengthLimitTests`（`Fit` / `Truncate`）。
+- `CodegenCaseTests` の行 `code-unique-constraint-name-*`・`UniqueConstraintResolvedNameLimitTests`（方言の切替で表示し直す。`ResolvedName_FollowsCollisionsAcrossTables`）・`IdentifierLengthLimitTests`（`Fit`）。
 - 多バイトの長い名前の既定名：名前の DDL の往復（`Name/DdlRoundTrip`）が、方言ごとに決まった長い名前（`NameFuzzDiagrams.DerivedNameCases`＝乱数なし）で、名前の無い主キー・一意制約・外部キーの既定名、同じ親子の 2 本目の外部キーの既定名、合成名がぶつかって縮めた後に番号が付く名前を上限で縮めさせ、5 方言の実 DB に適用して取り込み直した差分が空であることを確かめる。名前の長さは上限の単位ごとに、縮めた名前の切れ目に端数が出る長さ（PostgreSQL・Oracle は 3 バイトの文字・SQL Server はサロゲートペア）と、番号の形だけはちょうど上限まで埋まる長さ（後ろに番号を足す誤りが上限を超える）を選ぶ。縮めるはずの名前が上限の内なら空振りとして赤。mutation 実証済み（切り詰めの単位を無視する・縮めた後ろに番号を足す）。
 - mutation 実証済み。
 

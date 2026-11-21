@@ -471,9 +471,24 @@ public static class ConstraintNames
         IEnumerable<Entity> entities,
         IEnumerable<Relationship> relationships,
         IdentifierLengthLimit limit
-    ) =>
-        ResolveForeignKeyNameDetails(entities, relationships, limit)
-            .ToDictionary(pair => pair.Key, pair => pair.Value.Name);
+    )
+    {
+        // Relationship は等値を上書きしないので、辞書は参照の同一性で引く
+        var names = new Dictionary<Relationship, string>();
+
+        foreach (
+            var (relationship, resolved) in ResolveForeignKeyNamesCore(
+                entities,
+                relationships,
+                limit
+            )
+        )
+        {
+            names.TryAdd(relationship, resolved.Name);
+        }
+
+        return names;
+    }
 
     /// <summary>
     /// 図のリレーションの Id ごとに、DDL・同期が外部キーへ付ける名前を求める（<see cref="ResolveForeignKeyNames"/> の、
@@ -529,39 +544,6 @@ public static class ConstraintNames
     }
 
     /// <summary>
-    /// <see cref="ResolveForeignKeyNames"/> と同じ名前を、縮める前の名前と、保存された名前かどうかと一緒に求める
-    /// </summary>
-    /// <remarks>
-    /// 同期の差分が、旧版の QuickER が長い既定名で作った PostgreSQL の外部キー（PostgreSQL が黙って切り詰めた名前）を
-    /// 同じ外部キーとみなすために、縮める前の名前を使う（<c>SyncDialectCapabilities.TruncatesLongIdentifiers</c>）。
-    /// </remarks>
-    public static IReadOnlyDictionary<
-        Relationship,
-        ResolvedForeignKeyName
-    > ResolveForeignKeyNameDetails(
-        IEnumerable<Entity> entities,
-        IEnumerable<Relationship> relationships,
-        IdentifierLengthLimit limit
-    )
-    {
-        // Relationship は等値を上書きしないので、辞書は参照の同一性で引く
-        var names = new Dictionary<Relationship, ResolvedForeignKeyName>();
-
-        foreach (
-            var (relationship, resolved) in ResolveForeignKeyNamesCore(
-                entities,
-                relationships,
-                limit
-            )
-        )
-        {
-            names.TryAdd(relationship, resolved);
-        }
-
-        return names;
-    }
-
-    /// <summary>
     /// 名前を持たないリレーションのうち、既定名がほかの制約とぶつかるものに一意な名前を付ける
     /// </summary>
     /// <param name="entities">図のテーブル（リレーションの親子と、主キー・一意制約の名前を引く）</param>
@@ -601,7 +583,7 @@ public static class ConstraintNames
 
     /// <summary>
     /// <see cref="ResolveForeignKeyNames"/> と <see cref="NameUnnamedForeignKeys"/> が共有する名前の決め方
-    /// （名前と、縮める前の名前と、それが保存された名前か・既定名のままかを返す）
+    /// （名前と、それが既定名のままかを返す）
     /// </summary>
     private static List<
         KeyValuePair<Relationship, ResolvedForeignKeyName>
@@ -637,12 +619,7 @@ public static class ConstraintNames
                 resolved.Add(
                     new(
                         relationship,
-                        new ResolvedForeignKeyName(
-                            relationship.ConstraintName,
-                            relationship.ConstraintName,
-                            IsStored: true,
-                            IsDefault: false
-                        )
+                        new ResolvedForeignKeyName(relationship.ConstraintName, IsDefault: false)
                     )
                 );
                 continue;
@@ -664,21 +641,12 @@ public static class ConstraintNames
                 continue;
             }
 
-            var unshortenedDefault = UnshortenedForeignKey(child.TableName, parent.TableName);
-            var defaultName = limit.Fit(unshortenedDefault);
+            var defaultName = ForeignKey(child.TableName, parent.TableName, limit);
 
             if (reserved.Add(defaultName))
             {
                 resolved.Add(
-                    new(
-                        relationship,
-                        new ResolvedForeignKeyName(
-                            defaultName,
-                            unshortenedDefault,
-                            IsStored: false,
-                            IsDefault: true
-                        )
-                    )
+                    new(relationship, new ResolvedForeignKeyName(defaultName, IsDefault: true))
                 );
                 continue;
             }
@@ -688,7 +656,7 @@ public static class ConstraintNames
                     child.Columns.FirstOrDefault(column => column.Id == pair.TargetColumnId)?.Name
                 )
                 .OfType<string>();
-            var (name, unshortened) = UniqueForeignKeyCore(
+            var name = UniqueForeignKeyCore(
                 child.TableName,
                 parent.TableName,
                 childColumnNames,
@@ -696,12 +664,7 @@ public static class ConstraintNames
                 limit
             );
             reserved.Add(name);
-            resolved.Add(
-                new(
-                    relationship,
-                    new ResolvedForeignKeyName(name, unshortened, IsStored: false, IsDefault: false)
-                )
-            );
+            resolved.Add(new(relationship, new ResolvedForeignKeyName(name, IsDefault: false)));
         }
 
         return resolved;
@@ -757,10 +720,10 @@ public static class ConstraintNames
             childColumnNames,
             new HashSet<string>(existingNames, SchemaNames.Comparer),
             limit
-        ).Name;
+        );
 
-    /// <summary><see cref="UniqueForeignKey"/> の本体（縮めた名前と、縮める前の名前を返す）</summary>
-    private static (string Name, string Unshortened) UniqueForeignKeyCore(
+    /// <summary><see cref="UniqueForeignKey"/> の本体（縮めた名前を返す）</summary>
+    private static string UniqueForeignKeyCore(
         string childTable,
         string parentTable,
         IEnumerable<string> childColumnNames,
@@ -772,7 +735,7 @@ public static class ConstraintNames
 
         if (!taken.Contains(limit.Fit(name)))
         {
-            return (limit.Fit(name), name);
+            return limit.Fit(name);
         }
 
         var columns = childColumnNames.Select(SafeName).Where(column => column.Length > 0).ToList();
@@ -783,7 +746,7 @@ public static class ConstraintNames
 
             if (!taken.Contains(limit.Fit(name)))
             {
-                return (limit.Fit(name), name);
+                return limit.Fit(name);
             }
         }
 
@@ -792,7 +755,7 @@ public static class ConstraintNames
             taken,
             limit,
             () => $"Could not find a free foreign key name for '{childTable}' -> '{parentTable}'"
-        );
+        ).Name;
     }
 
     /// <summary>
@@ -834,12 +797,5 @@ public static class ConstraintNames
 
 /// <summary>外部キーに付ける名前の解決結果</summary>
 /// <param name="Name">DDL・同期が付ける名前（既定名は上限に収めたもの）</param>
-/// <param name="UnshortenedName">上限に収める前の名前（保存された名前ならそれと同じ）</param>
-/// <param name="IsStored">リレーションに保存された名前か</param>
 /// <param name="IsDefault">既定名 <c>FK_{子}_{親}</c> のままか（一意化した名前・保存された名前は <c>false</c>）</param>
-public sealed record ResolvedForeignKeyName(
-    string Name,
-    string UnshortenedName,
-    bool IsStored,
-    bool IsDefault
-);
+internal sealed record ResolvedForeignKeyName(string Name, bool IsDefault);

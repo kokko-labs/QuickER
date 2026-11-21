@@ -21,7 +21,7 @@ internal sealed record DocBefore(
 /// </summary>
 /// <remarks>
 /// 6 つ：(1) 利用者が見ていない外部の版・将来版を黙って書き潰さない、(2) 最終既知ハッシュは書いた／読んだ内容そのもの、
-/// (3) クリーンなら自動再読込・ダーティなら確認、(4) 自動保存のメタが食い違えば前のパスで復元しない、
+/// (3) クリーンなら自動再読込・ダーティなら確認、(4) 自動保存のメタが食い違うかハッシュを持たなければ前のパスで復元しない、
 /// (5) 読込の検査は拒否だけで修復しない、(6) 読み込んだ図の配置を持つ表は保存した位置のまま・配置の欠けた表は重ならない。
 /// 違反は文で返す（空なら守られた）。
 /// </remarks>
@@ -129,7 +129,8 @@ internal static class DocumentFileInvariants
             }
         }
 
-        // (4) 復元：自動保存の図とメタの AutoSaveHash が食い違えば、無題・未保存で開く（自動保存の図は書き直さない）
+        // (4) 復元：自動保存の図とメタの AutoSaveHash が食い違えば、無題・未保存で開く。メタがハッシュを持たなければ、
+        // 前のパスを付けない（自動保存の図を読めずに復元しなかったときも空の図はパスを持たない）。自動保存の図は書き直さない
         if (step.Op is RestartOp)
         {
             if (
@@ -140,6 +141,15 @@ internal static class DocumentFileInvariants
             )
             {
                 yield return "(4) メタが別の自動保存のものなのに、パス付き／クリーンで復元した";
+            }
+
+            if (
+                before.AutoSaveHash is not null
+                && before.MetaAutoSaveHash is null
+                && after.Path is not null
+            )
+            {
+                yield return "(4) メタがハッシュを持たないのに、パス付きで復元した";
             }
 
             if (after.AutoSaveHash != before.AutoSaveHash)

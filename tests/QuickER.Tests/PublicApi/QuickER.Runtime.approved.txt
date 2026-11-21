@@ -457,7 +457,6 @@ public static class QuickER.Runtime.RawValueConverter
     public static object ConvertRaw(object raw, System.Type targetType)
 
 public static class QuickER.Runtime.RemoteEntityGraph
-    public static System.Collections.Generic.Dictionary<System.ValueTuple<string, string>, byte[]> RowVersionLookup(System.Collections.Generic.List<QuickER.Runtime.RemoteRowVersionEntry> entries)
     public static System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement> ReadColumnValues(QuickER.Runtime.EntityBaseCore entity)
     public static System.Collections.Generic.HashSet<System.ValueTuple<string, string>> SkippedLookup(System.Collections.Generic.List<QuickER.Runtime.RemoteEntityRef> entries)
     public static System.Collections.Generic.List<QuickER.Runtime.EntityBaseCore> CollectAllRows(System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBaseCore> roots)
@@ -466,15 +465,11 @@ public static class QuickER.Runtime.RemoteEntityGraph
     public static System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>> ReadUnsavedValues(System.Collections.Generic.IReadOnlyList<QuickER.Runtime.EntityBaseCore> rows)
     public static System.Collections.Generic.List<System.ValueTuple<QuickER.Runtime.EntityBaseCore, System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>>> MatchSavedValues(System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBaseCore> roots, bool cascade, System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>> saved)
     public static System.Collections.Generic.List<System.ValueTuple<QuickER.Runtime.EntityBaseCore, System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>>> MatchUnsavedValues(System.Collections.Generic.IEnumerable<QuickER.Runtime.EntityBaseCore> roots, System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>> unsaved)
-    public static System.Reflection.PropertyInfo RowVersionProperty(System.Type entityType)
+    public static System.InvalidOperationException MismatchedResponse(string field, int expected, int? actual)
     public static bool IsSkipped(QuickER.Runtime.EntityBaseCore entity, System.Collections.Generic.HashSet<System.ValueTuple<string, string>> lookup)
-    public static byte[] ReadRowVersion(QuickER.Runtime.EntityBaseCore entity)
     public static string KeyText(QuickER.Runtime.EntityBaseCore entity)
-    public static void ApplyRowVersion(QuickER.Runtime.EntityBaseCore entity, System.Collections.Generic.Dictionary<System.ValueTuple<string, string>, byte[]> lookup)
-    public static void CollectRowVersions(QuickER.Runtime.EntityBaseCore entity, bool cascade, System.Collections.Generic.List<QuickER.Runtime.RemoteRowVersionEntry> into)
     public static void CollectSkipped(QuickER.Runtime.EntityBaseCore entity, bool cascade, System.Collections.Generic.List<QuickER.Runtime.RemoteEntityRef> into)
     public static void WriteColumnValues(QuickER.Runtime.EntityBaseCore entity, System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement> values)
-    public static void WriteRowVersion(QuickER.Runtime.EntityBaseCore entity, byte[] rowVersion)
 
 public sealed class QuickER.Runtime.RemoteEntityRef : System.IEquatable<QuickER.Runtime.RemoteEntityRef>
     public .ctor(string EntityType, string Key)
@@ -499,9 +494,8 @@ public sealed class QuickER.Runtime.RemoteIdRequest<TKey> : System.IEquatable<Qu
     public TKey Id { get; init; }
 
 public sealed class QuickER.Runtime.RemoteInsertResult : System.IEquatable<QuickER.Runtime.RemoteInsertResult>
-    public .ctor(byte[] RowVersion, System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement> Values = null)
+    public .ctor(System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement> Values)
     public System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement> Values { get; init; }
-    public byte[] RowVersion { get; init; }
 
 public static class QuickER.Runtime.RemoteJson
     public static System.Text.Json.JsonSerializerOptions Options { get; }
@@ -515,12 +509,6 @@ public sealed class QuickER.Runtime.RemoteRepositoryException : System.Exception
     public .ctor(int statusCode, string message, string correlationId, System.Exception innerException)
     public int StatusCode { get; }
     public string CorrelationId { get; }
-
-public sealed class QuickER.Runtime.RemoteRowVersionEntry : System.IEquatable<QuickER.Runtime.RemoteRowVersionEntry>
-    public .ctor(string EntityType, string Key, byte[] RowVersion)
-    public byte[] RowVersion { get; init; }
-    public string EntityType { get; init; }
-    public string Key { get; init; }
 
 public sealed class QuickER.Runtime.RemoteSaveManyRequest<TEntity> : System.IEquatable<QuickER.Runtime.RemoteSaveManyRequest<TEntity>>
     public .ctor(System.Collections.Generic.List<TEntity> Entities, bool CascadeSave, bool CascadeDelete, bool InsertWhenUpdateMissing, QuickER.Runtime.ConcurrencyMode Mode = 0)
@@ -539,9 +527,8 @@ public sealed class QuickER.Runtime.RemoteSaveRequest<TEntity> : System.IEquatab
     public bool InsertWhenUpdateMissing { get; init; }
 
 public sealed class QuickER.Runtime.RemoteSaveResult : System.IEquatable<QuickER.Runtime.RemoteSaveResult>
-    public .ctor(int Affected, System.Collections.Generic.List<QuickER.Runtime.RemoteRowVersionEntry> RowVersions, System.Collections.Generic.List<QuickER.Runtime.RemoteEntityRef> Skipped = null, System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>> Saved = null)
+    public .ctor(int Affected, System.Collections.Generic.List<QuickER.Runtime.RemoteEntityRef> Skipped, System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>> Saved)
     public System.Collections.Generic.List<QuickER.Runtime.RemoteEntityRef> Skipped { get; init; }
-    public System.Collections.Generic.List<QuickER.Runtime.RemoteRowVersionEntry> RowVersions { get; init; }
     public System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>> Saved { get; init; }
     public System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement>> Unsaved { get; init; }
     public int Affected { get; init; }
@@ -552,10 +539,9 @@ public sealed class QuickER.Runtime.RemoteUpdateRequest<TEntity> : System.IEquat
     public TEntity Entity { get; init; }
 
 public sealed class QuickER.Runtime.RemoteUpdateResult : System.IEquatable<QuickER.Runtime.RemoteUpdateResult>
-    public .ctor(bool Updated, byte[] RowVersion, System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement> Values = null)
+    public .ctor(bool Updated, System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement> Values)
     public System.Collections.Generic.Dictionary<string, System.Text.Json.JsonElement> Values { get; init; }
     public bool Updated { get; init; }
-    public byte[] RowVersion { get; init; }
 
 public enum QuickER.Runtime.RowState : int
     Added = 0

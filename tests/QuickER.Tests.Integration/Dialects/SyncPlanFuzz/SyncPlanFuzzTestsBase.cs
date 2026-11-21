@@ -440,7 +440,7 @@ public abstract class SyncPlanFuzzTestsBase
         // 合格側の行は、規則が失敗を予言し（偽陽性の守りが空振りしていない）、違反が 0
         problems.AddRange(SyncPlanScenarios.PassRowProblems(scenarioOutcomes));
 
-        // 来歴の行の合格の行は、既定の同期がコミットし、取り込み直した差分が空（4m-F1 の行は既知の失敗の一覧が受け持つ）
+        // 来歴の行は、既定の同期がコミットし、取り込み直した差分が空
         problems.AddRange(SyncPlanHistoryRows.RealProblems(scenarioOutcomes));
 
         // 網羅の行が、出すはずの変更の種類と強制した選び方を出している（出さなくなった行が網羅を黙って戻さない）

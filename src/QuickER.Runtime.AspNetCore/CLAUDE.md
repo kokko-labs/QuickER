@@ -55,8 +55,8 @@ Save フック・楽観排他・無制限バイナリの共通規則は `src/Qui
 ## クライアントの分類
 
 - `SaveConflictException` はリモートでも復元する。409 の `RemoteError` へ `Reason` / `EntityType` / `Key` を載せ（この 3 つは SaveConflict 以外では null。欠落した旧ボディは `Unknown` へ退化）、クライアントが同じプロパティを持つ例外を組み直す。楽観排他の共通の骨格は `src/QuickER.Runtime/CLAUDE.md`「rowversion による楽観排他」
-- リクエストは `ConcurrencyMode` を運ぶ（Mode の欠けた旧エンベロープは既定の Optimistic へ落ちる）。Insert / Update の応答は書き込んだ行の版を、Save の応答は版対応表（`RemoteRowVersionEntry`）を運び、クライアントが共有ヘルパー `RemoteEntityGraph` で書き戻す
-- フックが飛ばした行は保存の応答 `RemoteSaveResult.Skipped`（`RemoteEntityRef`＝CLR 型名×`RemoteJson` のキー・既定 null で旧ボディ互換）で伝える。サーバーは保存成功後のグラフから「HasChanges かつ非 Removed」を版対応表と同じ走査・同じ照合で集め、クライアントの `AcceptChanges` は一致する行を `MarkUnchanged` しない（直結と同じく未保存のまま残る）
+- リクエストは `ConcurrencyMode` を運ぶ（Mode の欠けた旧エンベロープは既定の Optimistic へ落ちる）。Insert / Update / Save の応答は書き込んだ行の列の値（版を含む）を運び、クライアントが共有ヘルパー `RemoteEntityGraph` で書き戻す（次の節「保存の応答は列の値を運び位置で突き合わせる」）
+- フックが飛ばした行は保存の応答 `RemoteSaveResult.Skipped`（`RemoteEntityRef`＝CLR 型名×`RemoteJson` のキー）で伝える。サーバーは保存成功後のグラフから「HasChanges かつ非 Removed」をカスケードの走査とキーの照合で集め、クライアントの `AcceptChanges` は一致する行を `MarkUnchanged` しない（直結と同じく未保存のまま残る）
 
 クライアントの失敗分類で落としやすい 4 点。
 
@@ -80,7 +80,7 @@ Save フック・楽観排他・無制限バイナリの共通規則は `src/Qui
   - エンベロープは positional record のため `{}` は Entity / Entities / 参照型キーが既定の null のまま通り、リポジトリ奥の null 引数例外＝500＋ログ＋フックに化けるため。
   - 共有ヘルパー `Required<T>(T? value, string name)`（無制約ジェネリック＝値型キーは素通し）を、Insert / Update / Save / SaveMany の Entity・SaveMany の Entities・GetById / Delete の Id へ適用する。
   - per-entity のマップを組み立てるモデルビルダー側（`CSharpGenerationModelBuilder.Remote.cs`）も同じ規則で、重複事前チェック（CheckUniqueness）の entity と名前付きクエリの参照型パラメータ（VO・string・`IReadOnlyList<T>`）を包む。判定は `QueryPayloadParameter.IsReferenceType`（列由来は `IsUnderlyingReferenceType`、VO・トークン由来は `CSharpTypeInfo.IsReferenceType`）。
-- リスト内 null 要素は 400 にしない。3 実装先の SaveAsync がいずれも `entity is not null` で除外しており、直結の契約どおり黙って無視するのが正。応答収集側（`CollectRowVersions` / `CollectSkipped`）の null ガードで NRE→500 を塞ぐ。
+- リスト内 null 要素は 400 にしない。3 実装先の SaveAsync がいずれも `entity is not null` で除外しており、直結の契約どおり黙って無視するのが正。応答収集側（`CollectSkipped`）の null ガードで NRE→500 を塞ぐ。
 - 未定義の `ConcurrencyMode` 値も 400 にする。enum は JSON で任意の数値を受けるため、Update / Save / SaveMany の 3 ハンドラが `ValidatedMode` で `Enum.IsDefined` 検証する（素通しすると版チェックが黙って無効化される）。
 - 名前付きクエリのページング引数も 400 にする（`ValidatedPaging(take, skip)`）。`take<=0` / `skip<0` はクエリパイプラインが `ArgumentOutOfRangeException` で拒否する値で、素通しすると呼び出し側の不備が 500＋ログ＋フックに化ける。2 つは常に対で出るので、まとめて 1 回検証する。
   - 生成クライアントはこの 400 を出さない。ページング付きの転送メソッドは先頭で直結と同じ例外（`ArgumentOutOfRangeException`・順序は Skip→Take・ParamName は `SqlQuery.Skip/Take` の引数名 `count`・文言も同一）で弾き、HTTP を投げない。
@@ -137,16 +137,14 @@ Kestrel は本文の読み取りの例外を先に投げ、`RequestAborted` は�
   - 並びは `RemoteEntityGraph.CollectSaveRows`（削除されていない行と null の要素を飛ばしてカスケードの順にたどる）1 つが決める。
   - サーバーは、リポジトリを呼ぶ前に受け取ったグラフで一覧を作り、保存の後に `ReadSavedValues` で読む。クライアントの `MatchSavedValues` は送ったグラフで同じ一覧を作る。
   - 保存の後にたどると、保存がコレクションを変える分（削除した子を外す・EF Core の fix-up が追跡中の子を親のコレクションへ入れる）だけ数がずれる。自己参照の親と子を別々の根で保存すると、EF Core のサーバーで値が 1 行も戻らなかった。
-  - フックが飛ばした行は null で、クライアントはその行を飛ばした行として扱う（値の無い応答では従来どおりキーの一覧）。
+  - フックが飛ばした行は null で、クライアントはその行を飛ばした行として扱う。
 - 飛ばした行と削除した行の値は `RemoteSaveResult.Unsaved`（位置でない init プロパティ＝コンストラクタの署名を変えない）が運ぶ。
   - 並びは `RemoteEntityGraph.CollectAllRows`（行の状態と保存のカスケードの指定に依らず、カスケードの子をすべてたどる）で、保存の後も変更を持つ行（削除した行・フックが飛ばした行）だけ値、ほかは null。
   - 削除した子を残った親のコレクションから外す共通規則と、サーバーが残った Removed の子を「飛ばした行」として応答に載せる処理（`RemoteEntityGraph.CollectSkipped`）は `src/QuickER.Runtime/CLAUDE.md`「削除した子の外れ方」を参照する。
-- クライアントは `Saved` の値の後に、`RowState` を変えずに書き戻す。数が合わなければ値を使わず、従来どおり確定する。以前のサーバーの応答は欄を持たず書き戻さない。以前のクライアントは知らない欄を読み捨てる。
-- 値は版の表（キーで照合）の後に書き戻す。食い違えば値が勝つ（フックが主キーを変えると版の表は外れる）。
-- 版は 2 つの経路が運ぶ。版の表（Insert / Update の `RowVersion`・Save / SaveMany の `RowVersions`）と、列の値（`Values`・`Saved`）。
-  - 同じ版の生成物どうしでは列の値が勝ち、版の表は冗長になる。版の表は以前のサーバー（列の値を運ばない）・以前のクライアント（列の値を読み捨てる）とのワイヤ互換の経路として残す。
-  - 片方だけを外す退行は通常の応答では答えが変わらないので、テストはクライアントの HTTP に `RemoteResponseChannelHandler` を挟み、応答から片方を外してもう片方だけで版が届くことを確かめる（版の表だけ＝以前のサーバーの応答を新しいクライアントが読む形）。
-  - ガード：`ConcurrencyRemoteRuntimeTestsBase.RowVersion_IsWrittenBack_ThroughEachResponseChannelAlone`（版の書き戻しのシナリオ 3 つ × 版の表だけ・列の値だけ。リモートの派生 5 つ＝サーバーはインメモリ・QuickER 版 SQL Server・EF Core SQL Server）。mutation 実証済み（サーバーの版の表の収集を外す・列の値から版を抜く・クライアントの版の表の書き戻しを外す・列の値の書き戻しを外す、のどれもその経路の行だけが赤）。
+- クライアントは `Saved` の値の後に `Unsaved` の値を、`RowState` を変えずに書き戻す。
+- 版は列の値（`Values`・`Saved`）だけが運ぶ（版だけを運ぶ別の欄は持たない）。位置で照合するので、フックが主キーを変えた行にも版が届く。
+- 値の欄が無い応答（Insert の `Values`・成功した Update の `Values`・Save の `Saved`・`Unsaved`）と、`Saved`・`Unsaved` の数が送った行の数と合わない応答は、別の版の QuickER で生成したサーバーの応答として、名指しの `InvalidOperationException`（`RemoteEntityGraph.MismatchedResponse`＝生成し直す案内の英文）で断る。保存はサーバーでコミット済みだが、値を捨てて確定すると版が書き戻らず、次の保存が偽の競合になる。サーバーとクライアントは同じ版の QuickER で生成する（以前の版との互換の経路は持たない）。
+  - ガード：基底の版の書き戻しのシナリオ（`ConcurrencyRuntimeTestsBase` のテスト 1・10・11）をリモートの派生 5 つ（サーバーはインメモリ・QuickER 版 SQL Server・EF Core SQL Server）が流す（列の値から版を抜くと赤）。断る形は `RemoteSaveResponseClientTests`（`Responses_WithoutValues_AreRefused`・`Save_MismatchedValueCount_IsRefused`・`Save_MismatchedUnsavedCount_IsRefused`）。
 - ガード：実装先の一致のシナリオ `remote-save-writes-back-hook-values`・`remote-write-back-by-position`（Remote・RemoteEfCoreOnly）、`IdentityColumnRemoteEfCoreSqlServerRuntimeTests`（EF Core のサーバー・実 SQL Server の採番列が Insert / Save / Update で戻る・Docker）、`RemoteSaveResponseClientTests`（応答を差し替えた HTTP）、`EditModelSaveRuntimeTestsBase` の Before フックのシナリオ（リモートの派生でも流す）、`h3-edit-then-skip-*`・`hook-edit-then-continue-delete`（Remote・RemoteEfCoreOnly の slots）。mutation 実証済み。
 - `CollectSaveRows` が削除行を飛ばさないようにしても緑のまま（両側が同じ関数で並びを作るので食い違わない）。サーバーの一覧を保存の後に作っても緑のまま（EF Core の保存が渡したエンティティのナビゲーションを元へ戻すため）。保存の前に作る形は二重の守りとして残す。
 
@@ -207,6 +205,5 @@ JSON エンベロープ（POST+Base64）とは意図的に別形式の、第 2 �
 ## DI 登録
 
 - 非 keyed・keyed の 2 系統 ×（ベースアドレス版／HttpClient ファクトリ版）の 4 本を用意する。keyed 版は方言別拡張の keyed 版と対で、「サーバー＝HTTP・ローカル＝SQLite」のハイブリッド構成を組むための部品。
-- Save の応答の版対応表は `RemoteRowVersionEntry`（CLR 型名＋`RemoteJson` でシリアライズしたキー）で運ぶ。クライアントが書き込んだ行の版として書き戻す。
 - 共有 HttpClient（`OwnedHttpClient`）も同じキーで `AddKeyedSingleton` する。非 keyed 登録とも別キーとも衝突せず、コンテナ所有（破棄も従来どおり）を保つ。
 - ガード：`CrudParityRemote{AdoSqlite,EfCoreSqlite}RuntimeTests`（Kestrel を 127.0.0.1 の空きポートで in-process 起動・CI 常時実行）、`RemoteTransportRemoteAdoSqliteKeyedRegistrationRuntimeTests`（Kestrel 2 台をキー別に登録して往復・非 keyed 解決との分離・同一キー後勝ち・コンテナ所有の破棄）。

@@ -1050,8 +1050,8 @@ Each dialect caps how long a table, column or constraint name may be, and the un
   A name already within the limit is unchanged.
   A longer one is cut and ends with `_` and 8 hex digits taken from the full name, so two names that differ only after the cut stay different.
   The result is the same every time.
-  When a PostgreSQL database holds a foreign key named with the default name cut at 63 bytes, it is treated as the same foreign key as one in the diagram that has no name of your own.
-  No difference appears, and the foreign key is not renamed
+  A PostgreSQL foreign key whose name is the full default name cut at 63 bytes is not treated as the same foreign key as one in the diagram.
+  The differences show the foreign key added under the shortened name and the one with the cut name dropped; select both and sync once
 - **Names you type** are never shortened.
   DDL generation and schema-sync script generation refuse a name beyond the limit, naming the place and the limit (`TABLE 'x' is longer than the limit of 63 UTF-8 bytes`), and produce nothing.
   Schema sync refuses only a name its script writes, so leaving the addition of a column with too long a name unselected lets the other changes to that table through.

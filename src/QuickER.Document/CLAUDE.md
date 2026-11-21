@@ -10,8 +10,8 @@
 - この帰結を「無害」に限定する規則：Version 1 のまま足すフィールドは、読み手が欠落・古い値を無害に扱える形に限る。無害でないフィールドを足すときは Version を上げる。
   上げれば 0.1.0 以降の読み手は `IsNewerFormat` で気付く。GUI は開く前に続行確認・上書き保存前にも確認、外部変更の自動再読込と MCP の変更系は拒否、CLI は警告。
 - 「無害に扱える」の判定例：
-  - `Entity.PrimaryKeyColumnIds` は欠落＝空リストで、読み手は列宣言順へフォールバックする。失われるのは順序の明示だけで、主キーの膜は `Column.IsPrimaryKey` が運ぶので図は壊れない。ガード：`DocumentFormatTests`（行 `load-legacy-json-without-primary-key-column-ids-yields-empty-list`・`load-explicit-null-primary-key-column-ids-normalized`）。
-  - `Column.IsComputed` は欠落＝false で、失われるのは「書き込みから外す」指定だけ（列そのものは `Column` が運ぶ）。生成コードがその列を書きに行き実 DB がエラーを返す従来の挙動へ戻るだけで、図は壊れない（黙ったデータ喪失ではなくエラーとして表に出る）。`bool` なので明示 null はリストと違い修復せず読込を拒否する。ガード：`DocumentFormatTests`（行 `load-legacy-json-without-is-computed-yields-false`・`tryload-explicit-null-is-computed-rejected-as-invalid-json`）。
+  - `Entity.PrimaryKeyColumnIds` は欠落＝空リストで、読み手は列宣言順へフォールバックする。失われるのは順序の明示だけで、主キーの膜は `Column.IsPrimaryKey` が運ぶので図は壊れない。ガード：`DocumentFormatTests`（行 `load-json-without-primary-key-column-ids-yields-empty-list`・`load-explicit-null-primary-key-column-ids-normalized`）。
+  - `Column.IsComputed` は欠落＝false で、失われるのは「書き込みから外す」指定だけ（列そのものは `Column` が運ぶ）。生成コードがその列を書きに行き実 DB がエラーを返す従来の挙動へ戻るだけで、図は壊れない（黙ったデータ喪失ではなくエラーとして表に出る）。`bool` なので明示 null はリストと違い修復せず読込を拒否する。ガード：`DocumentFormatTests`（行 `load-json-without-is-computed-yields-false`・`tryload-explicit-null-is-computed-rejected-as-invalid-json`）。
   - `Column.IsIdentity` は欠落＝false で、失われるのは書き込み除外だけ（計算列と同じ判定）。
 - 0.1.0 以降に v1 のまま足した公開プロパティは上の 3 つ。`Entity.UniqueConstraints`・`Relationship.ColumnPairs` は 0.1.0 以前（`git diff v0.1.0..HEAD -- src/QuickER.Model src/QuickER.Document` で確認済み）。
 - 規則そのものは設計判断で機械検査できないため、ガードはない。

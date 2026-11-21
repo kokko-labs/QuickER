@@ -10,7 +10,7 @@ using QuickER.Tests.TestSupport.Engines;
 namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 
 /// <summary>
-/// 同期計画の来歴の行：DB の来歴（今の DDL・旧版の DDL）× 子の表名の長さ × 後から図に足した 2 本目の外部キーの全積から、
+/// 同期計画の来歴の行：DB の来歴（今の DDL）× 子の表名の長さ × 後から図に足した 2 本目の外部キーの全積から、
 /// PostgreSQL の決定的な行を作る（網と実 PG の総当たりが同じ行を流す）
 /// </summary>
 /// <remarks>
@@ -18,17 +18,12 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 /// 行の図は親の表 <c>hp1</c>・<c>hp2</c> と、<c>hp1</c> を名前の無い外部キーで参照する子の表（列 <c>p2_ref</c> も持つ）。
 /// DB 側の図の名前の無い外部キーは、行の来歴（<see cref="SyncPlanHistory"/>）の規則で名付けてから DB を作り、目標の図ではその名前を
 /// 外す（利用者の図は名前を付けていない）。2 本目の水準 <c>Added</c> は、目標の図で <c>p2_ref</c> から <c>hp2</c> へ名前の無い外部キーを
-/// 足し、<c>AddedSameParent</c> は同じ親 <c>hp1</c> へ足す（旧版の DB には 1 本だけあり、2 本目は後で図に足した＝来歴＋その後の編集）。
-/// 長い子の表名では、どちらも縮める前の名前を切り詰めると DB の 1 本目と同じ名前になる＝前者は差分の吸収の「同じ親の表だけ」を、
-/// 後者は「live の外部キー 1 本につき 1 回・列ペアの一致を先に」を確かめる。
+/// 足し、<c>AddedSameParent</c> は同じ親 <c>hp1</c> へ足す（DB には 1 本だけあり、2 本目は後で図に足した＝来歴＋その後の編集）。
+/// 長い子の表名では、どちらも縮める前の既定名が上限を超え、縮めた既定名どうしは縮める前の名前のハッシュで別の名前になる。
 /// </para>
 /// <para>
-/// 12 行とも合格の行で、網では静的な規則が失敗を予言せず、実 PG では既定の同期がコミットし、取り込み直した差分が空になる
-/// （<see cref="NetProblems"/>・<see cref="RealProblems"/>）。4m-F1 の行（「旧版 × 長い子の表名 × 2 本目を足す」）は、旧版の 2 本の
-/// 既定名が同じ名前に切り詰められ、差分の吸収が 2 本目の追加にも DB にある 1 本目と同じ名前を与えて断られていた行（修正 E で、吸収を
-/// 同じ子・同じ親の外部キーに 1 回だけ掛けるよう直した）。
-/// 切り詰めは PostgreSQL だけの事実なので、ほかの方言の行は作らない（ほかの方言の旧版は長い名前の DDL を DB が断ったので、その来歴の
-/// DB は無い）。
+/// 6 行とも合格の行で、網では静的な規則が失敗を予言せず、実 PG では既定の同期がコミットし、取り込み直した差分が空になる
+/// （<see cref="NetProblems"/>・<see cref="RealProblems"/>）。
 /// </para>
 /// </remarks>
 internal static class SyncPlanHistoryRows
@@ -57,9 +52,6 @@ internal static class SyncPlanHistoryRows
     /// <summary>2 本目の水準：同じ親（hp1）へ別の列で足す</summary>
     private const string AddedSameParent = "AddedSameParent";
 
-    /// <summary>4m-F1 の指摘の名前</summary>
-    public const string F1Finding = "4m-f1-legacy-fk-name";
-
     /// <summary>次元表</summary>
     public static DimensionTable Table { get; } =
         new(
@@ -68,7 +60,7 @@ internal static class SyncPlanHistoryRows
                 new Factor(
                     History,
                     [.. Enum.GetValues<SyncPlanHistory>().Select(h => new Level(h.ToString()))],
-                    "DB の来歴（今の DDL・旧版の DDL）"
+                    "DB の来歴（今の DDL）"
                 ),
                 new Factor(
                     ChildName,
@@ -121,9 +113,6 @@ internal static class SyncPlanHistoryRows
             _ => "none",
         }}";
 
-    /// <summary>4m-F1 の行の Id</summary>
-    public static string F1Id => IdOf(SyncPlanHistory.PostgreSqlUnshortened, true, Added);
-
     /// <summary>行</summary>
     public static IEnumerable<ScenarioRow<SyncPlanScenarioInput>> Rows =>
         Cells.Select(cell =>
@@ -133,7 +122,7 @@ internal static class SyncPlanHistoryRows
 
             return new ScenarioRow<SyncPlanScenarioInput>(
                 id,
-                id == F1Id ? F1Finding : null,
+                null,
                 $"来歴の行：{History}={cell.History} × {ChildName}={(cell.Long ? "Long" : "Short")} × {SecondForeignKey}={cell.Second}",
                 new SyncPlanScenarioInput(
                     DialectNames.PostgreSql,

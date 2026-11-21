@@ -87,7 +87,7 @@ internal static partial class DocumentFormatRows
                 }
             ),
             Row(
-                "load-legacy-json-without-queries-yields-empty-queries",
+                "load-json-without-queries-yields-empty-queries",
                 "Load: queries が無い既存 JSON は空のクエリ一覧になる",
                 new FormatCase
                 {

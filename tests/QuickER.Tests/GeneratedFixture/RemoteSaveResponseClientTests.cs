@@ -16,15 +16,12 @@ namespace QuickER.Tests.GeneratedConcurrencyFixture;
 /// （ConcurrencyFixture の生成クライアント・DB とサーバーは使わない）。
 /// </summary>
 /// <remarks>
-/// 値は位置で照合し、キーで照合する版の表と食い違っても値が勝つ。値の欄を持たない応答（古いサーバー）では、従来どおり
-/// 版の表と飛ばした行の一覧だけで確定する。値の数が行の数と合わない応答も、値を使わずに従来どおり確定する。
+/// 値は位置で照合し、版も値が運ぶ。値の欄を持たない応答と、値の数が行の数と合わない応答（別の版の QuickER で生成した
+/// サーバー）は、名指しの <see cref="InvalidOperationException"/> で断る。
 /// </remarks>
 public sealed class RemoteSaveResponseClientTests
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
-
-    /// <summary>版の表が運ぶ版（"AQI=" = 01 02）</summary>
-    private const string TableVersion = "AQI=";
 
     /// <summary>値が運ぶ版（"CQo=" = 09 0A）</summary>
     private const string ValuesVersion = "CQo=";
@@ -48,16 +45,18 @@ public sealed class RemoteSaveResponseClientTests
         return gadget;
     }
 
-    [Fact(DisplayName = "リモートの保存: 応答の値が書き戻され、キーで照合する版の表より値が勝つ")]
-    public async Task Save_WritesBackValues_AndValuesWinOverVersionTable()
+    [Fact(
+        DisplayName = "リモートの保存: 応答の値（版を含む）が位置で書き戻され、サーバーのフックが主キーを変えた行にも届く"
+    )]
+    public async Task Save_WritesBackValues_IncludingVersionOfRowWithChangedKey()
     {
         var gadget = NewGadget(1);
         var repository = Client(
             $$"""
             {"Affected":1,
-             "RowVersions":[{"EntityType":"GadgetEntity","Key":"5","RowVersion":"{{TableVersion}}"}],
              "Skipped":null,
-             "Saved":[{"GadgetId":5,"Name":"server","RowVer":"{{ValuesVersion}}"}]}
+             "Saved":[{"GadgetId":5,"Name":"server","RowVer":"{{ValuesVersion}}"}],
+             "Unsaved":[null]}
             """
         );
 
@@ -70,39 +69,33 @@ public sealed class RemoteSaveResponseClientTests
     }
 
     [Fact(
-        DisplayName = "リモートの保存: 値の欄が無い応答（古いサーバー）は、従来どおり版の表で確定する"
+        DisplayName = "リモートの保存・挿入・更新: 値の欄が無い応答（別の版の QuickER で生成したサーバー）は、生成し直す案内の例外で断り、手元の行を変えない"
     )]
-    public async Task Save_WithoutValues_FallsBackToVersionTable()
+    public async Task Responses_WithoutValues_AreRefused()
     {
-        var gadget = NewGadget(1);
-        var repository = Client(
-            $$"""
-            {"Affected":1,
-             "RowVersions":[{"EntityType":"GadgetEntity","Key":"1","RowVersion":"{{TableVersion}}"}]}
-            """
+        var saved = NewGadget(1);
+        var save = () => Client("""{"Affected":1}""").SaveAsync(saved, cancellationToken: Ct);
+        (await save.Should().ThrowAsync<InvalidOperationException>()).WithMessage(
+            "*'Saved'*different versions of QuickER*"
         );
+        saved.RowState.Should().Be(RowState.Added);
 
-        await repository.SaveAsync(gadget, cancellationToken: Ct);
-
-        gadget.Name.Value.Should().Be("local");
-        gadget.RowVer.Value.Should().Equal([0x01, 0x02]);
-        gadget.RowState.Should().Be(RowState.Unchanged);
-    }
-
-    [Fact(DisplayName = "リモートの保存: 値の欄が無い応答でも、飛ばした行の一覧の行は状態を残す")]
-    public async Task Save_WithoutValues_KeepsSkippedRows()
-    {
-        var gadget = NewGadget(1);
-        var repository = Client(
-            """
-            {"Affected":0,"RowVersions":[],
-             "Skipped":[{"EntityType":"GadgetEntity","Key":"1"}]}
-            """
+        var inserted = NewGadget(1);
+        var insert = () => Client("{}").InsertAsync(inserted, Ct);
+        (await insert.Should().ThrowAsync<InvalidOperationException>()).WithMessage(
+            "*'Values'*different versions of QuickER*"
         );
+        inserted.Name.Value.Should().Be("local");
 
-        await repository.SaveAsync(gadget, cancellationToken: Ct);
-
-        gadget.RowState.Should().Be(RowState.Added);
+        var updated = NewGadget(1);
+        updated.RowVer = RowVerValue.Create([0x00]);
+        updated.MarkUpdated();
+        var update = () =>
+            Client("""{"Updated":true}""").UpdateAsync(updated, cancellationToken: Ct);
+        (await update.Should().ThrowAsync<InvalidOperationException>()).WithMessage(
+            "*'Values'*different versions of QuickER*"
+        );
+        updated.RowVer.Value.Should().Equal([0x00]);
     }
 
     [Fact(DisplayName = "リモートの保存: 値が null の位置の行は飛ばした行として状態を残す")]
@@ -111,7 +104,7 @@ public sealed class RemoteSaveResponseClientTests
         var gadget = NewGadget(1);
         var repository = Client(
             """
-            {"Affected":0,"RowVersions":[],"Skipped":[],"Saved":[null]}
+            {"Affected":0,"Skipped":[],"Saved":[null],"Unsaved":[null]}
             """
         );
 
@@ -122,24 +115,24 @@ public sealed class RemoteSaveResponseClientTests
     }
 
     [Fact(
-        DisplayName = "リモートの保存: 値の数が行の数と合わない応答は、値を使わずに従来どおり確定する"
+        DisplayName = "リモートの保存: 値の数が行の数と合わない応答は、数を名指しした例外で断り、手元の行を変えない"
     )]
-    public async Task Save_MismatchedValueCount_IgnoresValues()
+    public async Task Save_MismatchedValueCount_IsRefused()
     {
         var gadget = NewGadget(1);
         var repository = Client(
-            $$"""
-            {"Affected":1,
-             "RowVersions":[{"EntityType":"GadgetEntity","Key":"1","RowVersion":"{{TableVersion}}"}],
-             "Saved":[{"Name":"a"},{"Name":"b"}]}
+            """
+            {"Affected":1,"Saved":[{"Name":"a"},{"Name":"b"}],"Unsaved":[null]}
             """
         );
 
-        await repository.SaveAsync(gadget, cancellationToken: Ct);
+        var save = () => repository.SaveAsync(gadget, cancellationToken: Ct);
 
+        (await save.Should().ThrowAsync<InvalidOperationException>()).WithMessage(
+            "*2 'Saved' values for 1 rows*"
+        );
         gadget.Name.Value.Should().Be("local");
-        gadget.RowVer.Value.Should().Equal([0x01, 0x02]);
-        gadget.RowState.Should().Be(RowState.Unchanged);
+        gadget.RowState.Should().Be(RowState.Added);
     }
 
     [Fact(DisplayName = "リモートの保存: 飛ばした行は、Unsaved の値が書き戻され、状態を残す")]
@@ -148,7 +141,7 @@ public sealed class RemoteSaveResponseClientTests
         var gadget = NewGadget(1);
         var repository = Client(
             """
-            {"Affected":0,"RowVersions":[],"Skipped":[],"Saved":[null],
+            {"Affected":0,"Skipped":[],"Saved":[null],
              "Unsaved":[{"GadgetId":1,"Name":"hook"}]}
             """
         );
@@ -166,7 +159,7 @@ public sealed class RemoteSaveResponseClientTests
         gadget.MarkRemoved();
         var repository = Client(
             """
-            {"Affected":1,"RowVersions":[],"Skipped":[],"Saved":[],
+            {"Affected":1,"Skipped":[],"Saved":[],
              "Unsaved":[{"GadgetId":1,"Name":"hook-delete"}]}
             """
         );
@@ -177,19 +170,24 @@ public sealed class RemoteSaveResponseClientTests
         gadget.RowState.Should().Be(RowState.Removed);
     }
 
-    [Fact(DisplayName = "リモートの保存: Unsaved の数が行の数と合わない応答は、Unsaved を使わない")]
-    public async Task Save_MismatchedUnsavedCount_IgnoresUnsaved()
+    [Fact(
+        DisplayName = "リモートの保存: Unsaved の数が行の数と合わない応答は、数を名指しした例外で断り、手元の行を変えない"
+    )]
+    public async Task Save_MismatchedUnsavedCount_IsRefused()
     {
         var gadget = NewGadget(1);
         var repository = Client(
             """
-            {"Affected":0,"RowVersions":[],"Skipped":[],"Saved":[null],
+            {"Affected":0,"Skipped":[],"Saved":[null],
              "Unsaved":[{"Name":"a"},{"Name":"b"}]}
             """
         );
 
-        await repository.SaveAsync(gadget, cancellationToken: Ct);
+        var save = () => repository.SaveAsync(gadget, cancellationToken: Ct);
 
+        (await save.Should().ThrowAsync<InvalidOperationException>()).WithMessage(
+            "*2 'Unsaved' values for 1 rows*"
+        );
         gadget.Name.Value.Should().Be("local");
         gadget.RowState.Should().Be(RowState.Added);
     }
@@ -199,7 +197,7 @@ public sealed class RemoteSaveResponseClientTests
     )]
     public void SaveResult_UnsavedRoundTripsAndUnknownFieldsAreIgnored()
     {
-        var result = new RemoteSaveResult(1, [], null, [null])
+        var result = new RemoteSaveResult(1, null, [null])
         {
             Unsaved = [new() { ["Name"] = JsonSerializer.SerializeToElement("x") }],
         };
@@ -209,22 +207,22 @@ public sealed class RemoteSaveResponseClientTests
 
         read.Unsaved.Should().ContainSingle().Which!["Name"].GetString().Should().Be("x");
 
-        // 旧いクライアントが新しいサーバーの応答を読む形（知らない欄を持つ応答）と、旧いサーバーの応答（Unsaved なし）
+        // 知らない欄は読み捨て、欄の無い Unsaved は null で読む（クライアントは null の Unsaved を断る）
         var withUnknown = JsonSerializer.Deserialize<RemoteSaveResult>(
-            """{"Affected":2,"RowVersions":[],"FieldFromTheFuture":[1]}""",
+            """{"Affected":2,"FieldFromTheFuture":[1]}""",
             RemoteJson.Options
         )!;
         withUnknown.Affected.Should().Be(2);
         withUnknown.Unsaved.Should().BeNull();
     }
 
-    [Fact(DisplayName = "リモートの挿入: 応答の値が書き戻され、版より値が勝つ")]
+    [Fact(DisplayName = "リモートの挿入: 応答の値（版を含む）が書き戻される")]
     public async Task Insert_WritesBackValues()
     {
         var gadget = NewGadget(1);
         var repository = Client(
             $$$"""
-            {"RowVersion":"{{{TableVersion}}}","Values":{"Name":"server","RowVer":"{{{ValuesVersion}}}"}}
+            {"Values":{"Name":"server","RowVer":"{{{ValuesVersion}}}"}}
             """
         );
 
@@ -234,7 +232,7 @@ public sealed class RemoteSaveResponseClientTests
         gadget.RowVer.Value.Should().Equal([0x09, 0x0A]);
     }
 
-    [Fact(DisplayName = "リモートの更新: 応答の値が書き戻され、版より値が勝つ")]
+    [Fact(DisplayName = "リモートの更新: 応答の値（版を含む）が書き戻される")]
     public async Task Update_WritesBackValues()
     {
         var gadget = NewGadget(1);
@@ -242,7 +240,7 @@ public sealed class RemoteSaveResponseClientTests
         gadget.MarkUpdated();
         var repository = Client(
             $$$"""
-            {"Updated":true,"RowVersion":"{{{TableVersion}}}","Values":{"Name":"server","RowVer":"{{{ValuesVersion}}}"}}
+            {"Updated":true,"Values":{"Name":"server","RowVer":"{{{ValuesVersion}}}"}}
             """
         );
 

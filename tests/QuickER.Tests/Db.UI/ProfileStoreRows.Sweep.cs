@@ -57,7 +57,7 @@ internal static partial class ProfileStoreRows
         + id.ToString("D")
         + "\",\"name\":\""
         + name
-        + "\",\"server\":\""
+        + "\",\"dbms\":\"sqlserver\",\"server\":\""
         + server
         + "\",\"database\":\"db\",\"savePassword\":"
         + (save ? "true" : "false")

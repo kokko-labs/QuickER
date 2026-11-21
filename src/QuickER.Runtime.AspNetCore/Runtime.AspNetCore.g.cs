@@ -877,11 +877,7 @@ public static class RemoteServerEngine
                         await Repository<TRepository>(context)
                             .InsertAsync(entity, context.RequestAborted).ConfigureAwait(false);
                         // The insert leaves the newly assigned version, and any value the backend wrote back, on the entity, which the client writes back
-                        return (object?)
-                            new RemoteInsertResult(
-                                RemoteEntityGraph.ReadRowVersion(entity),
-                                RemoteEntityGraph.ReadColumnValues(entity)
-                            );
+                        return (object?)new RemoteInsertResult(RemoteEntityGraph.ReadColumnValues(entity));
                     }
                 )
         );
@@ -904,7 +900,6 @@ public static class RemoteServerEngine
                         return (object?)
                             new RemoteUpdateResult(
                                 updated,
-                                updated ? RemoteEntityGraph.ReadRowVersion(entity) : null,
                                 updated ? RemoteEntityGraph.ReadColumnValues(entity) : null
                             );
                     }
@@ -951,7 +946,6 @@ public static class RemoteServerEngine
                         return (object?)
                             new RemoteSaveResult(
                                 affected,
-                                CollectRowVersions([entity], request.CascadeSave),
                                 CollectSkipped([entity], request.CascadeSave),
                                 RemoteEntityGraph.ReadSavedValues(rows)
                             )
@@ -986,7 +980,6 @@ public static class RemoteServerEngine
                         return (object?)
                             new RemoteSaveResult(
                                 affected,
-                                CollectRowVersions(entities, request.CascadeSave),
                                 CollectSkipped(entities, request.CascadeSave),
                                 RemoteEntityGraph.ReadSavedValues(rows)
                             )
@@ -1016,36 +1009,6 @@ public static class RemoteServerEngine
     }
 
     /// <summary>
-    /// Collects the row versions a completed save assigned across the saved graphs, so that the client can write them back
-    /// onto its own entities.
-    /// </summary>
-    /// <remarks>
-    /// The traversal is the server-side counterpart of the client's <c>AcceptChanges</c>: both walk the same
-    /// [NavigationReference(Cascade=true)] child navigations (<c>EntityBaseCore.EnumerateCascadeChildren</c>) and identify an
-    /// entity the same way, so every collected entry lands on the matching local entity. Backends that assign no versions -
-    /// a dialect without a rowversion type, or a diagram whose tables carry no such column - simply yield an empty list.
-    /// </remarks>
-    public static List<RemoteRowVersionEntry> CollectRowVersions<TEntity>(
-        IEnumerable<TEntity> entities,
-        bool cascade
-    )
-        where TEntity : EntityBaseCore
-    {
-        var rowVersions = new List<RemoteRowVersionEntry>();
-
-        foreach (var entity in entities)
-        {
-            // A null element is filtered out by the save itself, so it is passed over here as well
-            if (entity is not null)
-            {
-                RemoteEntityGraph.CollectRowVersions(entity, cascade, rowVersions);
-            }
-        }
-
-        return rowVersions;
-    }
-
-    /// <summary>
     /// Collects the rows a save hook's Before skipped, so that the client can leave their RowState untouched instead of
     /// finalizing them to Unchanged.
     /// </summary>
@@ -1057,8 +1020,10 @@ public static class RemoteServerEngine
     /// untouched in either case.
     /// </para>
     /// <para>
-    /// The traversal and the identity of a row are shared with the row version table, so the same constraint applies: when a
-    /// graph contains the same (type, key) twice, the entries collapse onto one entity on the client side.
+    /// The traversal is the server-side counterpart of the client's <c>AcceptChanges</c>: both walk the same
+    /// [NavigationReference(Cascade=true)] child navigations (<c>EntityBaseCore.EnumerateCascadeChildren</c>) and identify a
+    /// row by its type and key, so when a graph contains the same (type, key) twice, the entries collapse onto one entity on
+    /// the client side.
     /// </para>
     /// <para>
     /// The list is part of the wire contract, which is not promised to stay compatible across QuickER versions while the tool

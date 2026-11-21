@@ -1728,7 +1728,7 @@ internal static partial class SyncPlanExpectationRows
             );
     }
 
-    /// <summary>既定の制約名が上限を超える図（上限のある 4 方言）と、PostgreSQL の旧版が切り詰めた外部キー名の吸収</summary>
+    /// <summary>既定の制約名が上限を超える図（上限のある 4 方言）と、PostgreSQL が切り詰めた外部キー名の作り直し</summary>
     private static IEnumerable<
         ScenarioRow<SyncPlanExpectationInput>
     > RealCrossDialectLongDefaultNameRows() =>
@@ -1787,8 +1787,8 @@ internal static partial class SyncPlanExpectationRows
                     })
                 ),
             Row(
-                    "realdb-long-default-pg-legacy-truncated-fk-name-is-absorbed",
-                    "[Integration] PostgreSQL: 旧版の DDL で作った長い既定名の外部キー（PG が切り詰めた名前）は、取り込み直しても差分が出ない",
+                    "realdb-long-default-pg-truncated-fk-name-is-recreated-once",
+                    "[Integration] PostgreSQL: 縮めない長い既定名で作った外部キー（PG が切り詰めた名前＝以前の版の DDL）は、縮めた既定名の外部キーの追加と切り詰めた名前の外部キーの削除になり、両方を選んで同期すると取り込み直しても差分が出ない",
                     DialectNames.PostgreSql
                 )
                 .TargetWith(w =>
@@ -1797,23 +1797,33 @@ internal static partial class SyncPlanExpectationRows
                         LongNameDiagrams.BuildSingleForeignKey(40, DialectNames.PostgreSql)
                     )
                 )
-                .Select(items => RealScenarios.SelectKinds(items))
+                .Select(items => RealScenarios.SelectAll(items))
                 .OnRealDatabase(r =>
-                    r.LiveSql(RealCrossDialectScenarios.LegacyPostgreSqlLongNameSql)
+                    r.LiveSql(RealCrossDialectScenarios.TruncatedPostgreSqlLongNameSql)
                         .Expect(e =>
                         {
                             var limit = SyncPlanExpectationCapabilities
                                 .Get(DialectNames.PostgreSql)
                                 .IdentifierLengthLimit;
-                            var (parent, child) = RealCrossDialectScenarios.LegacyTables;
-                            var legacyName = "FK_" + child + "_" + parent;
-                            e.Before.Count("fk *", 1);
-                            e.Before.Single($"fk {child} {limit.Truncate(legacyName)} *");
-                            e.Before.Absent(
-                                $"fk * {ConstraintNames.ForeignKey(child, parent, limit)} *"
+                            var (parent, child) = RealCrossDialectScenarios.TruncatedNameTables;
+                            var truncated = PostgreSqlIdentifierTruncation.Truncate(
+                                ConstraintNames.ForeignKey(
+                                    child,
+                                    parent,
+                                    IdentifierLengthLimit.Unlimited
+                                )
                             );
-                            e.Diff.Empty();
+                            var shortened = ConstraintNames.ForeignKey(child, parent, limit);
+                            e.Before.Count("fk *", 1);
+                            e.Before.Single($"fk {child} {truncated} *");
+                            e.Before.Absent($"fk * {shortened} *");
+                            e.Diff.Count("*", 2);
+                            e.Diff.Single($"AddForeignKey * fk={shortened} *");
+                            e.Diff.Single($"DropForeignKey * fk={truncated} *");
                             e.Outcome.Exact("committed");
+                            e.After.Count("fk *", 1);
+                            e.After.Single($"fk {child} {shortened} *");
+                            e.AfterDiff.Empty();
                         })
                 ),
         ];
@@ -2083,22 +2093,22 @@ internal static class RealCrossDialectScenarios
     public static void Adopt(ExpectationSchema s, ErDiagram diagram) =>
         s.Adopt(diagram.Entities, diagram.Relationships);
 
-    /// <summary>旧版の DDL を再現する表（親・子とも 40 文字）</summary>
-    public static (string Parent, string Child) LegacyTables =>
+    /// <summary>縮めない長い既定名の外部キーの表（親・子とも 40 文字）</summary>
+    public static (string Parent, string Child) TruncatedNameTables =>
         (new string('p', 40), new string('c', 40));
 
     /// <summary>
-    /// 旧版の QuickER が書いた DDL と同じ形（外部キーの既定名を縮めずに書く＝PostgreSQL が 63 バイトで切り詰めて保存する）
+    /// 外部キーの既定名を縮めずに書いた DDL（以前の版の QuickER が書いた形＝PostgreSQL が 63 バイトで切り詰めて保存する）
     /// </summary>
-    public static string LegacyPostgreSqlLongNameSql
+    public static string TruncatedPostgreSqlLongNameSql
     {
         get
         {
-            var (parent, child) = LegacyTables;
-            var legacyName = "FK_" + child + "_" + parent;
+            var (parent, child) = TruncatedNameTables;
+            var unshortenedName = "FK_" + child + "_" + parent;
             return $"CREATE TABLE {PgIdentifier.Quote(parent)} (id integer NOT NULL, CONSTRAINT \"PK_{parent}\" PRIMARY KEY (id));\n"
                 + $"CREATE TABLE {PgIdentifier.Quote(child)} (id integer NOT NULL, parent_id integer NOT NULL, CONSTRAINT \"PK_{child}\" PRIMARY KEY (id));\n"
-                + $"ALTER TABLE {PgIdentifier.Quote(child)} ADD CONSTRAINT \"{legacyName}\" FOREIGN KEY (parent_id) REFERENCES {PgIdentifier.Quote(parent)} (id);";
+                + $"ALTER TABLE {PgIdentifier.Quote(child)} ADD CONSTRAINT \"{unshortenedName}\" FOREIGN KEY (parent_id) REFERENCES {PgIdentifier.Quote(parent)} (id);";
         }
     }
 }

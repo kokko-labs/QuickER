@@ -127,7 +127,6 @@ public static class GeneratedFixedTypeNames
             "RemoteJson",
             "RemotePaths",
             "RemoteRepositoryException",
-            "RemoteRowVersionEntry",
             "RemoteSaveManyRequest",
             "RemoteSaveRequest",
             "RemoteSaveResult",

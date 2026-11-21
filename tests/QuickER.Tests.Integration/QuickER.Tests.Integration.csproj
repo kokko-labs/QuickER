@@ -110,6 +110,10 @@
     -->
     <Compile Include="..\QuickER.Tests\TestSupport\NameFuzz*.cs" LinkBase="TestSupport" />
     <Compile Include="..\QuickER.Tests\TestSupport\LongNameDiagrams.cs" LinkBase="TestSupport" />
+    <Compile
+      Include="..\QuickER.Tests\TestSupport\PostgreSqlIdentifierTruncation.cs"
+      LinkBase="TestSupport"
+    />
   </ItemGroup>
 
   <ItemGroup>

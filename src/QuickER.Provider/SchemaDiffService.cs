@@ -432,20 +432,16 @@ public class SchemaDiffService
         var fkDrops = new List<SchemaDiffItem>();
 
         // 外部キー名は DDL・同期スクリプトが付けるのと同じ規則で求める（名前の無い同じ組の 2 本目は一意化される。
-        // 既定名は同期の方言の上限で縮める）
+        // 既定名は同期の方言の上限で縮める）。図の名前は揃える前の図（namingEntities＝DDL と同じ図の綴り）から求める
         var liveFkNames = ConstraintNames.ResolveForeignKeyNames(
             liveEntities,
             liveRelationships,
             dialect.IdentifierLengthLimit
         );
-        var targetFkNames = ResolveTargetForeignKeyNames(
+        var targetFkNames = ConstraintNames.ResolveForeignKeyNames(
             namingEntities,
-            targetEntities,
             targetRelationships,
-            liveEntities,
-            liveFkNames,
-            includeFkConstraintName,
-            dialect
+            dialect.IdentifierLengthLimit
         );
         // 外部キーとして扱えるリレーションを両側で 1 回ずつ解決し、シグネチャも 1 回ずつ求める
         var liveFks = ForeignKeyColumnPairResolver
@@ -1206,124 +1202,6 @@ public class SchemaDiffService
 
         return mapped;
     }
-
-    /// <summary>図の外部キーの名前を求める（旧版の PostgreSQL が切り詰めた既定名を吸収する）</summary>
-    /// <remarks>
-    /// <para>
-    /// 名前は DDL と同じ規則（<see cref="ConstraintNames.ResolveForeignKeyNameDetails"/>・同期の方言の上限で既定名を縮める）。名前は
-    /// 揃える前の図（<paramref name="namingEntities"/>＝DDL と同じ図の綴り）から求め、吸収の照合は live の綴りへ揃えた表で行う。
-    /// </para>
-    /// <para>
-    /// 上限を超える識別子を黙って切り詰める方言（<see cref="SyncDialectCapabilities.TruncatesLongIdentifiers"/>＝PostgreSQL）
-    /// では、名前の無いリレーションに限り、同じ子テーブルの live の外部キーに「縮める前の名前を方言の切り方で切った名前」
-    /// があれば、その名前を図の外部キーの名前とする（同じ外部キーとみなす）。旧版の QuickER は長い既定名をそのまま
-    /// DDL へ書き、PostgreSQL が切り詰めて保存していたため、吸収しないと既定名を縮める版で同期したときに同じ外部キーが
-    /// 追加と削除の 2 項目になる。保存された名前（利用者が付けた名前）は対象にしない。
-    /// </para>
-    /// <para>
-    /// 吸収するのは、live の外部キーと同じ子・同じ親の表の外部キーだけで、live の外部キー 1 本につき 1 本だけ
-    /// （候補が複数なら列ペアが一致するもの、無ければ図の並びの先）。子の表名が長いと、親の違う外部キー
-    /// （<c>FK_{子}_p1</c> と <c>FK_{子}_p2</c>）の縮める前の名前は切り詰めると同じ名前になるので、子と名前だけで
-    /// 吸収すると、後から図に足した 2 本目にも DB の 1 本目と同じ名前を与え、既定で選ばれる追加が同じ名前で
-    /// 断られた（42710）。吸収しなかった外部キーは今の既定名（縮めた名前）で追加する。
-    /// </para>
-    /// </remarks>
-    private static IReadOnlyDictionary<Relationship, string> ResolveTargetForeignKeyNames(
-        IReadOnlyList<Entity> namingEntities,
-        IReadOnlyList<Entity> targetEntities,
-        IReadOnlyList<Relationship> targetRelationships,
-        IReadOnlyList<Entity> liveEntities,
-        IReadOnlyDictionary<Relationship, string> liveFkNames,
-        bool includeConstraintName,
-        SyncDialectCapabilities dialect
-    )
-    {
-        var limit = dialect.IdentifierLengthLimit;
-        var details = ConstraintNames.ResolveForeignKeyNameDetails(
-            namingEntities,
-            targetRelationships,
-            limit
-        );
-        var names = details.ToDictionary(pair => pair.Key, pair => pair.Value.Name);
-
-        if (!dialect.TruncatesLongIdentifiers || !includeConstraintName)
-        {
-            return names;
-        }
-
-        // live の外部キーを「子テーブル＋名前」で引けるようにする（親の表と列ペアも持つ）
-        var liveByKey = new Dictionary<string, (string Parent, string Pairs)>(
-            StringComparer.Ordinal
-        );
-
-        foreach (var fk in ForeignKeyColumnPairResolver.ResolveAll(liveFkNames.Keys, liveEntities))
-        {
-            liveByKey.TryAdd(
-                LegacyForeignKeyKey(NormalizeTable(fk.Child), liveFkNames[fk.Relationship]),
-                (NameKey(NormalizeTable(fk.Parent)), PairSetSignature(fk))
-            );
-        }
-
-        // 吸収の候補（名前の無い外部キーで、縮める前の名前を切り詰めると live の外部キーの名前になるもの）を、
-        // live の外部キーごとに図の並びで集める
-        var candidates = new Dictionary<
-            string,
-            List<(Relationship Relationship, string Legacy, string Pairs)>
-        >(StringComparer.Ordinal);
-
-        foreach (
-            var fk in ForeignKeyColumnPairResolver.ResolveAll(targetRelationships, targetEntities)
-        )
-        {
-            // 上限内の名前は縮めていない＝旧版と同じ名前なので吸収の対象外
-            if (
-                !details.TryGetValue(fk.Relationship, out var resolved)
-                || resolved.IsStored
-                || limit.Fits(resolved.UnshortenedName)
-            )
-            {
-                continue;
-            }
-
-            var legacy = limit.Truncate(resolved.UnshortenedName);
-            var key = LegacyForeignKeyKey(NormalizeTable(fk.Child), legacy);
-
-            if (
-                !liveByKey.TryGetValue(key, out var live)
-                || live.Parent != NameKey(NormalizeTable(fk.Parent))
-            )
-            {
-                continue;
-            }
-
-            if (!candidates.TryGetValue(key, out var list))
-            {
-                list = [];
-                candidates.Add(key, list);
-            }
-
-            list.Add((fk.Relationship, legacy, PairSetSignature(fk)));
-        }
-
-        foreach (var (key, list) in candidates)
-        {
-            var livePairs = liveByKey[key].Pairs;
-            var chosen = list.FirstOrDefault(candidate => candidate.Pairs == livePairs);
-
-            if (chosen.Relationship is null)
-            {
-                chosen = list[0];
-            }
-
-            names[chosen.Relationship] = chosen.Legacy;
-        }
-
-        return names;
-    }
-
-    /// <summary>旧版の切り詰めた名前を引くキー（子テーブル＋名前。名前の比べ方はシグネチャと同じ）</summary>
-    private static string LegacyForeignKeyKey(string childTable, string name) =>
-        NameKey(childTable) + "|" + NameKey(name);
 
     /// <summary>
     /// 同じ外部キーの作り直しにあたる削除候補と追加候補を、1 つの <see cref="SchemaDiffKind.AlterForeignKey"/> へ畳む。

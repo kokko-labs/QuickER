@@ -6,6 +6,24 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Breaking changes
+
+#### Generated code
+
+- **Remote save, insert and update responses now carry row versions only in the column values** — The fields that carried versions alone (such as `RemoteSaveResult.RowVersions`) are gone, and a response without the values, or with a number of values that does not match the rows sent, is refused with an `InvalidOperationException`. Regenerate the remote server and client with the same version of QuickER
+
+#### DB sync & DDL
+
+- **On PostgreSQL, a foreign key created with the full default name is no longer treated as the same foreign key as the one in the diagram** — In a database created with the DDL of 0.2.0 or earlier, the differences show the foreign key with the name cut at 63 bytes dropped and the one with the shortened name added. Select both and sync once
+
+#### DB import & connections
+
+- **A `connections.json` holding a connection profile without the DBMS type is now treated as a corrupt file** — It used to be read as SQL Server. The file is backed up to `connections.json.corrupt` and the list starts empty, so create the connections again
+
+#### Diagram files
+
+- **An auto-save record without the diagram's hash (written by 0.2.0 or earlier) is no longer trusted** — On the first start after the update, the diagram you had open may be restored as untitled and unsaved. Save it to its file again
+
 ### Changed
 
 #### DB sync & DDL
