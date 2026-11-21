@@ -184,7 +184,7 @@ public sealed class WorkflowGuardTests
     /// 複数行の run では途中のビルドの失敗が後続の成功で隠れる。
     /// </remarks>
     [Fact(
-        DisplayName = "ci.yml の dotnet build は build-and-test の QuickER.slnx の 1 回と、integration-tests-windows の Integration の 1 回だけ"
+        DisplayName = "ci.yml の dotnet build は build-and-test の QuickER.slnx の 1 回と、Windows の Integration の 2 つのジョブの Integration の 1 回ずつだけ"
     )]
     public void SampleSteps_DoNotRebuild()
     {
@@ -199,9 +199,18 @@ public sealed class WorkflowGuardTests
         );
 
         builds["build-and-test"].Should().Equal("dotnet build QuickER.slnx");
-        builds[WindowsIntegrationJob].Should().Equal($"dotnet build {IntegrationProject}");
+        foreach (var job in WindowsIntegrationJobs)
+        {
+            builds[job]
+                .Should()
+                .Equal(
+                    [$"dotnet build {IntegrationProject}"],
+                    $"{job} は Integration だけを 1 回ビルドする"
+                );
+        }
+
         builds
-            .Where(job => job.Key is not "build-and-test" and not WindowsIntegrationJob)
+            .Where(job => job.Key != "build-and-test" && !WindowsIntegrationJobs.Contains(job.Key))
             .SelectMany(job => job.Value)
             .Should()
             .BeEmpty("ほかのジョブは dotnet build の手順を持たない");
@@ -220,7 +229,12 @@ public sealed class WorkflowGuardTests
     [InlineData("ci.yml", "build-and-test", "dotnet test " + UnitTestProject + " --no-build")]
     [InlineData(
         "ci.yml",
-        WindowsIntegrationJob,
+        WindowsIntegrationSyncJob,
+        "dotnet test " + IntegrationProject + " --no-build"
+    )]
+    [InlineData(
+        "ci.yml",
+        WindowsIntegrationRestJob,
         "dotnet test " + IntegrationProject + " --no-build"
     )]
     [InlineData("publish.yml", "publish", "dotnet test QuickER.slnx --no-build")]
@@ -231,9 +245,7 @@ public sealed class WorkflowGuardTests
         string command
     )
     {
-        var steps = JobSteps(Jobs(ReadWorkflow(workflow))[job])
-            .Where(step => Regex.IsMatch(step, @"^\s*- name: テスト\s*$", RegexOptions.Multiline))
-            .ToList();
+        var steps = NamedTestSteps(Jobs(ReadWorkflow(workflow))[job]);
 
         steps.Should().ContainSingle($"{job} にテストの手順がちょうど 1 つある");
         steps[0].Should().Contain(command, $"{job} のテストの手順は {command} で流す");
@@ -385,7 +397,16 @@ public sealed class WorkflowGuardTests
         DisplayName = "ci.yml の Windows のテストは TRX を書き、if: always() の upload-artifact で保存する"
     )]
     [InlineData("build-and-test", UnitTestProject, "build-and-test-trx")]
-    [InlineData(WindowsIntegrationJob, IntegrationProject, "integration-tests-windows-trx")]
+    [InlineData(
+        WindowsIntegrationSyncJob,
+        IntegrationProject,
+        "integration-tests-windows-sync-trx"
+    )]
+    [InlineData(
+        WindowsIntegrationRestJob,
+        IntegrationProject,
+        "integration-tests-windows-rest-trx"
+    )]
     public void WindowsTestStep_KeepsTestResultsAsArtifacts(
         string job,
         string project,
@@ -393,12 +414,12 @@ public sealed class WorkflowGuardTests
     )
     {
         var body = Jobs(ReadWorkflow("ci.yml"))[job];
-        var testSteps = FullTestSteps(body);
+        var testSteps = NamedTestSteps(body);
 
         testSteps
             .Should()
             .ContainSingle(
-                $"{job} の全件のテストの手順はちょうど 1 つ（単発のテストの報告の dotnet test は絞り込みつきの別の手順）"
+                $"{job} のテストの手順（名前がテスト）はちょうど 1 つ（単発のテストの報告の dotnet test は名前の違う別の手順）"
             );
 
         testSteps[0]
@@ -415,15 +436,17 @@ public sealed class WorkflowGuardTests
 
     /// <summary>どのテストのプロジェクトも Windows のジョブで流れ、Integration は厳格の Ubuntu でも流れる</summary>
     /// <remarks>
-    /// Windows のテストは build-and-test（QuickER.Tests）と integration-tests-windows（Integration）に分けている（1 つのジョブで
-    /// 流すと 2 つのプロジェクトが同じ 4 コアを取り合い、遅いランナーでは 30 分に収まらない）。分けた形を崩すと、テストのプロジェクトが
-    /// どの Windows のジョブからも黙って落ちるか、build-and-test を <c>QuickER.slnx</c> に戻して Windows で Integration を 2 回流す。
+    /// Windows のテストは build-and-test（QuickER.Tests）と、Integration を互いに裏返しの絞り込みで流す 2 つのジョブ
+    /// （integration-tests-windows-sync / -rest）に分けている（1 つのジョブで流すと 2 つのプロジェクトが同じ 4 コアを取り合い、
+    /// Integration を 1 つのジョブで流しても遅いランナーでは 30 分に収まらない）。分けた形を崩すと、テストのプロジェクトや
+    /// Integration の一部がどの Windows のジョブからも黙って落ちるか、Windows で 2 回流す。
     /// テストのプロジェクトは照合の行 <c>test-projects-run-on-mtp</c> と同じ関数で集める（写しを作らない）。
-    /// Windows の全件のテストの手順が流すプロジェクトを多重集合で比べるので、足りない・2 回流す・プロジェクトでないもの（slnx）を流す、
+    /// Windows のプロジェクトの 1 回は、絞り込みの無い全件の手順 1 つか、同じ項の肯定（<c>~</c>）と否定（<c>!~</c>）の絞り込みの
+    /// 手順の対で数え、多重集合で比べるので、足りない・2 回流す・プロジェクトでないもの（slnx）を流す・絞り込みを片方だけ変える、
     /// のどれでも赤になる。
     /// </remarks>
     [Fact(
-        DisplayName = "ci.yml はどのテストのプロジェクトも Windows のジョブで 1 回ずつ流し、Integration は Integration だけをビルドした別のジョブと、厳格の Ubuntu のジョブでも流す"
+        DisplayName = "ci.yml はどのテストのプロジェクトも Windows のジョブで 1 回ずつ流し、Integration は Integration だけをビルドした裏返しの絞り込みの 2 つのジョブと、厳格の Ubuntu のジョブでも流す"
     )]
     public void TestProjects_RunInWindowsJobsAndIntegrationAlsoOnStrictLinux()
     {
@@ -445,36 +468,73 @@ public sealed class WorkflowGuardTests
             .ToList();
 
         testProjects.Should().Contain([UnitTestProject, IntegrationProject]);
+
+        // Windows の Integration の絞り込みつきの手順は、同じ項の肯定と否定の対でちょうど 1 回と数える
+        var windowsJobs = runs.Where(run => run.RunsOn == "windows-latest").Select(run => run.Job);
+        var partitions = windowsJobs
+            .SelectMany(job =>
+                FilteredTestSteps(jobs[job], IntegrationProject)
+                    .Select(step => (Job: job, Step: step))
+            )
+            .ToList();
+        partitions
+            .Select(part => part.Job)
+            .Should()
+            .BeEquivalentTo(
+                WindowsIntegrationJobs,
+                "Windows の Integration を絞り込みつきで流すのは 2 つのジョブで、1 つずつ"
+            );
+        AreComplementaryFilters(FilterOf(partitions[0].Step), FilterOf(partitions[1].Step))
+            .Should()
+            .BeTrue(
+                $"2 つのジョブの絞り込みは同じ項の肯定と否定（どのテストもちょうど 1 回流れる）: "
+                    + $"{FilterOf(partitions[0].Step)} / {FilterOf(partitions[1].Step)}"
+            );
+
         runs.Where(run => run.RunsOn == "windows-latest")
             .SelectMany(run => run.Steps.Select(TestedTarget))
+            .Append(IntegrationProject)
             .Should()
             .BeEquivalentTo(
                 testProjects,
-                "どのテストのプロジェクトも Windows のどれかのジョブでちょうど 1 回流れる"
+                "どのテストのプロジェクトも Windows のどれかのジョブでちょうど 1 回流れる（Integration は裏返しの対で 1 回）"
             );
         runs.Single(run => run.Job == "build-and-test")
             .Steps.Select(TestedTarget)
             .Should()
             .Equal(
                 [UnitTestProject],
-                "build-and-test は Integration を流さない（Integration は integration-tests-windows が流す）"
+                "build-and-test は Integration を流さない（Integration は Windows の Integration の 2 つのジョブが流す）"
             );
 
-        // integration-tests-windows：テストの手順の前に Integration のビルドを持ち、テストは --no-build で流す
-        var windowsIntegration = JobSteps(jobs[WindowsIntegrationJob]);
-        var build = windowsIntegration.FindIndex(step =>
-            Regex.IsMatch(
-                step,
-                $@"(?m)^\s+run: dotnet build {Regex.Escape(IntegrationProject)}\s*$"
-            )
-        );
-        var test = windowsIntegration.FindIndex(step => IsFullTestStep(step, IntegrationProject));
+        // Windows の Integration の 2 つのジョブ：テストの手順の前に Integration のビルドを持ち、テストは --no-build で流す
+        foreach (var job in WindowsIntegrationJobs)
+        {
+            var windowsIntegration = JobSteps(jobs[job]);
+            var build = windowsIntegration.FindIndex(step =>
+                Regex.IsMatch(
+                    step,
+                    $@"(?m)^\s+run: dotnet build {Regex.Escape(IntegrationProject)}\s*$"
+                )
+            );
+            var test = windowsIntegration.FindIndex(step =>
+                Regex.IsMatch(
+                    step,
+                    $@"(?m)^\s+run: dotnet test {Regex.Escape(IntegrationProject)} "
+                ) && step.Contains("--filter", StringComparison.Ordinal)
+            );
 
-        build.Should().BeGreaterThanOrEqualTo(0, "Integration だけをビルドする手順がある");
-        test.Should().BeGreaterThan(build, "テストの手順はビルドの後");
-        windowsIntegration[test]
-            .Should()
-            .Contain($"dotnet test {IntegrationProject} --no-build", "上のビルドを使い回す");
+            build
+                .Should()
+                .BeGreaterThanOrEqualTo(0, $"{job} に Integration だけをビルドする手順がある");
+            test.Should().BeGreaterThan(build, $"{job} のテストの手順はビルドの後");
+            windowsIntegration[test]
+                .Should()
+                .Contain(
+                    $"dotnet test {IntegrationProject} --no-build",
+                    $"{job} は上のビルドを使い回す"
+                );
+        }
 
         // Ubuntu：Integration を厳格モードで流すジョブがある（実 DB の唯一の CI 経路）
         runs.Where(run => run.RunsOn == "ubuntu-latest")
@@ -1125,8 +1185,51 @@ public sealed class WorkflowGuardTests
     private const string IntegrationProject =
         "tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj";
 
-    /// <summary>ci.yml の Integration を Windows で流すジョブ</summary>
-    private const string WindowsIntegrationJob = "integration-tests-windows";
+    /// <summary>ci.yml の Integration を Windows で流すジョブのうち、肯定の絞り込みのもの</summary>
+    private const string WindowsIntegrationSyncJob = "integration-tests-windows-sync";
+
+    /// <summary>ci.yml の Integration を Windows で流すジョブのうち、否定の絞り込み（裏返し）のもの</summary>
+    private const string WindowsIntegrationRestJob = "integration-tests-windows-rest";
+
+    /// <summary>ci.yml の Integration を Windows で流す 2 つのジョブ</summary>
+    private static readonly string[] WindowsIntegrationJobs =
+    [
+        WindowsIntegrationSyncJob,
+        WindowsIntegrationRestJob,
+    ];
+
+    /// <summary>ジョブの名前が「テスト」の手順</summary>
+    private static List<string> NamedTestSteps(string jobBody) =>
+        JobSteps(jobBody)
+            .Where(step => Regex.IsMatch(step, @"^\s*- name: テスト\s*$", RegexOptions.Multiline))
+            .ToList();
+
+    /// <summary><paramref name="project"/> を絞り込みつきで流す <c>dotnet test</c> の手順</summary>
+    private static List<string> FilteredTestSteps(string body, string project) =>
+        JobSteps(body)
+            .Where(step =>
+                Regex.IsMatch(step, $@"(?m)^\s+run: dotnet test {Regex.Escape(project)} ")
+                && step.Contains("--filter", StringComparison.Ordinal)
+            )
+            .ToList();
+
+    /// <summary><c>dotnet test</c> の手順の絞り込みの式（<c>--filter "..."</c> の中身）</summary>
+    private static string FilterOf(string step) =>
+        Regex.Match(step, @"--filter ""(?<filter>[^""]+)""").Groups["filter"].Value;
+
+    /// <summary>2 つの絞り込みが、同じ 1 つの項の肯定（<c>名前~値</c>）と否定（<c>名前!~値</c>）か（どのテストもちょうど 1 回当たる）</summary>
+    private static bool AreComplementaryFilters(string first, string second)
+    {
+        var term = new Regex(@"^(?<name>[A-Za-z]+)(?<op>!?~)(?<value>[^&|()!~=]+)$");
+        var a = term.Match(first);
+        var b = term.Match(second);
+
+        return a.Success
+            && b.Success
+            && a.Groups["name"].Value == b.Groups["name"].Value
+            && a.Groups["value"].Value == b.Groups["value"].Value
+            && a.Groups["op"].Value != b.Groups["op"].Value;
+    }
 
     /// <summary>
     /// ジョブの全件を流す <c>dotnet test</c> の手順（絞り込みの無いもの。単発のテストの報告の入口は <c>--filter</c> つきなので入らない）
