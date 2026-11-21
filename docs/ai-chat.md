@@ -52,6 +52,9 @@ The model is selected from an alias (such as `sonnet`).
 ### 4. Copilot (the "Copilot" tab)
 
 Reuses the sign-in of an installed GitHub Copilot CLI, so no API key is needed (a GitHub Copilot subscription is required).
+QuickER needs GitHub Copilot CLI 1.0.113 or later.
+With an older CLI, connecting fails with a message asking you to update the CLI (`copilot update` updates it).
+If the CLI is newer than this version of QuickER supports, the message asks you to update QuickER instead.
 The model candidates are enumerated at runtime after connecting, and which models you can pick depends on your Copilot plan.
 Leaving the model empty uses the CLI's default.
 
@@ -235,7 +238,7 @@ Interrupting stops the run at any point, including while the final build is runn
   QuickER builds the command line for `codex` and `claude` itself so that arguments cannot escape the quoting, and refuses to launch when an argument carries something `cmd` would still interpret.
   Arguments containing a line break are refused as well, because `cmd` truncates at the first newline and quoting cannot prevent it.
   Multi-line content is passed through a temporary file instead of an argument.
-  `copilot` is started from inside the GitHub Copilot SDK, so QuickER does not compose its command line; only the resolved path is checked.
+  `copilot` is started from inside the Microsoft Copilot SDK, so QuickER does not compose its command line; only the resolved path is checked.
   For all three CLIs, a `.cmd` shim whose path contains `%` is refused, because `cmd` would expand it as an environment variable.
   For `copilot`, a path containing `!` is refused as well: QuickER cannot turn off `cmd`'s delayed expansion for a process the SDK starts.
   Each CLI is looked up on `PATH` by absolute folder only (a relative entry such as `.` is skipped) and started by that full path, and `cmd.exe` is started from the Windows system folder by full path rather than by name.

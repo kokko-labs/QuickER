@@ -1,5 +1,5 @@
 using AwesomeAssertions;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 using QuickER.AI;
 
 namespace QuickER.Tests.AI;

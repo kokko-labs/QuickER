@@ -17,6 +17,25 @@ AI チャットエンジンの共通基盤（WPF 非依存）。内蔵チャッ�
   コマンド文の自前構文解析で部分コマンドまで絞る方式は、引用・連結の解釈で静かに外すため採らない。ここは「SDK が渡す情報で表現できる最も狭い規則」であって封じ込めの保証ではない。
 - 利用者向けの権限差は `docs/ai-chat.md`（.ja）の「注意」節の表が正本。モック生成での使い方は `src/QuickER.AI.Mock/CLAUDE.md`「AI モック生成」を参照する。
 
+## Copilot の SDK プロトコル
+
+- SDK（Microsoft.Copilot.SDK 2.x）は SDK プロトコル 4 だけを話し、プロトコル 4 を話すのは GitHub Copilot CLI 1.0.113 以降。SDK 1.x（GitHub.Copilot.SDK）はプロトコル 3 だけで、両方を話す版はない。QuickER は利用者が入れた copilot を使うので、組める CLI の版がそのまま利用者の条件になる（`docs/ai-chat.md`（.ja）の Copilot の節）。
+- クライアントの設定は `CopilotRuntimeClient.CreateClientOptions` の 1 か所。
+  - `Mode = CodingAgent`：SDK 1.x の既定（未指定＝`CopilotCli`）を振る舞いを変えずに改名したもの。SDK がモードを読むのは「Empty かどうか」だけ。チャットを `Empty` へ移すのは振る舞いの変更なので、別の判断。
+  - `Runtime = ForSpawnedStdio(path: …, workingDirectory: …)`：パスを渡すと、SDK は同梱のランタイムでなくそのパスを子プロセスとして起動する（旧来の起動の契約＝`--headless --no-auto-update --stdio`）。既定のアプリの中に読み込む形は同梱のランタイムが要る（`CopilotSkipCliDownload=true` で同梱しない）ので使わない。
+  - `GitHub = { UseLoggedInUser = true }`：CLI のログイン状態をそのまま使う（`--no-auto-login` を付けない）。
+  - SDK 2.x はモードが Empty でないと、子プロセスへ `COPILOT_RUNTIME_PROCESS_FILE_LOGGING=1` を渡す。copilot は起動 1 回ごとに CLI のホームの `logs` へ `process-<時刻>-<PID>.log`（実測 2〜6 KB・起動の情報とセッションの ID で、プロンプトの文は含まない）を書く。CLI を単独で使ったときと同じ置き場なので、docs には書かない（2026-11-21・CLI 1.0.114 で実測）。
+- 版の合わない CLI では、SDK の起動が `InvalidOperationException`（「SDK protocol version mismatch: SDK supports versions min-max, but server reports version N. …」）で断られる。型で見分けられないので、`TranslateStartFailure` が文言から min・max・N を読む。
+  - N < min なら CLI の更新（`Copilot_CliProtocolTooOld`）を、N > max なら QuickER の更新（`Copilot_CliProtocolTooNew`）を案内する例外に包み、元の例外を InnerException に残す。
+  - 版を報告しない形は、どちらを更新すべきか決められないので訳さない。版の数（4）はコードに書かず、文言の範囲から読む。
+  - 訳は StartAsync が一時フォルダを消した後に投げる。チャット（`Copilot_ConnectFailed` の差し込み）とモック生成の両方へ、共有の `CopilotRuntimeClient` を通って届く。
+- 接続断の判定（`IsConnectionLost`）は、SDK 内部の `Microsoft.Copilot.ConnectionLostException` を名前で引く。SDK 2.x はランタイムのエラー応答を IOException に包まずに `RemoteRpcException` で投げる（接続を捨てない側）。
+- ガード：
+  - `CopilotRuntimeClientConnectionTests.Start_WhenLaunchFails_LeavesNoWorkingDirectory`（行 `protocol-3-runtime`）：製品の StartAsync で本物の SDK に偽のランタイム（`tests/QuickER.Tests.FakeCodexAppServer` の Copilot の型＝第 1 引数 `--headless` で LSP の枠を話し、connect にプロトコル 3 を名乗る）を起動させる。CLI の更新の案内・内側の SDK の文言・一時フォルダの後始末を見る。
+  - `CopilotRuntimeClientConnectionTests.SdkFailureShapes_AreClassified`：接続断の形と、訳す形（範囲の下・上）・訳さない形（範囲の中・版の報告なし・ほかの例外）の分類。
+  - mutation 実証済み：訳を外す・境目の反転・文言の固定文の 1 文字・接続断の旧い型の名前・パスを渡さない、のどれも赤。
+- 残余：`Mode` を `Empty` に変える変異は、偽物が connect までしか話さないのでオフラインでは赤にならない。根拠は SDK のソース（モードを読むのは Empty かどうかだけ）と、実機のモック生成。
+
 ## CLI バックエンドの作業フォルダ
 
 - 内蔵チャットの CLI バックエンドは作業フォルダを `%TEMP%\QuickER\{backend}\<guid>` へ隔離する。Codex だけアプリの実行フォルダのまま `ApprovalPolicy = never` で走っていると、承認なしにその配下を読めてしまうため。

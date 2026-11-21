@@ -418,6 +418,12 @@
   <data name="Copilot_CliNotFound" xml:space="preserve">
     <value>copilot CLI が見つかりません。GitHub Copilot CLI をインストールしてください。</value>
   </data>
+  <data name="Copilot_CliProtocolTooOld" xml:space="preserve">
+    <value>インストールされている GitHub Copilot CLI は、この QuickER には古すぎます。GitHub Copilot CLI を 1.0.113 以降へ更新してから、接続し直してください。</value>
+  </data>
+  <data name="Copilot_CliProtocolTooNew" xml:space="preserve">
+    <value>インストールされている GitHub Copilot CLI は、この QuickER が対応している版より新しいです。この CLI に対応した版の QuickER へ更新してから、接続し直してください。</value>
+  </data>
   <data name="Copilot_PathHasQuote" xml:space="preserve">
     <value>copilot コマンドのパスに引用符が含まれるため起動できません: {0}</value>
   </data>

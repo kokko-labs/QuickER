@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!--
-    CodexAppServerClient のテストが実プロセスとして起動する偽の app-server（QuickER.Tests が参照し、出力へ一緒にコピーされる）。
-    製品のコードは参照しない＝1 行 1 JSON の規則だけを持つ小さな console exe。
+    AI の CLI バックエンドのテストが実プロセスとして起動する偽物（QuickER.Tests が参照し、出力へ一緒にコピーされる）。
+    Codex の app-server（1 行 1 JSON）と Copilot のランタイム（LSP の枠でプロトコル 3 を名乗る）の 2 つの型を、起動の引数で分ける。
+    製品のコードは参照しない小さな console exe。
   -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>

@@ -1,6 +1,6 @@
 using System.IO;
 using System.Linq;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 using QuickER.Platform;
 
 namespace QuickER.AI;

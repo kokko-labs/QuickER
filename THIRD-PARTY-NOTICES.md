@@ -37,7 +37,7 @@ The following components are licensed under the MIT License.
 **Microsoft and .NET Foundation projects**
 
 - **CommunityToolkit.Mvvm** — Copyright (c) .NET Foundation and Contributors — https://github.com/CommunityToolkit/dotnet — *GUI*
-- **GitHub Copilot SDK** (`GitHub.Copilot.SDK`) — Copyright (c) Microsoft Corporation — https://github.com/github/copilot-sdk — *GUI*
+- **Microsoft Copilot SDK** (`Microsoft.Copilot.SDK`) — Copyright (c) Microsoft Corporation — https://github.com/microsoft/copilot-sdk — *GUI*
 - **Open XML SDK** (`DocumentFormat.OpenXml`, `DocumentFormat.OpenXml.Framework`) — Copyright © Microsoft Corporation — https://github.com/dotnet/Open-XML-SDK — *GUI*
 - **Roslyn** (`Microsoft.CodeAnalysis.Common`, `Microsoft.CodeAnalysis.CSharp`) — Copyright © Microsoft Corporation — https://github.com/dotnet/roslyn — *GUI, CLI*
 - **Microsoft.Data.SqlClient** (`Microsoft.Data.SqlClient`, `.Extensions.Abstractions`, `.Internal.Logging`, `Microsoft.SqlServer.Server`) — Copyright © Microsoft Corporation — https://github.com/dotnet/SqlClient — *GUI, CLI*

@@ -1,4 +1,4 @@
-using GitHub.Copilot;
+using Microsoft.Copilot;
 using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Platform.OsBoundary;

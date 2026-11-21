@@ -1,5 +1,5 @@
 using System.IO;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 using QuickER.AI;
 
 namespace QuickER.Tests.AI;
@@ -288,7 +288,7 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
     private static IOException CreateConnectionLostException() => ConnectionLostError();
 
     /// <summary>
-    /// SDK（GitHub.Copilot.SDK 1.0.26）が接続断で投げる形の例外を作る（型がちょうど <see cref="IOException"/> で、
+    /// SDK（Microsoft.Copilot.SDK 2.0.1）が接続断で投げる形の例外を作る（型がちょうど <see cref="IOException"/> で、
     /// 内側が SDK 内部の接続断の例外）
     /// </summary>
     public static IOException ConnectionLostError()
@@ -302,15 +302,11 @@ internal sealed class FakeCopilotRuntimeClient : ICopilotRuntimeClient
     }
 
     /// <summary>
-    /// SDK（GitHub.Copilot.SDK 1.0.26）が、ランタイムが返した通常のエラー応答で投げる形の例外を作る
-    /// （型がちょうど <see cref="IOException"/> で、内側が <see cref="RemoteRpcException"/>）
+    /// SDK（Microsoft.Copilot.SDK 2.0.1）が、ランタイムが返した通常のエラー応答で投げる形の例外を作る
+    /// （<see cref="IOException"/> に包まない <see cref="RemoteRpcException"/>）
     /// </summary>
     /// <param name="message">ランタイムが返したエラーの文言</param>
-    public static IOException ErrorResponse(string message)
-    {
-        var inner = new RemoteRpcException(message, -32603);
-        return new IOException("Communication error with Copilot CLI: " + inner.Message, inner);
-    }
+    public static RemoteRpcException ErrorResponse(string message) => new(message, -32603);
 
     /// <inheritdoc />
     public Task RespondToToolCallAsync(

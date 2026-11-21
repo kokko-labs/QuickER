@@ -64,7 +64,7 @@ public sealed class CopilotSessionOptions
 /// <summary>
 /// GitHub Copilot ランタイム（copilot CLI の子プロセス）への接続を抽象化するクライアント。
 /// <see cref="CopilotChatEngine"/> を SDK から切り離してテスト可能に保つためのシームで、
-/// 実装は <see cref="CopilotRuntimeClient"/>（GitHub.Copilot.SDK 版）。
+/// 実装は <see cref="CopilotRuntimeClient"/>（Microsoft.Copilot.SDK 版）。
 /// </summary>
 /// <remarks>
 /// Codex の <see cref="ICodexAppServerClient"/> と同じ役割・同じ粒度（接続 → 会話開始 → 送信 →

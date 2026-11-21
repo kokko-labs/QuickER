@@ -28,7 +28,7 @@ Platform の外はここの入口を通す。通さない出現は各ガード�
   防御の二重化として、引数の積み順は「`--model` / `--resume` が先・プロンプト系が後」。
 - 引数を持たない `ExternalLauncher.StartExecutable`（自分の exe の再起動だけ）は対象の外。防ぐのは引数が cmd の再解釈で引用の外へ抜けることで、引数の無い起動には当たらない（`ProcessLaunchDimensions.Gaps` の受け入れの項目）。
 - 改行の判定は `BatchShimProcessGuard.ContainsNewline` を Copilot の `EnsureSafeToLaunch` と共有する（写しを持たない）。
-- Copilot は例外。起動が GitHub.Copilot.SDK の内側で QuickER が引数を組み立てないため、掛けられるのは解決パスの検証（引用符・`%`・`!` の拒否）だけ。`EnsureSafeToLaunch` は起動直前に置く。解決側へ置くと `IsAvailable` の検出だけで例外になる。残余は docs/ai-chat.md の注意節。文言 resx はバックエンドごと（どの CLI が止まったかを名指しするため）で、ポリシーだけが共有。
+- Copilot は例外。起動が Microsoft.Copilot.SDK の内側で QuickER が引数を組み立てないため、掛けられるのは解決パスの検証（引用符・`%`・`!` の拒否）だけ。`EnsureSafeToLaunch` は起動直前に置く。解決側へ置くと `IsAvailable` の検出だけで例外になる。残余は docs/ai-chat.md の注意節。文言 resx はバックエンドごと（どの CLI が止まったかを名指しするため）で、ポリシーだけが共有。
 - 起動する実体はフルパスで渡す（防御の二重化）。包み直しの `cmd.exe` は `BatchShimProcessGuard.CmdExePath`（`Environment.SystemDirectory` 直下）、codex は `CodexCliLocator` が PATH から解決したフルパス（`CodexAppServerClient.ResolveLaunch`）。
   共有の PATH 走査 `PathExecutableResolver` は相対要素（`.` 等）を読み飛ばし、同じフォルダの `.exe` / `.cmd` / `.bat` は PATHEXT の順に試す（無ければ既定の `.exe`・`.bat`・`.cmd`。PATHEXT に無い候補とほかの拡張子は試さない。コマンドラインで名前を打って起動されるものと同じ）。
 - シムの判定 `IsBatchShim` は拡張子を見る前に末尾の空白と `.` を落とす。Windows が落として開くので、落とさないと `x.cmd ` が包み直しも引数の検査も通らずに cmd へ渡る。
@@ -46,7 +46,7 @@ Platform の外はここの入口を通す。通さない出現は各ガード�
   - `CreateProcess`：標準入出力をつなぐ子プロセスを起動前の状態で返す（claude 2・codex・dotnet）。シェル経由の起動・名前だけの実行ファイル（`BareExecutableNames`＝`dotnet` だけを許す。上の `.cmd` の項の理由）・包み直していない `.cmd` / `.bat` のシム（`BatchShimProcessGuard` で `cmd.exe` の形へ包み直してから渡す）を断る。
 - シムのガードと PATH の解決（`BatchShimProcessGuard`・`PathExecutableResolver`）も Platform に置く。
 - 入口ごとに起動を書くと、URL のスキームの制限やフルパスの解決が入口ごとに食い違う（Codex のログイン URL がホストを確かめていなかった例がある）。
-- QuickER がプロセスを作らないもの（GitHub.Copilot.SDK・Velopack・WebView2）は対象外。
+- QuickER がプロセスを作らないもの（Microsoft.Copilot.SDK・Velopack・WebView2）は対象外。
 - チャットのリンクを開く側 `ShellChatLinkOpener` も `UrlPolicy.IsSafe` を再検査してから渡す（`ProcessLaunchTests` の行 `external-chat-link-*`）。
 - ガード：`SourceRuleTests` の規則 `process-launches`・`process-launch-create-process-starts`（`SourceSymbolScan` で src の Platform の外をシンボルで判定し、静的な `Process.Start`・`Process` の生成〔目的型の `new()` も〕・`UseShellExecute` への定数の false でない値の代入〔値が定数でないものも〕・入口の名前が `ShellExecute` / `CreateProcess` / `WinExec` で始まる P/Invoke を 0 にする。インスタンスの `Start()` は、受け手が `ExternalLauncher.CreateProcess` の結果で初期化した局所変数のときだけ許す。解決できない呼び出しは「未解決」として同じ一覧に出す。自己検査の行 `process-launches-forms` が、using static・別名・目的型の new・非定数の代入・P/Invoke を拾い、CreateProcess の戻り値の起動・定数の false・無関係な P/Invoke を拾わないことも固定する）・`ProcessLaunchTests`（OS との境界のエンジンの起動の表の行 `external-*`：開いてはいけない URL の表は起動せずに断る・フルパスでない／無いフォルダ・名前だけの実行ファイル・包み直していないシム・シェル経由の子プロセスを断る・`dotnet` だけは名前のまま）。mutation 実証済み。
 

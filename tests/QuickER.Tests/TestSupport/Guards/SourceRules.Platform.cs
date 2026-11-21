@@ -122,7 +122,7 @@ internal static partial class SourceRules
                 ),
             },
             // 外部のプロセス・URL・フォルダを開く処理は ExternalLauncher を通す。拾う形は ProcessLaunchCalls。
-            // QuickER がプロセスを作らないもの（GitHub.Copilot.SDK の CLI の起動・Velopack の更新・WebView2 の子プロセス）は対象外
+            // QuickER がプロセスを作らないもの（Microsoft.Copilot.SDK の CLI の起動・Velopack の更新・WebView2 の子プロセス）は対象外
             SourceRule.Forbid(
                 "process-launches",
                 "プロセス・URL・フォルダを開くのは ExternalLauncher を通す",

@@ -418,6 +418,12 @@
   <data name="Copilot_CliNotFound" xml:space="preserve">
     <value>The copilot CLI was not found. Install the GitHub Copilot CLI.</value>
   </data>
+  <data name="Copilot_CliProtocolTooOld" xml:space="preserve">
+    <value>The installed GitHub Copilot CLI is too old for this version of QuickER. Update the GitHub Copilot CLI to 1.0.113 or later, then connect again.</value>
+  </data>
+  <data name="Copilot_CliProtocolTooNew" xml:space="preserve">
+    <value>The installed GitHub Copilot CLI is newer than this version of QuickER supports. Update QuickER to a version that supports this CLI, then connect again.</value>
+  </data>
   <data name="Copilot_PathHasQuote" xml:space="preserve">
     <value>Cannot launch because the copilot command path contains a quotation mark: {0}</value>
   </data>
