@@ -507,6 +507,32 @@ internal sealed class SyncTriggerHarness : IDisposable
     }
 
     /// <summary>
+    /// 表の行のうち、行の状態の表が未送信と印を付けた行の数を、製品の条件
+    /// （<c>TrackedSyncEngine.NotUnsentCondition</c>＝未送信でない行に真になる条件）から数える（表の全行 − 条件に当たる行）
+    /// </summary>
+    /// <param name="tableName">表の名前</param>
+    /// <param name="ct">キャンセルトークン</param>
+    public async Task<long> CountRowsKeptAsUnsentAsync(string tableName, CancellationToken ct)
+    {
+        var key = $"{Quote(tableName)}.{Quote(KeyColumn(tableName))}";
+        var condition = Fixture switch
+        {
+            SyncTriggerFixture.SyncModel => M.TrackedSyncEngine.NotUnsentCondition(key),
+            SyncTriggerFixture.Sync => S.TrackedSyncEngine.NotUnsentCondition(key),
+            _ => V.TrackedSyncEngine.NotUnsentCondition(key),
+        };
+
+        await using var connection = await OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            $"SELECT (SELECT count(*) FROM {Quote(tableName)}) - "
+            + $"(SELECT count(*) FROM {Quote(tableName)} WHERE {condition})";
+        command.Parameters.AddWithValue("@table", tableName);
+
+        return Convert.ToInt64(await command.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
     /// フィクスチャの同期する表の行を、表とキー（型とテキスト）で引ける内容のテキストにして読む
     /// （手の前後で比べ、触っていない行を見分ける）
     /// </summary>

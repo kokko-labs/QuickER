@@ -97,6 +97,183 @@ public sealed class SyncSupportAdoSqliteEngineRuntimeTests(ITestOutputHelper out
     public Task RandomSeeds_ConvergeWithoutLoss() =>
         SyncModelRuntimeTests.RunRandomSeedsAsync(EngineSuite, output);
 
+    /// <summary>小さい塊の組の端末のエンジンの取得ごとの道を数える入れ物（組と一緒にプロセスで 1 つ）</summary>
+    private static readonly SyncModelDownloadRoutes SmallChunkRoutes = new();
+
+    /// <summary>
+    /// 直結・小さい塊の端末（<see cref="SyncModelEngineDevice.OnSmallChunks"/>）で乱数の種を流すときの組。端末の作り方・夜間の数・
+    /// 夜間だけの空振りの守りのほかは <see cref="EngineSuite"/> と同じ（既知の失敗の一覧・網羅しない組・空振りの守りの並び）
+    /// </summary>
+    /// <remarks>
+    /// 夜間だけの空振りの守り（戻せなかった行の決定の後の編集の照合）は持たない。その照合が起きるのは未送信の行がある実行だけで、
+    /// 未送信のある実行は小さい塊の端末でも 1 回で全部の道を通る（塊の経路に入るのは、入口で未送信の無い実行だけ）。照合が見る
+    /// 経路は <see cref="EngineSuite"/> と同じなので、守りはそちらが持つ。この組の空振りの守りは、道の守り（1 回で全部と塊が
+    /// どちらも 1 回以上）で受ける。
+    /// <para>
+    /// 夜間の種の数は普段の数と同じにする（夜間に深くしない）。夜間の Integration のジョブは目安の時間を超えていて、この組の
+    /// 種は並列に流れてランナーを使い切るので、足すとジョブの上限に届きうる。塊の経路の形は、普段の CI で控えとの照合
+    /// （<see cref="SmallChunkScenarios_MatchLedger"/>）が全行を流す。夜間のジョブの実測が目安の内へ戻ったら、夜間の数を
+    /// 普段の 4 倍（広い世界は普段と同じ）へ上げる
+    /// </para>
+    /// </remarks>
+    internal static SyncModelRandomSuite SmallChunkSuite { get; } =
+        EngineSuite with
+        {
+            Name = "SyncModelEngineSmallChunks",
+            Options = SyncModelEngineDevice.OnSmallChunks(
+                SyncModelWorldOptions.Direct,
+                SmallChunkRoutes
+            ),
+            Seeds = WithNightlyCount(
+                SyncModelRuntimeTests.Seeds,
+                SyncModelRuntimeTests.Seeds.RegularCount
+            ),
+            WideSeeds = WithNightlyCount(
+                SyncModelRuntimeTests.WideSeeds,
+                SyncModelRuntimeTests.WideSeeds.RegularCount
+            ),
+            NightlyGuardedRunChecks = [],
+        };
+
+    [Fact(
+        DisplayName = "[Sync/新しいエンジン] 小さい塊の端末でも、乱数の操作の列で止まらず・収束し・消えない（既知の失敗の署名は除く）"
+    )]
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
+    public async Task SmallChunkRandomSeeds_ConvergeWithoutLoss()
+    {
+        var before = (SmallChunkRoutes.Single, SmallChunkRoutes.Chunked, SmallChunkRoutes.Refused);
+        await SyncModelRuntimeTests.RunRandomSeedsAsync(SmallChunkSuite, output);
+
+        var single = SmallChunkRoutes.Single - before.Single;
+        var chunked = SmallChunkRoutes.Chunked - before.Chunked;
+        output.WriteLine(
+            $"download routes: single {single}, chunked {chunked}, refused {SmallChunkRoutes.Refused - before.Refused}"
+        );
+
+        // 空振りの守り：既定の種の数なら、1 回で全部の道と塊の道がどちらも起きている（断る道は乱数の種では起きない＝決まった形の行が持つ）
+        var (plan, widePlan) = SyncModelSignatures.ResolvePlans(
+            SmallChunkSuite.Seeds,
+            SmallChunkSuite.WideSeeds
+        );
+
+        if (plan.IsDefaultCount && widePlan.IsDefaultCount)
+        {
+            CoverageGuard.AtLeast("small-chunk download route Single", (int)single, 1);
+            CoverageGuard.AtLeast("small-chunk download route Chunked", (int)chunked, 1);
+        }
+    }
+
+    [Fact(
+        DisplayName = "[Sync/新しいエンジン] 小さい塊の端末で流した決定的なシナリオは、控えと同じ結果（違う行は理由の宣言どおり）"
+    )]
+    public async Task SmallChunkScenarios_MatchLedger()
+    {
+        var ledger = ReadLedger();
+        var results = new ConcurrentDictionary<
+            string,
+            (string Outcome, string Detail, long Chunked, long Carried)
+        >(StringComparer.Ordinal);
+
+        await Parallel.ForEachAsync(
+            SyncModelScenarios.All,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 8),
+                CancellationToken = Ct,
+            },
+            async (scenario, ct) =>
+            {
+                var routes = new SyncModelDownloadRoutes();
+                var (outcome, detail) = await RunAsync(
+                    scenario,
+                    ct,
+                    SyncModelEngineDevice.OnSmallChunks(SyncModelWorldOptions.Direct, routes)
+                );
+                results[scenario.Name] = (outcome, detail, routes.Chunked, routes.Carried);
+            }
+        );
+
+        ledger
+            .Keys.Should()
+            .BeEquivalentTo(results.Keys, "控えの行は決定的なシナリオと同じ（先に控えを書き直す）");
+
+        var differing = results
+            .Where(pair => (pair.Value.Outcome, pair.Value.Detail) != ledger[pair.Key])
+            .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+            .ToList();
+
+        foreach (var (name, (outcome, detail, _, _)) in differing)
+        {
+            output.WriteLine(
+                $"differs from ledger: {name}: {outcome} {detail} (ledger: {ledger[name].Outcome} {ledger[name].Detail})"
+            );
+        }
+
+        var chunkedRows = results.Count(pair => pair.Value.Chunked > 0);
+        output.WriteLine(
+            $"rows: {results.Count}, rows with a chunked fetch: {chunkedRows}, rows differing from the ledger: {differing.Count}"
+        );
+        chunkedRows
+            .Should()
+            .BePositive("塊の道を通った実行のある行が 1 つも無ければ、照合が空振りしている");
+
+        // 塊をまたぐ形の印のある行は、小さい塊の端末で持ち越し（最後の段で書く行）が起きていなければ形が塊をまたいでいない
+        var notCarried = SyncModelScenarios
+            .All.Where(scenario => scenario.CarriesAcrossChunks)
+            .Where(scenario => results[scenario.Name].Carried == 0)
+            .Select(scenario => scenario.Name)
+            .ToList();
+        notCarried
+            .Should()
+            .BeEmpty("CarriesAcrossChunks の行は、小さい塊の端末で持ち越しを 1 行以上起こす");
+
+        SyncModelSmallChunkScenarioDifferences
+            .All.Values.Where(string.IsNullOrWhiteSpace)
+            .Should()
+            .BeEmpty("違う行の理由の宣言は理由を書く");
+
+        GuardKnownList.AssertMatches(
+            differing.ToDictionary(pair => pair.Key, _ => 1, StringComparer.Ordinal),
+            SyncModelSmallChunkScenarioDifferences.All.Keys.Select(name => (name, 1)),
+            (name, _) => name,
+            "控えと違う行には理由の宣言（SyncModelSmallChunkScenarioDifferences）が要る",
+            "控えと一致している行の理由の宣言は消す"
+        );
+    }
+
+    /// <summary>控えを読み、シナリオの名前 → 結果と詳細を返す（表のセルの逃がした縦棒を戻す）</summary>
+    private static Dictionary<string, (string Outcome, string Detail)> ReadLedger()
+    {
+        var ledger = new Dictionary<string, (string Outcome, string Detail)>(
+            StringComparer.Ordinal
+        );
+
+        foreach (var line in File.ReadAllLines(Path.Combine(EngineRepository.Root(), LedgerPath)))
+        {
+            if (
+                !line.StartsWith("| ", StringComparison.Ordinal)
+                || line.StartsWith("| シナリオ |", StringComparison.Ordinal)
+            )
+            {
+                continue;
+            }
+
+            var cells = LedgerCellSeparator
+                .Split(line.Trim().Trim('|'))
+                .Select(cell => cell.Trim().Replace("\\|", "|", StringComparison.Ordinal))
+                .ToArray();
+            ledger[cells[0]] = (cells[1], cells[2]);
+        }
+
+        return ledger;
+    }
+
+    /// <summary>控えの表のセルの区切り（逃がした縦棒は区切りにしない）</summary>
+    private static readonly Regex LedgerCellSeparator = new(
+        @"(?<!\\)\|",
+        RegexOptions.CultureInvariant
+    );
+
     /// <summary>控えのリポジトリの相対パス</summary>
     public const string LedgerPath =
         "tests/QuickER.Tests.Integration/GeneratedRuntime/sync-engine-scenario-ledger.md";
@@ -129,7 +306,12 @@ public sealed class SyncSupportAdoSqliteEngineRuntimeTests(ITestOutputHelper out
                 MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 8),
                 CancellationToken = Ct,
             },
-            async (scenario, ct) => results[scenario.Name] = await RunAsync(scenario, ct)
+            async (scenario, ct) =>
+                results[scenario.Name] = await RunAsync(
+                    scenario,
+                    ct,
+                    SyncModelEngineDevice.On(SyncModelWorldOptions.Direct)
+                )
         );
 
         GeneratedTextFile.Verify(
@@ -165,18 +347,22 @@ public sealed class SyncSupportAdoSqliteEngineRuntimeTests(ITestOutputHelper out
         await SyncEngineFixedRows.Table[id].Input.Run(harness, Ct);
     }
 
-    /// <summary>シナリオ 1 本を新しいエンジンの端末で流し、結果と詳細を返す</summary>
+    /// <summary>シナリオ 1 本を新しいエンジンの端末の世界で流し、結果と詳細を返す</summary>
+    /// <param name="scenario">シナリオ</param>
+    /// <param name="ct">キャンセルトークン</param>
+    /// <param name="options">新しいエンジンの端末の世界の組み方</param>
     private static async Task<(string Outcome, string Detail)> RunAsync(
         SyncModelScenario scenario,
-        CancellationToken ct
+        CancellationToken ct,
+        SyncModelWorldOptions options
     )
     {
         try
         {
-            // 控えの Fact だけが素通しの印を立てる（「流せない」を違反にせず、行の結果として数える）
+            // 控えを作る・控えと照らす Fact だけが素通しの印を立てる（「流せない」を違反にせず、行の結果として数える）
             var (failures, _) = await scenario.RunAsync(
                 ct,
-                SyncModelEngineDevice.On(SyncModelWorldOptions.Direct) with
+                options with
                 {
                     PassesNotRunnableThrough = true,
                 }

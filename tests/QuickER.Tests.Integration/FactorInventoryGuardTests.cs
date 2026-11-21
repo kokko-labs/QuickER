@@ -40,7 +40,19 @@ public sealed class FactorInventoryGuardTests
     ];
 
     /// <summary>まだどのエンジンの次元表にも載っていない項目（軸・項目・受け持つエンジン・区切り・理由）</summary>
-    private static IReadOnlyList<InventoryExclusion> Exclusions { get; } = [];
+    private static IReadOnlyList<InventoryExclusion> Exclusions { get; } =
+    [
+        new InventoryExclusion(
+            "SyncOptions",
+            "DownloadRowLimit",
+            EngineIds.SyncModel,
+            "P4",
+            "乱数の同期の手は降ろす行の上限を製品の既定（300,000 行）のまま渡し、乱数の世界の行数は上限に届かない。"
+                + "上限を超えて断る形・超えても降ろす形・引数の検査は、決まった形の行（新しいエンジンの決まった形の行の"
+                + "上限の枠と row-limit の行、決定的なシナリオの dl-row-limit の行）が受け持つ。"
+                + "乱数の手に小さい上限の水準を足すには、断られた実行を判定役が扱う必要がある"
+        ),
+    ];
 
     [Fact(
         DisplayName = "[棚卸し] Integration が検査する軸は、軸の割り当ての表の Integration の軸とちょうど一致する"

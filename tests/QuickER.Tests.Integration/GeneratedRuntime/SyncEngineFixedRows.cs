@@ -74,7 +74,7 @@ internal static class SyncEngineFixedRows
             ),
             Row(
                 "invalid-arguments-refuse-before-anything",
-                "取得の大きさが 0 以下・エンジンが同期しない型の除外は、同期・送信だけ・受信だけのどれも引数の例外で断り、"
+                "取得の大きさ・降ろす行の上限が 0 以下・エンジンが同期しない型の除外は、同期・送信だけ・受信だけ・洗い替えのどれも引数の例外で断り、"
                     + "何も送らず、端末と行の状態の表を変えない",
                 InvalidArgumentsAsync
             ),
@@ -104,6 +104,20 @@ internal static class SyncEngineFixedRows
                 RefreshFetchFailureAsync
             ),
             Row(
+                "refresh-over-row-limit-with-change-written-during-fetch-is-refused",
+                "未送信の無い端末の洗い替え（Force なし）の取得の途中に端末で記録つきの書き込みがあり、取得が降ろす行の上限を"
+                    + "超えると、洗い替えは SyncDownloadTooLargeException で断り、何も適用しない（端末の行は洗い替えの前のまま、"
+                    + "途中で書いた行とその未送信は残る）",
+                RefreshOverRowLimitWithChangeDuringFetchAsync
+            ),
+            Row(
+                "refresh-force-over-row-limit-with-discarded-key-rewritten-during-fetch-is-refused",
+                "Force の洗い替えが捨てると決めた未送信の行を、取得の途中に端末がもう一度書く（連番が進む）と、その行は適用が"
+                    + "捨てずに残す未送信なので数え、取得が降ろす行の上限を超えた洗い替えは SyncDownloadTooLargeException で断る"
+                    + "（端末の行は書き直した内容の未送信のまま、サーバーと再開点は変わらない）",
+                RefreshForceOverRowLimitWithDiscardedKeyRewrittenAsync
+            ),
+            Row(
                 "refresh-and-sync-leave-nothing-to-fetch-again",
                 "洗い替えの直後の同期と、同期の直後の同期は、サーバーから 1 行も取得しない（洗い替えも同期も再開点を書く）。"
                     + "サーバーの他者が 1 行変えた後の同期は、その 1 行を取得して降ろす",
@@ -115,6 +129,85 @@ internal static class SyncEngineFixedRows
                     + "送信を挟まない受信だけの実行がサーバーの行を端末に入れる（端末に送るものは無い）。続く同期は何も送らず、"
                     + "競合も打ち切りも無く、端末とサーバーの内容が同じ",
                 UnsentGoneRowOfUnknownKeyAsync
+            ),
+            Row(
+                "chunk-failure-between-chunks-keeps-first-chunk-and-next-sync-resumes",
+                "塊ごとに確定する経路で 2 ページ目の取得が失敗すると、失敗の時点で最初の塊の行だけが端末に書かれ、表の再開点は"
+                    + "最初の塊の最後の行の版まで進んでいる。同期は例外で終わり、次の同期は続きの行だけを取得してそろう",
+                ChunkFailureBetweenChunksAsync
+            ),
+            Row(
+                "chunk-failure-after-carry-keeps-resume-point-before-carried-row",
+                "最初の塊で親の無い子が持ち越された後、後ろの塊を書いてから取得が失敗すると、表の再開点は持ち越した子の手前で"
+                    + "止まっている（後ろの塊の版まで進まない）。次の同期で子が入ってそろう",
+                ChunkFailureAfterCarryAsync
+            ),
+            Row(
+                "chunk-unsent-edit-between-chunks-kept-then-serverwins-restores",
+                "最初の塊のコミットの後に、まだ書かれていないサーバーの行と同じキーの端末の行を記録つきで編集すると、その実行の後"
+                    + "その行は端末の内容のまま未送信で残り、ほかの行は降りている。続く ServerWins の同期でサーバーの内容に戻る",
+                (h, ct) => ChunkUnsentEditBetweenChunksAsync(h, SyncConflictPolicy.ServerWins, ct)
+            ),
+            Row(
+                "chunk-unsent-edit-between-chunks-kept-then-localwins-uploads",
+                "最初の塊のコミットの後に、まだ書かれていないサーバーの行と同じキーの端末の行を記録つきで編集すると、その実行の後"
+                    + "その行は端末の内容のまま未送信で残り、ほかの行は降りている。続く LocalWins の同期で端末の内容がサーバーへ上がる",
+                (h, ct) => ChunkUnsentEditBetweenChunksAsync(h, SyncConflictPolicy.LocalWins, ct)
+            ),
+            Row(
+                "chunk-row-gone-after-keys-stays-until-next-sync",
+                "塊の経路に入った後、後ろの表（品目）のキーを取った後・その表の行を取る前にサーバーの他者がその表の行を消すと、"
+                    + "その実行の後もその行は端末に残り、次の同期の削除伝搬で消える",
+                ChunkRowGoneAfterKeysAsync
+            ),
+            .. RefreshFailureRows(),
+            Row(
+                "chunk-refresh-force-discard-blobs-failure-keeps-blob-of-unreplaced-discard",
+                "塊ごとに確定する Force かつ blob を捨てる洗い替えで、端末が blob を書いた捨てる行のうち、置き換える塊より前で"
+                    + "落ちた行は、未送信のまま blob も端末の内容のまま残り（置き換え済みの捨てる行はサーバーの内容で blob が空）、"
+                    + "落ちた後の blob を運ぶ同期がその blob をサーバーへ上げる",
+                ChunkRefreshForceDiscardBlobsFailureAsync
+            ),
+            Row(
+                "chunk-refresh-force-discard-blobs-completes-with-every-blob-empty",
+                "端末が blob を書いた捨てる行のある Force かつ blob を捨てる洗い替えを塊ごとに最後まで流すと、1 回で全部の道と"
+                    + "同じく、捨てる行も含めてどの品目の blob も空で、未送信が残らない",
+                ChunkRefreshForceDiscardBlobsCompletesAsync
+            ),
+            Row(
+                "chunk-refresh-force-discard-blobs-empties-blob-of-discard-changed-after-ceiling",
+                "塊ごとに確定する Force かつ blob を捨てる洗い替えで、端末が blob を書いた捨てる行（品目 12）を、取得の上限の後に"
+                    + "サーバーの他者が書き直すと（どの塊もその行を持ってこない）、最後の段がその行の変更を捨てるときに blob も"
+                    + "空にする（未送信も写し待ちも残らない）。続く blob を運ばない同期はサーバーの内容を降ろし、blob は空のまま",
+                ChunkRefreshForceDiscardBlobsChangedAfterCeilingAsync
+            ),
+            Row(
+                "chunk-refresh-force-discard-gone-after-keys-only-loses-change",
+                "塊ごとに確定する Force の洗い替えで、捨てる行（品目 11）がキーを取った後・その表の行を取る前にサーバーで消えると、"
+                    + "最後の段がその行の変更だけを捨てる（未送信が外れ、行はその洗い替えでは端末に残る）。次の同期は何も送らず競合も"
+                    + "無く、削除伝搬で 11 が消える",
+                ChunkRefreshForceDiscardGoneAfterKeysAsync
+            ),
+            Row(
+                "refresh-force-discard-blobs-discard-held-back-is-not-left-unsent-with-empty-blob",
+                "Force かつ blob を捨てる洗い替え（1 回で全部の道）で、端末が blob を書いた捨てる行（品目 12）のサーバーの一意な値を、"
+                    + "洗い替えの取得の間に端末で書かれた別の行（品目 13）が持っていて 12 を置けないとき、12 を未送信のまま blob だけ"
+                    + "空にして残さない（その後に端末が 12 の題名を書いてから流す同期が、サーバーの 12 の blob を空で上書きしない）。"
+                    + "同じ洗い替えで、置き換えた捨てる行（10）と未送信の無い行（11）の blob は空になり、13 の blob は残る",
+                RefreshForceDiscardBlobsHeldDiscardAsync
+            ),
+            Row(
+                "unsent-rows-condition-reads-state-table-once",
+                "未送信の行を外す製品の条件（TrackedSyncEngine.NotUnsentCondition）の実行計画に、表の行ごとに流し直す副問い合わせ"
+                    + "（CORRELATED）が無い。行ごとに行の状態の表を引く形（対照の文）には CORRELATED が出る",
+                UnsentRowsConditionPlanAsync
+            ),
+            Row(
+                "chunk-download-route-cells",
+                "取得の道は（閾値以下・閾値を超え上限以下・上限を超える・上限が閾値以下で上限を超える）×（未送信なし・あり）で、"
+                    + "1 回で全部・1 回で全部／塊・1 回で全部／塊・断る／塊・断る（観測の口が取得ごとに 1 回だけ知らせる）。"
+                    + "洗い替えは、閾値を超えて未送信なし・Force で捨てる行だけが塊、閾値以下が 1 回で全部",
+                ChunkRouteCellsAsync
             ),
             Row(
                 "untracked-write-is-not-recorded-and-keeps-earlier-records",
@@ -445,6 +538,16 @@ internal static class SyncEngineFixedRows
                     typeof(ArgumentOutOfRangeException)
                 ),
                 (
+                    "row-limit-zero",
+                    new SyncOptions { DownloadRowLimit = 0 },
+                    typeof(ArgumentOutOfRangeException)
+                ),
+                (
+                    "row-limit-negative",
+                    new SyncOptions { DownloadRowLimit = -1 },
+                    typeof(ArgumentOutOfRangeException)
+                ),
+                (
                     "unknown-excluded-type",
                     new SyncOptions { ExcludedEntityTypes = [typeof(string)] },
                     typeof(ArgumentException)
@@ -482,7 +585,7 @@ internal static class SyncEngineFixedRows
             }
         }
 
-        // 洗い替えの入口も、取得の大きさと除外の型を最初に断る（Force と blob を捨てる指定があっても、未送信を捨てず何も変えない）
+        // 洗い替えの入口も、取得の大きさ・降ろす行の上限と除外の型を最初に断る（Force と blob を捨てる指定があっても、未送信を捨てず何も変えない）
         foreach (
             var (name, options, expected) in new (string, SyncRefreshOptions, Type)[]
             {
@@ -501,6 +604,26 @@ internal static class SyncEngineFixedRows
                     new SyncRefreshOptions
                     {
                         BatchSize = -1,
+                        Force = true,
+                        DiscardLocalUnboundedBinaries = true,
+                    },
+                    typeof(ArgumentOutOfRangeException)
+                ),
+                (
+                    "refresh-row-limit-zero",
+                    new SyncRefreshOptions
+                    {
+                        DownloadRowLimit = 0,
+                        Force = true,
+                        DiscardLocalUnboundedBinaries = true,
+                    },
+                    typeof(ArgumentOutOfRangeException)
+                ),
+                (
+                    "refresh-row-limit-negative",
+                    new SyncRefreshOptions
+                    {
+                        DownloadRowLimit = -1,
                         Force = true,
                         DiscardLocalUnboundedBinaries = true,
                     },
@@ -667,6 +790,1389 @@ internal static class SyncEngineFixedRows
         )
             .Should()
             .Be("0");
+    }
+
+    /// <summary>塊の経路で途中で落ちる洗い替えの種類</summary>
+    private enum ChunkRefreshKind
+    {
+        /// <summary>blob を運ぶ普通の洗い替え</summary>
+        Plain,
+
+        /// <summary>blob を捨てる洗い替え（<c>DiscardLocalUnboundedBinaries</c>）</summary>
+        DiscardBlobs,
+
+        /// <summary>未送信を捨てる洗い替え（<c>Force</c>・blob を運ぶ）</summary>
+        Force,
+    }
+
+    /// <summary>途中で落ちた洗い替えの次の手</summary>
+    private enum ChunkRefreshNext
+    {
+        /// <summary>同期（blob を運ぶ）</summary>
+        Sync,
+
+        /// <summary>同じ洗い替えの流し直し</summary>
+        Refresh,
+    }
+
+    /// <summary>途中で落ちた洗い替え × 次の手の行（洗い替えの種類 3 つ × 次の手 2 つ）</summary>
+    private static IEnumerable<ScenarioRow<SyncEngineFixedCase>> RefreshFailureRows() =>
+        from kind in Enum.GetValues<ChunkRefreshKind>()
+        from next in Enum.GetValues<ChunkRefreshNext>()
+        select Row(
+            $"chunk-refresh-{KindName(kind)}-failure-then-{(next == ChunkRefreshNext.Sync ? "sync" : "refresh")}",
+            "塊ごとに確定する洗い替え（"
+                + KindName(kind)
+                + "）がフォルダーの表の 2 ページ目の取得で落ちると、失敗の時点で削除の段（サーバーに無い行・再開点を戻す・"
+                + "blob を空にする・サーバーに無い捨てる行の片付け）と最初の塊が済んでいる。次の手が"
+                + (
+                    next == ChunkRefreshNext.Sync
+                        ? "同期なら、続きだけを取得して降ろし、捨てる行の残りはその同期が送る"
+                        : "洗い替えの流し直しなら、そろう（Force は残っていた未送信を捨てる）"
+                ),
+            (h, ct) => ChunkRefreshFailureAsync(h, kind, next, ct)
+        );
+
+    /// <summary>洗い替えの種類の行の名前の部分</summary>
+    private static string KindName(ChunkRefreshKind kind) =>
+        kind switch
+        {
+            ChunkRefreshKind.Plain => "plain",
+            ChunkRefreshKind.DiscardBlobs => "discard-blobs",
+            _ => "force",
+        };
+
+    /// <summary>
+    /// 塊ごとに確定する洗い替えが途中で落ちた後：端末とサーバーにフォルダー 1〜6 と品目 11・12（フォルダー 1 の下・blob つき）が
+    /// あり、サーバーの他者がフォルダー 6 を消す（Force の行は、端末がフォルダー 2 と 4 を記録つきで書き直す）。取得の大きさ 3・
+    /// 閾値 2・塊 2 の洗い替えは、フォルダーの表の 1 ページ目 [1, 2, 3] で塊の経路へ入り、削除の段を流して塊 [1, 2] を確定し、
+    /// 2 ページ目の取得の前で失敗させる
+    /// </summary>
+    private static async Task ChunkRefreshFailureAsync(
+        SyncEngineFixedHarness h,
+        ChunkRefreshKind kind,
+        ChunkRefreshNext next,
+        CancellationToken ct
+    )
+    {
+        await InsertServerFoldersAsync(
+            h,
+            ct,
+            (1, null, "f1"),
+            (2, null, "f2"),
+            (3, null, "f3"),
+            (4, null, "f4"),
+            (5, null, "f5"),
+            (6, null, "f6")
+        );
+
+        foreach (var key in new[] { 11, 12 })
+        {
+            await h.Server.Items.InsertAsync(
+                new ModelItemEntity
+                {
+                    ItemId = key,
+                    FolderId = 1,
+                    Code = $"c-{key}",
+                    Title = $"t{key}",
+                    Payload = [0x0A, 0x0B, 0x00, (byte)key],
+                },
+                ct
+            );
+        }
+
+        await h.SyncAsync(WithBlobs, ct);
+        (await h.Server.Folders.DeleteAsync(6, ct)).Should().BeTrue();
+
+        if (kind == ChunkRefreshKind.Force)
+        {
+            await h.ExecuteLocalAsync(
+                "UPDATE model_folders SET name = 'local-2' WHERE folder_id = 2",
+                ct
+            );
+            await h.ExecuteLocalAsync(
+                "UPDATE model_folders SET name = 'local-4' WHERE folder_id = 4",
+                ct
+            );
+        }
+
+        var options = new SyncRefreshOptions
+        {
+            BatchSize = 3,
+            IncludeUnboundedBinary = kind != ChunkRefreshKind.DiscardBlobs,
+            DiscardLocalUnboundedBinaries = kind == ChunkRefreshKind.DiscardBlobs,
+            Force = kind == ChunkRefreshKind.Force,
+        };
+
+        // 失敗の時点の端末の控え（表明は実行の後に行う）
+        ModelDbState? atFailure = null;
+        string? folderAnchor = null;
+        string? itemAnchor = null;
+        string? owedCount = null;
+        string? dirtyAtFailure = null;
+        var pages = 0;
+        var engine = SmallChunks(
+            h.CreateEngine(async call =>
+            {
+                if (
+                    call.Table == ModelTables.Folders
+                    && call.Call == SyncEngineSourceCall.RowsBefore
+                    && ++pages == 2
+                )
+                {
+                    atFailure = await h.ReadLocalAsync(ct);
+                    folderAnchor = await LocalAnchorAsync(h, ModelTables.Folders, ct);
+                    itemAnchor = await LocalAnchorAsync(h, ModelTables.Items, ct);
+                    owedCount = await h.ScalarAsync(
+                        $"SELECT count(*) FROM {SyncLocalTracking.RowTableName} WHERE blob_owed <> ''",
+                        ct
+                    );
+                    dirtyAtFailure = await h.ScalarAsync(
+                        $"SELECT group_concat(\"key\", ',') FROM (SELECT \"key\" FROM {SyncLocalTracking.RowTableName} WHERE dirty = 1 ORDER BY \"key\")",
+                        ct
+                    );
+
+                    throw new InvalidOperationException(InjectedFetchFailure);
+                }
+            })
+        );
+
+        var thrown = await Record.ExceptionAsync(() => h.RefreshAsync(options, ct, engine));
+
+        thrown
+            .Should()
+            .BeOfType<InvalidOperationException>()
+            .Which.Message.Should()
+            .Be(InjectedFetchFailure);
+        atFailure.Should().NotBeNull("フォルダーの表の 2 ページ目の取得の前で失敗させた");
+        atFailure!
+            .Folders.Should()
+            .NotContainKey(
+                6,
+                "失敗の時点で削除の段が済み、サーバーに無いフォルダー 6 が端末から消えている"
+            );
+        folderAnchor
+            .Should()
+            .Be(
+                await ServerFolderVersionAsync(h, 2, ct),
+                "届いた表の再開点は、確定した塊の最後の行（2）の版"
+            );
+        itemAnchor
+            .Should()
+            .BeNull("まだ届いていない表（品目）の再開点は、削除の段が戻した「何も取っていない」");
+
+        if (kind == ChunkRefreshKind.DiscardBlobs)
+        {
+            atFailure
+                .Items.Values.Select(item => item.PayloadHex)
+                .Should()
+                .AllBe("", "blob を捨てる洗い替えは、削除の段で範囲の表の全行の blob を空にする");
+            owedCount.Should().Be("0", "blob を捨てる洗い替えの削除の段は写し待ちを消す");
+        }
+        else
+        {
+            atFailure
+                .Items[11]
+                .PayloadHex.Should()
+                .Be("0A0B000B", "blob を運ぶ洗い替えは blob に触らない");
+        }
+
+        if (kind == ChunkRefreshKind.Force)
+        {
+            atFailure
+                .Folders[2]
+                .Name.Should()
+                .Be("f2", "置き換え済みの捨てる行（2）はサーバーの内容");
+            atFailure
+                .Folders[4]
+                .Name.Should()
+                .Be("local-4", "まだ置き換えていない捨てる行（4）は端末の内容");
+            dirtyAtFailure.Should().Be("4", "未送信は置き換え済みの行で外れ、まだの行に残る");
+        }
+        else
+        {
+            dirtyAtFailure.Should().BeNull("未送信は無い");
+        }
+
+        if (next == ChunkRefreshNext.Sync)
+        {
+            if (kind == ChunkRefreshKind.DiscardBlobs)
+            {
+                // この同期が書く行（サーバーの他者が書き直した品目 11）にだけ写し待ちが立って写る
+                var item = (await h.Server.Items.GetByIdAsync(11, ct))!;
+                item.Title = "t11-edited";
+                (await h.Server.Items.UpdateAsync(item, cancellationToken: ct)).Should().BeTrue();
+            }
+
+            var fetched = 0;
+            var result = await h.SyncAsync(
+                WithBlobs,
+                ct,
+                SmallChunks(
+                    h.CreateEngine(call =>
+                    {
+                        if (
+                            call.Table == ModelTables.Folders
+                            && call.Call == SyncEngineSourceCall.RowsReturned
+                        )
+                        {
+                            fetched += call.Rows!.Value;
+                        }
+
+                        return Task.CompletedTask;
+                    })
+                )
+            );
+
+            fetched
+                .Should()
+                .Be(3, "次の同期はフォルダーの再開点（2 の版）の続き（3〜5）だけを取得する");
+            result.Truncations.Should().BeEmpty();
+            result.Conflicts.Should().BeEmpty();
+
+            if (kind == ChunkRefreshKind.Force)
+            {
+                result
+                    .Uploaded.Should()
+                    .Be(1, "捨てる行のうちまだ置き換えていなかった 4 は、その同期が普通に送る");
+                (await h.Server.Folders.GetByIdAsync(4, ct))!.Name.Should().Be("local-4");
+            }
+
+            var local = await h.ReadLocalAsync(ct);
+            var server = await h.ReadServerAsync(ct);
+
+            if (kind == ChunkRefreshKind.DiscardBlobs)
+            {
+                local
+                    .Items[11]
+                    .PayloadHex.Should()
+                    .Be(server.Items[11].PayloadHex, "この同期が書いた品目 11 の blob は写る");
+                local
+                    .Items[12]
+                    .PayloadHex.Should()
+                    .Be("", "この同期が書かなかった品目 12 の blob は空のまま");
+                (
+                    await h.ScalarAsync(
+                        $"SELECT count(*) FROM {SyncLocalTracking.RowTableName} WHERE blob_owed <> ''",
+                        ct
+                    )
+                )
+                    .Should()
+                    .Be("0", "写し待ちは写した後に残らない");
+                DescribeRows(local)
+                    .Should()
+                    .Be(DescribeRows(server), "blob の外の内容は端末とサーバーで同じ");
+            }
+            else
+            {
+                Describe(local).Should().Be(Describe(server), "端末とサーバーの内容が同じ");
+            }
+        }
+        else
+        {
+            var result = await h.RefreshAsync(options, ct, SmallChunks(h.CreateEngine()));
+            result
+                .DiscardedChanges.Should()
+                .Be(
+                    kind == ChunkRefreshKind.Force ? 1 : 0,
+                    "Force の流し直しは残っていた未送信（4）を捨てる"
+                );
+
+            var local = await h.ReadLocalAsync(ct);
+            var server = await h.ReadServerAsync(ct);
+
+            if (kind == ChunkRefreshKind.DiscardBlobs)
+            {
+                local.Items.Values.Select(item => item.PayloadHex).Should().AllBe("");
+                DescribeRows(local)
+                    .Should()
+                    .Be(DescribeRows(server), "blob の外の内容は端末とサーバーで同じ");
+            }
+            else
+            {
+                Describe(local).Should().Be(Describe(server), "端末とサーバーの内容が同じ");
+            }
+
+            (
+                await h.ScalarAsync(
+                    $"SELECT count(*) FROM {SyncLocalTracking.RowTableName} WHERE dirty = 1",
+                    ct
+                )
+            )
+                .Should()
+                .Be("0");
+        }
+    }
+
+    /// <summary>
+    /// 取得が持ってこなかった捨てる行：端末とサーバーにフォルダー 1 と品目 11・12 があり、端末が 11 を記録つきで書き直す。サーバーの
+    /// 他者がフォルダー 2・3 を入れ、Force の洗い替え（閾値 2・塊 2）はフォルダーの表で塊の経路へ入って品目のキーを先に取る。品目の
+    /// 表の最初の行の取得の前に、サーバーの他者が 11 を消す
+    /// </summary>
+    private static async Task ChunkRefreshForceDiscardGoneAfterKeysAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await InsertServerFoldersAsync(h, ct, (1, null, "f1"));
+
+        foreach (var key in new[] { 11, 12 })
+        {
+            await h.Server.Items.InsertAsync(
+                new ModelItemEntity
+                {
+                    ItemId = key,
+                    FolderId = 1,
+                    Code = $"c-{key}",
+                    Title = $"t{key}",
+                    Payload = [0x0A, 0x0B, 0x00, (byte)key],
+                },
+                ct
+            );
+        }
+
+        await h.SyncAsync(WithBlobs, ct);
+        await h.ExecuteLocalAsync("UPDATE model_items SET title = 'local' WHERE item_id = 11", ct);
+        await InsertServerFoldersAsync(h, ct, (2, null, "f2"), (3, null, "f3"));
+
+        var calls = new List<string>();
+        var deleted = false;
+        var engine = SmallChunks(
+            h.CreateEngine(async call =>
+            {
+                calls.Add(call.Table + ":" + call.Call);
+
+                if (
+                    !deleted
+                    && call.Table == ModelTables.Items
+                    && call.Call == SyncEngineSourceCall.RowsBefore
+                )
+                {
+                    deleted = true;
+                    (await h.Server.Items.DeleteAsync(11, ct)).Should().BeTrue();
+                }
+            })
+        );
+
+        await h.RefreshAsync(
+            new SyncRefreshOptions { IncludeUnboundedBinary = true, Force = true },
+            ct,
+            engine
+        );
+
+        deleted.Should().BeTrue("品目の表の行の取得の前に割り込んだ");
+        calls
+            .IndexOf(ModelTables.Items + ":" + SyncEngineSourceCall.KeysBefore)
+            .Should()
+            .BeInRange(
+                0,
+                calls.IndexOf(ModelTables.Items + ":" + SyncEngineSourceCall.RowsBefore) - 1,
+                "塊の経路の入口が、品目の表のキーを行より先に取った（11 はキーの集合にあった）"
+            );
+        (
+            await h.ScalarAsync(
+                $"SELECT count(*) FROM {SyncLocalTracking.RowTableName} WHERE dirty = 1",
+                ct
+            )
+        )
+            .Should()
+            .Be("0", "取得が持ってこなかった捨てる行（11）は、最後の段で変更だけを失う");
+        (await h.ReadLocalAsync(ct))
+            .Items.Should()
+            .ContainKey(11, "キーを取った後に消えた行は、その洗い替えでは端末に残る");
+
+        var result = await h.SyncAsync(WithBlobs, ct);
+
+        result.Uploaded.Should().Be(0, "変更を捨てた 11 は送らない");
+        result.Conflicts.Should().BeEmpty();
+        (await h.ReadLocalAsync(ct)).Items.Should().NotContainKey(11, "次の同期の削除伝搬で消える");
+        Describe(await h.ReadLocalAsync(ct))
+            .Should()
+            .Be(Describe(await h.ReadServerAsync(ct)), "端末とサーバーの内容が同じ");
+    }
+
+    /// <summary>
+    /// 置き換える前に落ちた捨てる行の blob：端末とサーバーにフォルダー 1 と品目 10〜13（blob つき）があり、端末が品目 10 と 12 の
+    /// blob を記録つきで書く。Force かつ blob を捨てる洗い替え（取得の大きさ 3・閾値 2・塊 2）は、品目の表の 1 ページ目
+    /// [10, 11, 12] で塊の経路へ入り、塊 [10, 11] を確定してから 2 ページ目の取得の前で失敗する（12 はまだ置き換えていない）
+    /// </summary>
+    private static async Task ChunkRefreshForceDiscardBlobsFailureAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedDiscardedBlobWritesAsync(h, ct);
+
+        ModelDbState? atFailure = null;
+        string? dirtyAtFailure = null;
+        var pages = 0;
+        var engine = SmallChunks(
+            h.CreateEngine(async call =>
+            {
+                if (
+                    call.Table == ModelTables.Items
+                    && call.Call == SyncEngineSourceCall.RowsBefore
+                    && ++pages == 2
+                )
+                {
+                    atFailure = await h.ReadLocalAsync(ct);
+                    dirtyAtFailure = await h.ScalarAsync(
+                        $"SELECT group_concat(\"key\", ',') FROM (SELECT \"key\" FROM {SyncLocalTracking.RowTableName} WHERE dirty = 1 ORDER BY \"key\")",
+                        ct
+                    );
+
+                    throw new InvalidOperationException(InjectedFetchFailure);
+                }
+            })
+        );
+
+        var thrown = await Record.ExceptionAsync(() =>
+            h.RefreshAsync(ForceDiscardBlobs, ct, engine)
+        );
+
+        thrown
+            .Should()
+            .BeOfType<InvalidOperationException>()
+            .Which.Message.Should()
+            .Be(InjectedFetchFailure);
+        atFailure.Should().NotBeNull("品目の表の 2 ページ目の取得の前で失敗させた");
+        dirtyAtFailure
+            .Should()
+            .Be("12", "置き換え済みの捨てる行（10）は未送信が外れ、まだの行（12）に残る");
+        atFailure!
+            .Items[10]
+            .PayloadHex.Should()
+            .Be("", "置き換えた捨てる行の blob は、その塊が空にする");
+        atFailure
+            .Items[11]
+            .PayloadHex.Should()
+            .Be("", "捨てる行でない行の blob は、削除の段が空にする");
+        atFailure
+            .Items[12]
+            .PayloadHex.Should()
+            .Be("EE12", "まだ置き換えていない捨てる行は、blob も端末で書いた内容のまま残る");
+
+        var result = await h.SyncAsync(WithBlobs, ct);
+
+        result.Conflicts.Should().BeEmpty();
+        result
+            .Uploaded.Should()
+            .Be(1, "まだ置き換えていなかった捨てる行（12）は、その同期が普通に送る");
+        (await h.ReadServerAsync(ct))
+            .Items[12]
+            .PayloadHex.Should()
+            .Be(
+                "EE12",
+                "落ちた後の同期は、端末で書いた blob をサーバーへ上げる（空の blob で上書きしない）"
+            );
+    }
+
+    /// <summary>Force かつ blob を捨てる、取得の大きさ 3 の洗い替え</summary>
+    private static readonly SyncRefreshOptions ForceDiscardBlobs = new()
+    {
+        BatchSize = 3,
+        DiscardLocalUnboundedBinaries = true,
+        Force = true,
+    };
+
+    /// <summary>
+    /// 置き換えた捨てる行の blob：<see cref="ChunkRefreshForceDiscardBlobsFailureAsync"/> と同じ準備で、Force かつ blob を捨てる
+    /// 洗い替えを塊ごとに最後まで流すと、1 回で全部の道と同じく、どの品目の blob も空で未送信が残らない（捨てる行 10・12 も、
+    /// 置き換えた塊が blob を空にする）
+    /// </summary>
+    private static async Task ChunkRefreshForceDiscardBlobsCompletesAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedDiscardedBlobWritesAsync(h, ct);
+        var routes = new List<TrackedSyncDownloadRoute>();
+        var engine = SmallChunks(h.CreateEngine());
+        engine.DownloadRouteObserved = routes.Add;
+
+        var result = await h.RefreshAsync(ForceDiscardBlobs, ct, engine);
+
+        routes.Should().Equal([TrackedSyncDownloadRoute.Chunked], "洗い替えは塊の道を通る");
+        result.DiscardedChanges.Should().Be(2);
+        var local = await h.ReadLocalAsync(ct);
+        local
+            .Items.OrderBy(pair => pair.Key)
+            .Select(pair => pair.Key + "=" + pair.Value.PayloadHex)
+            .Should()
+            .Equal(
+                ["10=", "11=", "12=", "13="],
+                "blob を捨てる洗い替えの後、捨てる行も含めてどの品目の blob も空"
+            );
+        DescribeRows(local)
+            .Should()
+            .Be(DescribeRows(await h.ReadServerAsync(ct)), "blob の外の内容は端末とサーバーで同じ");
+        (
+            await h.ScalarAsync(
+                $"SELECT count(*) FROM {SyncLocalTracking.RowTableName} WHERE dirty = 1",
+                ct
+            )
+        )
+            .Should()
+            .Be("0");
+    }
+
+    /// <summary>
+    /// どの塊も持ってこない捨てる行の blob：<see cref="ChunkRefreshForceDiscardBlobsFailureAsync"/> と同じ準備で、取得の上限を
+    /// 洗い替えの始めに固定し（上限の関数がサーバー役の版を 1 つ採って返す）、その直後にサーバーの他者が品目 12 を書き直す。
+    /// 12 の版は上限を超えるので、洗い替えの取得は 12 を持ってこない（キーの集合にはある）
+    /// </summary>
+    private static async Task ChunkRefreshForceDiscardBlobsChangedAfterCeilingAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedDiscardedBlobWritesAsync(h, ct);
+
+        var ceilings = 0;
+        var routes = new List<TrackedSyncDownloadRoute>();
+        var fetchedItems = 0;
+        var engine = SmallChunks(
+            h.CreateEngine(
+                call =>
+                {
+                    if (
+                        call.Table == ModelTables.Items
+                        && call.Call == SyncEngineSourceCall.RowsReturned
+                    )
+                    {
+                        fetchedItems += call.Rows ?? 0;
+                    }
+
+                    return Task.CompletedTask;
+                },
+                async () =>
+                {
+                    var ceiling = h.Server.TakeVersion();
+
+                    if (++ceilings == 1)
+                    {
+                        var item = (await h.Server.Items.GetByIdAsync(12, ct))!;
+                        item.Title = "t12-after-ceiling";
+                        (await h.Server.Items.UpdateAsync(item, cancellationToken: ct))
+                            .Should()
+                            .BeTrue();
+                    }
+
+                    return ceiling;
+                }
+            )
+        );
+        engine.DownloadRouteObserved = routes.Add;
+
+        var result = await h.RefreshAsync(ForceDiscardBlobs, ct, engine);
+
+        ceilings.Should().Be(1, "洗い替えは取得の上限を 1 回取り、その直後に 12 を書き直した");
+        routes.Should().Equal([TrackedSyncDownloadRoute.Chunked], "洗い替えは塊の道を通る");
+        fetchedItems
+            .Should()
+            .Be(3, "上限の後に書き直した 12 は、洗い替えの取得に入らない（10・11・13 だけ）");
+        result.DiscardedChanges.Should().Be(2);
+        var local = await h.ReadLocalAsync(ct);
+        local.Items[12].Title.Should().Be("t12", "12 はこの洗い替えでは書き直されない");
+        local
+            .Items.OrderBy(pair => pair.Key)
+            .Select(pair => pair.Key + "=" + pair.Value.PayloadHex)
+            .Should()
+            .Equal(
+                ["10=", "11=", "12=", "13="],
+                "どの塊も持ってこなかった捨てる行（12）の blob も、変更を捨てるときに空にする"
+            );
+        (
+            await h.ScalarAsync(
+                $"SELECT count(*) FROM {SyncLocalTracking.RowTableName} WHERE dirty = 1",
+                ct
+            )
+        )
+            .Should()
+            .Be("0");
+        (
+            await h.ScalarAsync(
+                $"SELECT count(*) FROM {SyncLocalTracking.RowTableName} WHERE blob_owed <> ''",
+                ct
+            )
+        )
+            .Should()
+            .Be("0");
+
+        var synced = await h.SyncAsync(null, ct);
+
+        synced.Uploaded.Should().Be(0, "変更を捨てた 12 は送らない");
+        synced.Conflicts.Should().BeEmpty();
+        local = await h.ReadLocalAsync(ct);
+        local.Items[12].Title.Should().Be("t12-after-ceiling", "続く同期がサーバーの内容を降ろす");
+        local
+            .Items[12]
+            .PayloadHex.Should()
+            .Be("", "blob を運ばない同期は 12 の blob に触らない（空のまま）");
+        DescribeRows(local)
+            .Should()
+            .Be(DescribeRows(await h.ReadServerAsync(ct)), "blob の外の内容は端末とサーバーで同じ");
+    }
+
+    /// <summary>
+    /// 置けなかった捨てる行の blob（1 回で全部の道）：<see cref="ChunkRefreshForceDiscardBlobsFailureAsync"/> と同じ準備に加えて、
+    /// 端末が品目 12 の code を記録つきで書き換える（12 は blob と code の未送信を持つ捨てる行）。Force かつ blob を捨てる
+    /// 洗い替えの品目の最初の取得の前に、端末が品目 13 の code をサーバーの 12 の code（c-12）へ記録つきで書き換える。13 は
+    /// 洗い替えが捨てない未送信（端末の内容を残す）なので、サーバーの 12 の行は一意な値がぶつかって置けない。洗い替えの後、
+    /// 端末が 12 の題名だけをもう一度書いてから、blob を運ぶ同期を流す
+    /// </summary>
+    private static async Task RefreshForceDiscardBlobsHeldDiscardAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedDiscardedBlobWritesAsync(h, ct);
+        await h.ExecuteLocalAsync("UPDATE model_items SET code = 'tmp-12' WHERE item_id = 12", ct);
+
+        var taken = false;
+        var routes = new List<TrackedSyncDownloadRoute>();
+        var engine = h.CreateEngine(async call =>
+        {
+            if (
+                !taken
+                && call.Table == ModelTables.Items
+                && call.Call == SyncEngineSourceCall.RowsBefore
+            )
+            {
+                taken = true;
+                await h.ExecuteLocalAsync(
+                    "UPDATE model_items SET code = 'c-12' WHERE item_id = 13",
+                    ct
+                );
+            }
+        });
+        engine.DownloadRouteObserved = routes.Add;
+
+        var thrown = await Record.ExceptionAsync(() =>
+            h.RefreshAsync(ForceDiscardBlobs, ct, engine)
+        );
+
+        taken.Should().BeTrue("品目の最初の取得の前に、端末の 13 が c-12 を取った");
+        routes.Should().OnlyContain(route => route == TrackedSyncDownloadRoute.Single);
+        var local = await h.ReadLocalAsync(ct);
+        var dirty =
+            await h.ScalarAsync(
+                $"SELECT group_concat(\"key\" || ':' || blob_columns, ',') FROM (SELECT \"key\", blob_columns FROM {SyncLocalTracking.RowTableName} WHERE table_name = 'model_items' AND dirty = 1 ORDER BY \"key\")",
+                ct
+            ) ?? "";
+        var carried = await h.ScalarAsync(
+            $"SELECT sw_seq IS NOT NULL AND sw_seq = change_seq FROM {SyncLocalTracking.RowTableName} WHERE table_name = 'model_items' AND \"key\" = 12",
+            ct
+        );
+        var observed =
+            $"洗い替えの結果={(thrown is null ? "成功" : thrown.GetType().Name + ": " + thrown.Message)}／"
+            + $"未送信={dirty}／12 の code={local.Items[12].Code}／12 の blob={local.Items[12].PayloadHex}"
+            + $"／12 の捨てる決定の持ち越し={carried}";
+
+        // 洗い替えの後、端末が 12 をもう一度書く（題名だけ。blob は書かない）
+        await h.ExecuteLocalAsync(
+            "UPDATE model_items SET title = 't12-edited' WHERE item_id = 12",
+            ct
+        );
+        var synced = await h.SyncAsync(WithBlobs, ct);
+        var server = await h.ReadServerAsync(ct);
+        var after = await h.ReadLocalAsync(ct);
+        observed +=
+            $"／同期が送った数={synced.Uploaded}・競合={string.Join(";", synced.Conflicts.Select(conflict => conflict.Reason))}"
+            + $"／サーバーの 12 の code={server.Items[12].Code}・blob={server.Items[12].PayloadHex}"
+            + $"／同期の後の端末の 12 の code={after.Items[12].Code}・blob={after.Items[12].PayloadHex}";
+
+        // 表明をまとめて出す（端末に残った形と、続く同期がサーバーへ運んだもの）
+        using var scope = new AwesomeAssertions.Execution.AssertionScope();
+
+        local
+            .Items.OrderBy(pair => pair.Key)
+            .Where(pair => pair.Key != 12)
+            .Select(pair => pair.Key + "=" + pair.Value.PayloadHex)
+            .Should()
+            .Equal(
+                ["10=", "11=", "13=0A0B000D"],
+                "置き換えた捨てる行（10）と未送信の無い行（11）の blob は空になり、洗い替えの間に書かれた未送信の行（13）の "
+                    + "blob は残る（"
+                    + observed
+                    + "）"
+            );
+
+        thrown
+            .Should()
+            .BeNull("置けなかった捨てる行があっても、洗い替えは成功で終わる（" + observed + "）");
+        dirty
+            .Should()
+            .Be(
+                "12:Payload,13:",
+                "12 は置けずに未送信のまま残り（blob の書き込みの記録つき＝この行が置けない形に当たった）、13 は洗い替えの間に"
+                    + "書かれた未送信（"
+                    + observed
+                    + "）"
+            );
+        local
+            .Items[12]
+            .Code.Should()
+            .Be("tmp-12", "置けなかった捨てる行は、行を端末の内容のまま残す（" + observed + "）");
+        local
+            .Items[12]
+            .PayloadHex.Should()
+            .Be(
+                "EE12",
+                "置けなかった捨てる行は、blob も端末で書いた内容のまま残す（" + observed + "）"
+            );
+
+        server
+            .Items[12]
+            .PayloadHex.Should()
+            .BeOneOf(
+                ["0A0B000C", "EE12"],
+                "端末が 12 をもう一度書いた後の同期は、サーバーの 12 の blob を空で上書きしない（"
+                    + observed
+                    + "）"
+            );
+    }
+
+    /// <summary>
+    /// 未送信の行を外す条件の形：製品の条件を品目の表に掛けた文の実行計画を読む。行の状態の表のキーの列は型の宣言が無いので、
+    /// 表のキーの列と行ごとに比べる形は状態の表の索引をキーで引けず、表の行 × 状態の行の総当たりになる（10 万行の表で数分）。
+    /// 副問い合わせが表の行に依らなければ、1 回だけ流れて結果を引くだけになる
+    /// </summary>
+    private static async Task UnsentRowsConditionPlanAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        const string key = "\"model_items\".\"item_id\"";
+        var plan = await h.QueryPlanAsync(
+            $"UPDATE \"model_items\" SET \"title\" = \"title\" WHERE {TrackedSyncEngine.NotUnsentCondition(key)}",
+            ModelTables.Items,
+            ct
+        );
+        var planText = string.Join(" | ", plan);
+
+        // 前提：行の状態の表（別名 s）を読む段が計画にある（SQLite の計画は、表を別名で「SCAN s」「SEARCH s …」と書く）
+        plan.Should()
+            .Contain(
+                line => ReadsStateTable(line),
+                "計画が行の状態の表を読んでいる（前提。実際：" + planText + "）"
+            );
+        plan.Should()
+            .NotContain(
+                line => line.Contains("CORRELATED", StringComparison.Ordinal),
+                "副問い合わせは表の行ごとに流し直さない（実際：" + planText + "）"
+            );
+
+        // 対照：行ごとに行の状態の表を引く形は、この SQLite の計画で CORRELATED と出る（上の表明が空振りでない）
+        var control = await h.QueryPlanAsync(
+            "UPDATE \"model_items\" SET \"title\" = \"title\" WHERE NOT EXISTS (SELECT 1 FROM "
+                + SyncLocalTracking.RowTableName
+                + $" AS s WHERE s.table_name = @table AND s.dirty = 1 AND {key} = s.\"key\")",
+            ModelTables.Items,
+            ct
+        );
+        control
+            .Should()
+            .Contain(
+                line => line.Contains("CORRELATED", StringComparison.Ordinal),
+                "行ごとに引く形は CORRELATED と出る（実際：" + string.Join(" | ", control) + "）"
+            );
+    }
+
+    /// <summary>実行計画の行が、別名 s の表を読む段（SCAN / SEARCH の直後の語が s）か</summary>
+    private static bool ReadsStateTable(string line)
+    {
+        var words = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var at = Array.IndexOf(words, "s");
+
+        return at > 0 && words[at - 1] is "SCAN" or "SEARCH";
+    }
+
+    /// <summary>
+    /// 端末とサーバーにフォルダー 1 と品目 10〜13（blob つき）を置き、端末が品目 10 と 12 の blob を記録つきで書く（取得の順は
+    /// 10・11・12・13＝取得の大きさ 3 では 1 ページ目が [10, 11, 12]）
+    /// </summary>
+    private static async Task SeedDiscardedBlobWritesAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await InsertServerFoldersAsync(h, ct, (1, null, "f1"));
+
+        foreach (var key in new[] { 10, 11, 12, 13 })
+        {
+            await h.Server.Items.InsertAsync(
+                new ModelItemEntity
+                {
+                    ItemId = key,
+                    FolderId = 1,
+                    Code = $"c-{key}",
+                    Title = $"t{key}",
+                    Payload = [0x0A, 0x0B, 0x00, (byte)key],
+                },
+                ct
+            );
+        }
+
+        await h.SyncAsync(WithBlobs, ct);
+        byte[] written = [0xEE, 0x12];
+
+        foreach (var key in new[] { 10, 12 })
+        {
+            await using var source = new System.IO.MemoryStream(written);
+            (await h.Items.WritePayloadAsync(key, source, written.Length, ct)).Should().BeTrue();
+        }
+
+        (
+            await h.ScalarAsync(
+                $"SELECT group_concat(blob_columns, ';') FROM {SyncLocalTracking.RowTableName} WHERE table_name = 'model_items' AND dirty = 1",
+                ct
+            )
+        )
+            .Should()
+            .NotBeNullOrEmpty("品目 10 と 12 は blob の書き込みの未送信を持つ（前提）");
+    }
+
+    /// <summary>塊の経路の行で、観測が投げる取得の失敗の文</summary>
+    private const string InjectedFetchFailure = "Injected fetch failure between chunks.";
+
+    /// <summary>エンジンの塊へ入る閾値と塊の大きさを、小さい塊の端末と同じ値にする</summary>
+    private static TrackedSyncEngine SmallChunks(TrackedSyncEngine engine)
+    {
+        engine.ChunkThreshold = SyncModelEngineDevice.SmallChunkThreshold;
+        engine.ChunkSize = SyncModelEngineDevice.SmallChunkSize;
+
+        return engine;
+    }
+
+    /// <summary>サーバーの他者がフォルダーを入れる（並べた順に版が付く）</summary>
+    private static async Task InsertServerFoldersAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct,
+        params (int Id, int? Parent, string Name)[] folders
+    )
+    {
+        foreach (var (id, parent, name) in folders)
+        {
+            await h.Server.Folders.InsertAsync(
+                new ModelFolderEntity
+                {
+                    FolderId = id,
+                    ParentId = parent,
+                    Name = name,
+                },
+                ct
+            );
+        }
+    }
+
+    /// <summary>サーバーの他者がフォルダーの名前を書き直す（版が進む）</summary>
+    private static async Task RenameServerFolderAsync(
+        SyncEngineFixedHarness h,
+        int id,
+        string name,
+        CancellationToken ct
+    )
+    {
+        var folder = (await h.Server.Folders.GetByIdAsync(id, ct))!;
+        folder.Name = name;
+        (await h.Server.Folders.UpdateAsync(folder, cancellationToken: ct)).Should().BeTrue();
+    }
+
+    /// <summary>端末の表の再開点（16 進。無ければ null）</summary>
+    private static Task<string?> LocalAnchorAsync(
+        SyncEngineFixedHarness h,
+        string table,
+        CancellationToken ct
+    ) =>
+        h.ScalarAsync(
+            $"SELECT CASE WHEN anchor IS NULL THEN NULL ELSE hex(anchor) END FROM {SyncLocalTracking.AnchorTableName} WHERE table_name = '{table}'",
+            ct
+        );
+
+    /// <summary>サーバーのフォルダーの版（16 進）</summary>
+    private static async Task<string> ServerFolderVersionAsync(
+        SyncEngineFixedHarness h,
+        int id,
+        CancellationToken ct
+    ) => Convert.ToHexString((await h.Server.Folders.GetByIdAsync(id, ct))!.RowVer!);
+
+    /// <summary>
+    /// フォルダーの表の n 回目の行のページの取得の前に、端末のフォルダーのキーと再開点を控えてから投げる観測を作る（控えは
+    /// <paramref name="seen"/> へ入れる。表明は実行の後に行う＝観測の中で投げた表明は取得の失敗に紛れるため）
+    /// </summary>
+    private static Func<SyncEngineSourceCall, Task> FailOnFolderPage(
+        SyncEngineFixedHarness h,
+        int page,
+        List<(IReadOnlyList<int> Keys, string? Anchor)> seen,
+        CancellationToken ct
+    )
+    {
+        var pages = 0;
+
+        return async call =>
+        {
+            if (
+                call.Table == ModelTables.Folders
+                && call.Call == SyncEngineSourceCall.RowsBefore
+                && ++pages == page
+            )
+            {
+                var local = await h.ReadLocalAsync(ct);
+                seen.Add(
+                    (
+                        local.Folders.Keys.Order().ToList(),
+                        await LocalAnchorAsync(h, ModelTables.Folders, ct)
+                    )
+                );
+
+                throw new InvalidOperationException(InjectedFetchFailure);
+            }
+        };
+    }
+
+    /// <summary>
+    /// 塊の間で落ちた実行：フォルダー 1〜5 を、取得の大きさ 3・閾値 2・塊 2 で降ろす。1 ページ目 [1, 2, 3] で塊の経路へ入り、塊
+    /// [1, 2] を確定してから 2 ページ目の取得で失敗させる。失敗の時点で端末には 1・2 だけがあり、再開点は 2 の版。次の同期は
+    /// 3〜5 だけを取得して降ろす
+    /// </summary>
+    private static async Task ChunkFailureBetweenChunksAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await InsertServerFoldersAsync(
+            h,
+            ct,
+            (1, null, "f1"),
+            (2, null, "f2"),
+            (3, null, "f3"),
+            (4, null, "f4"),
+            (5, null, "f5")
+        );
+        var options = new SyncOptions { DownloadBatchSize = 3 };
+        var seen = new List<(IReadOnlyList<int> Keys, string? Anchor)>();
+
+        var thrown = await Record.ExceptionAsync(() =>
+            h.SyncAsync(options, ct, SmallChunks(h.CreateEngine(FailOnFolderPage(h, 2, seen, ct))))
+        );
+
+        thrown
+            .Should()
+            .BeOfType<InvalidOperationException>()
+            .Which.Message.Should()
+            .Be(InjectedFetchFailure);
+        seen.Should().ContainSingle("2 ページ目の取得の前で 1 回だけ失敗させた");
+        seen[0]
+            .Keys.Should()
+            .Equal([1, 2], "失敗の時点で、最初の塊（1・2）だけが端末に書かれている");
+        seen[0]
+            .Anchor.Should()
+            .Be(
+                await ServerFolderVersionAsync(h, 2, ct),
+                "失敗の時点で、表の再開点は最初の塊の最後の行（2）の版まで進んでいる"
+            );
+        (await LocalAnchorAsync(h, ModelTables.Folders, ct))
+            .Should()
+            .Be(seen[0].Anchor, "失敗した実行は、確定した塊の再開点を残す");
+
+        var fetched = 0;
+        var result = await h.SyncAsync(
+            options,
+            ct,
+            SmallChunks(
+                h.CreateEngine(call =>
+                {
+                    if (
+                        call.Table == ModelTables.Folders
+                        && call.Call == SyncEngineSourceCall.RowsReturned
+                    )
+                    {
+                        fetched += call.Rows!.Value;
+                    }
+
+                    return Task.CompletedTask;
+                })
+            )
+        );
+
+        fetched.Should().Be(3, "次の同期は再開点の後ろ（3〜5）だけを取得する");
+        result.Downloaded.Should().Be(3);
+        result.Truncations.Should().BeEmpty();
+        Describe(await h.ReadLocalAsync(ct))
+            .Should()
+            .Be(Describe(await h.ReadServerAsync(ct)), "端末とサーバーの内容が同じ");
+    }
+
+    /// <summary>
+    /// 持ち越しがある表で落ちた実行：取得の順は 1・3（親 2 の子）・2（子の後に書き直した親）・4・5。取得の大きさ 4・閾値 2・塊 2
+    /// で、1 ページ目で塊の経路へ入り、塊 [1, 3] で 3 が持ち越され（再開点は 1 の版）、塊 [2, 4] を書いてから 2 ページ目の取得で
+    /// 失敗させる。再開点は 1 の版で止まったまま（4 の版まで進めない）。次の同期は 3 から取り直し、3 と 5 が入る
+    /// </summary>
+    private static async Task ChunkFailureAfterCarryAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await InsertServerFoldersAsync(
+            h,
+            ct,
+            (1, null, "filler"),
+            (2, null, "parent"),
+            (3, 2, "child")
+        );
+        await RenameServerFolderAsync(h, 2, "parent-renamed", ct);
+        await InsertServerFoldersAsync(h, ct, (4, null, "f4"), (5, null, "f5"));
+        var options = new SyncOptions { DownloadBatchSize = 4 };
+        var seen = new List<(IReadOnlyList<int> Keys, string? Anchor)>();
+
+        var thrown = await Record.ExceptionAsync(() =>
+            h.SyncAsync(options, ct, SmallChunks(h.CreateEngine(FailOnFolderPage(h, 2, seen, ct))))
+        );
+
+        thrown
+            .Should()
+            .BeOfType<InvalidOperationException>()
+            .Which.Message.Should()
+            .Be(InjectedFetchFailure);
+        seen.Should().ContainSingle("2 ページ目の取得の前で 1 回だけ失敗させた");
+        seen[0]
+            .Keys.Should()
+            .Equal(
+                [1, 2, 4],
+                "失敗の時点で、塊 [1, 3] の 1 と塊 [2, 4] が書かれ、持ち越した 3 は書かれていない"
+            );
+        seen[0]
+            .Anchor.Should()
+            .Be(
+                await ServerFolderVersionAsync(h, 1, ct),
+                "持ち越しのある表の再開点は、持ち越した最初の行（3）の手前（1 の版）で止まり、後ろの塊の版まで進まない"
+            );
+        (await LocalAnchorAsync(h, ModelTables.Folders, ct)).Should().Be(seen[0].Anchor);
+
+        var result = await h.SyncAsync(options, ct, SmallChunks(h.CreateEngine()));
+
+        result
+            .Downloaded.Should()
+            .Be(
+                2,
+                "次の同期は 3 から取り直し、持ち越していた 3 と続きの 5 が入る（2・4 はエコー）"
+            );
+        result.Truncations.Should().BeEmpty();
+        Describe(await h.ReadLocalAsync(ct))
+            .Should()
+            .Be(Describe(await h.ReadServerAsync(ct)), "端末とサーバーの内容が同じ");
+    }
+
+    /// <summary>
+    /// 塊の間に端末が書いた未送信の行：端末とサーバーにフォルダー 1〜5 があり、サーバーの他者が 1〜5 の名前を順に書き直す。取得の
+    /// 大きさ 3・閾値 2・塊 2 の同期の、塊 [1, 2] の確定の後（2 ページ目の取得の前）に、端末がまだ書かれていない 4 を記録つきで
+    /// 編集する。その実行の後 4 は端末の内容のまま未送信で、ほかの行はサーバーの内容。続く同期が <paramref name="policy"/> で決める
+    /// </summary>
+    private static async Task ChunkUnsentEditBetweenChunksAsync(
+        SyncEngineFixedHarness h,
+        SyncConflictPolicy policy,
+        CancellationToken ct
+    )
+    {
+        await InsertServerFoldersAsync(
+            h,
+            ct,
+            (1, null, "f1"),
+            (2, null, "f2"),
+            (3, null, "f3"),
+            (4, null, "f4"),
+            (5, null, "f5")
+        );
+        await h.SyncAsync(null, ct);
+
+        for (var id = 1; id <= 5; id++)
+        {
+            await RenameServerFolderAsync(h, id, $"s{id}", ct);
+        }
+
+        var pages = 0;
+        var namesAtEdit = new List<string>();
+        var engine = SmallChunks(
+            h.CreateEngine(async call =>
+            {
+                if (
+                    call.Table == ModelTables.Folders
+                    && call.Call == SyncEngineSourceCall.RowsBefore
+                    && ++pages == 2
+                )
+                {
+                    var local = await h.ReadLocalAsync(ct);
+                    namesAtEdit.AddRange(
+                        local.Folders.OrderBy(pair => pair.Key).Select(pair => pair.Value.Name)
+                    );
+                    await h.ExecuteLocalAsync(
+                        "UPDATE model_folders SET name = 'local-4' WHERE folder_id = 4",
+                        ct
+                    );
+                }
+            })
+        );
+
+        var first = await h.SyncAsync(new SyncOptions { DownloadBatchSize = 3 }, ct, engine);
+
+        namesAtEdit
+            .Should()
+            .Equal(
+                ["s1", "s2", "f3", "f4", "f5"],
+                "編集の時点で、最初の塊（1・2）はコミットされ、3〜5 はまだ書かれていない"
+            );
+        first.Truncations.Should().BeEmpty();
+        first.Conflicts.Should().BeEmpty();
+        var local = await h.ReadLocalAsync(ct);
+        local
+            .Folders.OrderBy(pair => pair.Key)
+            .Select(pair => pair.Value.Name)
+            .Should()
+            .Equal(
+                ["s1", "s2", "s3", "local-4", "s5"],
+                "4 は端末の内容のまま、ほかの行は降りている"
+            );
+        (
+            await h.ScalarAsync(
+                $"SELECT dirty FROM {SyncLocalTracking.RowTableName} WHERE table_name = 'model_folders' AND \"key\" = 4",
+                ct
+            )
+        )
+            .Should()
+            .Be("1", "4 は未送信のまま残る");
+        (await h.Server.Folders.GetByIdAsync(4, ct))!.Name.Should().Be("s4");
+
+        await h.SyncAsync(new SyncOptions { ConflictPolicy = policy }, ct);
+
+        var expected = policy == SyncConflictPolicy.ServerWins ? "s4" : "local-4";
+        (await h.ReadLocalAsync(ct)).Folders[4].Name.Should().Be(expected);
+        (await h.Server.Folders.GetByIdAsync(4, ct))!.Name.Should().Be(expected);
+        Describe(await h.ReadLocalAsync(ct))
+            .Should()
+            .Be(Describe(await h.ReadServerAsync(ct)), "端末とサーバーの内容が同じ");
+        (
+            await h.ScalarAsync(
+                $"SELECT count(*) FROM {SyncLocalTracking.RowTableName} WHERE dirty = 1",
+                ct
+            )
+        )
+            .Should()
+            .Be("0");
+    }
+
+    /// <summary>
+    /// キーの後・行の前にサーバーで消えた行：端末とサーバーにフォルダー 1 と品目 11 がある。サーバーの他者がフォルダー 2〜4 を
+    /// 入れ、同期（閾値 2・塊 2）はフォルダーの表で塊の経路へ入り、後ろの表のキーを先に取る。品目の表の最初の行の取得の前に
+    /// サーバーの他者が品目 11 を消す（品目のキーはもう取ってある）。その実行の後も 11 は端末に残り、次の同期で消える
+    /// </summary>
+    private static async Task ChunkRowGoneAfterKeysAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await InsertServerFoldersAsync(h, ct, (1, null, "f1"));
+        await h.Server.Items.InsertAsync(
+            new ModelItemEntity
+            {
+                ItemId = 11,
+                FolderId = 1,
+                Code = "c-11",
+                Title = "t11",
+                Payload = [0x0A, 0x0B, 0x00, 0x0B],
+            },
+            ct
+        );
+        await h.SyncAsync(WithBlobs, ct);
+        await InsertServerFoldersAsync(h, ct, (2, null, "f2"), (3, null, "f3"), (4, null, "f4"));
+
+        var calls = new List<string>();
+        var deleted = false;
+        var engine = SmallChunks(
+            h.CreateEngine(async call =>
+            {
+                calls.Add(call.Table + ":" + call.Call);
+
+                if (
+                    !deleted
+                    && call.Table == ModelTables.Items
+                    && call.Call == SyncEngineSourceCall.RowsBefore
+                )
+                {
+                    deleted = true;
+                    (await h.Server.Items.DeleteAsync(11, ct)).Should().BeTrue();
+                }
+            })
+        );
+
+        var result = await h.SyncAsync(WithBlobs, ct, engine);
+
+        deleted.Should().BeTrue("品目の表の行の取得の前に割り込んだ");
+        calls
+            .IndexOf(ModelTables.Items + ":" + SyncEngineSourceCall.KeysBefore)
+            .Should()
+            .BeInRange(
+                0,
+                calls.IndexOf(ModelTables.Items + ":" + SyncEngineSourceCall.RowsBefore) - 1,
+                "塊の経路の入口が、品目の表のキーを行より先に取った（割り込みは入口の後に当たった）"
+            );
+        result.Downloaded.Should().Be(3);
+        (await h.ReadLocalAsync(ct))
+            .Items.Should()
+            .ContainKey(11, "キーを取った後に消えた行は、その実行では端末に残る");
+
+        await h.SyncAsync(WithBlobs, ct);
+
+        (await h.ReadLocalAsync(ct)).Items.Should().NotContainKey(11, "次の同期の削除伝搬で消える");
+        Describe(await h.ReadLocalAsync(ct))
+            .Should()
+            .Be(Describe(await h.ReadServerAsync(ct)), "端末とサーバーの内容が同じ");
+    }
+
+    /// <summary>
+    /// 取得の道の枠：枠ごとに別の端末とサーバー役を作り、サーバーの他者が入れたフォルダーを受信だけで降ろす（未送信ありの枠は、
+    /// 端末がサーバーの知らないフォルダー 50 を未送信のまま持つ）。観測の口が知らせた道が、枠ごとにちょうど 1 つ期待のとおり
+    /// </summary>
+    private static async Task ChunkRouteCellsAsync(SyncEngineFixedHarness h, CancellationToken ct)
+    {
+        (
+            string Name,
+            int Threshold,
+            int Limit,
+            int Fetched,
+            bool Unsent,
+            TrackedSyncDownloadRoute Route
+        )[] cells =
+        [
+            ("below-threshold", 2, 100, 2, false, TrackedSyncDownloadRoute.Single),
+            ("below-threshold-unsent", 2, 100, 2, true, TrackedSyncDownloadRoute.Single),
+            ("over-threshold-within-limit", 2, 100, 3, false, TrackedSyncDownloadRoute.Chunked),
+            (
+                "over-threshold-within-limit-unsent",
+                2,
+                100,
+                3,
+                true,
+                TrackedSyncDownloadRoute.Single
+            ),
+            ("over-limit", 2, 3, 4, false, TrackedSyncDownloadRoute.Chunked),
+            ("over-limit-unsent", 2, 3, 4, true, TrackedSyncDownloadRoute.Refused),
+            ("limit-below-threshold-over-limit", 10, 2, 3, false, TrackedSyncDownloadRoute.Chunked),
+            (
+                "limit-below-threshold-over-limit-unsent",
+                10,
+                2,
+                3,
+                true,
+                TrackedSyncDownloadRoute.Refused
+            ),
+        ];
+
+        foreach (var (name, threshold, limit, fetched, unsent, route) in cells)
+        {
+            // 行に渡された端末は使わず、枠ごとに空の端末とサーバー役を作る（取得する行の数を枠ごとに決めるため）
+            await using var cell = await SyncEngineFixedHarness.CreateAsync(ct);
+
+            for (var id = 1; id <= fetched; id++)
+            {
+                await InsertServerFoldersAsync(cell, ct, (id, null, $"f{id}"));
+            }
+
+            if (unsent)
+            {
+                await cell.ExecuteLocalAsync(
+                    "INSERT INTO model_folders (folder_id, name) VALUES (50, 'unsent')",
+                    ct
+                );
+            }
+
+            var routes = new List<TrackedSyncDownloadRoute>();
+            var engine = cell.CreateEngine();
+            engine.ChunkThreshold = threshold;
+            engine.ChunkSize = SyncModelEngineDevice.SmallChunkSize;
+            engine.DownloadRouteObserved = routes.Add;
+
+            var thrown = await Record.ExceptionAsync(() =>
+                engine.DownloadAsync(new SyncOptions { DownloadRowLimit = limit }, ct)
+            );
+
+            routes.Should().Equal([route], $"枠 {name} の取得は 1 回で、道は {route}");
+
+            if (route == TrackedSyncDownloadRoute.Refused)
+            {
+                thrown.Should().BeOfType<SyncDownloadTooLargeException>($"枠 {name} は断る");
+                (await cell.ReadLocalAsync(ct))
+                    .Folders.Keys.Should()
+                    .Equal([50], $"枠 {name} は何も適用しない");
+            }
+            else
+            {
+                thrown.Should().BeNull($"枠 {name} は断らない");
+                (await cell.ReadLocalAsync(ct))
+                    .Folders.Count.Should()
+                    .Be(fetched + (unsent ? 1 : 0), $"枠 {name} は取得した行を全部降ろす");
+            }
+        }
+
+        // 洗い替えの枠：閾値を超えて未送信なし・Force で捨てる行だけ（未送信に数えない）→ 塊、閾値以下 → 1 回で全部
+        (
+            string Name,
+            int Fetched,
+            bool ForceDiscard,
+            TrackedSyncDownloadRoute Route
+        )[] refreshCells =
+        [
+            ("refresh-over-threshold", 3, false, TrackedSyncDownloadRoute.Chunked),
+            ("refresh-force-discards-only", 3, true, TrackedSyncDownloadRoute.Chunked),
+            ("refresh-below-threshold", 2, false, TrackedSyncDownloadRoute.Single),
+        ];
+
+        foreach (var (name, fetched, forceDiscard, route) in refreshCells)
+        {
+            await using var cell = await SyncEngineFixedHarness.CreateAsync(ct);
+
+            for (var id = 1; id <= fetched; id++)
+            {
+                await InsertServerFoldersAsync(cell, ct, (id, null, $"f{id}"));
+            }
+
+            if (forceDiscard)
+            {
+                await cell.SyncAsync(null, ct);
+                await cell.ExecuteLocalAsync(
+                    "UPDATE model_folders SET name = 'local-1' WHERE folder_id = 1",
+                    ct
+                );
+            }
+
+            var routes = new List<TrackedSyncDownloadRoute>();
+            var engine = cell.CreateEngine();
+            engine.ChunkThreshold = 2;
+            engine.ChunkSize = SyncModelEngineDevice.SmallChunkSize;
+            engine.DownloadRouteObserved = routes.Add;
+
+            var result = await engine.RefreshAsync(
+                new SyncRefreshOptions
+                {
+                    DiscardLocalUnboundedBinaries = true,
+                    Force = forceDiscard,
+                },
+                ct
+            );
+
+            routes.Should().Equal([route], $"枠 {name} の洗い替えの取得は 1 回で、道は {route}");
+            result.DiscardedChanges.Should().Be(forceDiscard ? 1 : 0);
+            (await cell.ReadLocalAsync(ct))
+                .Folders.OrderBy(pair => pair.Key)
+                .Select(pair => pair.Value.Name)
+                .Should()
+                .Equal(
+                    Enumerable.Range(1, fetched).Select(id => $"f{id}"),
+                    $"枠 {name} は端末をサーバーの内容にする"
+                );
+        }
+
+        _ = h;
     }
 
     /// <summary>主キーを変えた行の blob</summary>
@@ -888,6 +2394,200 @@ internal static class SyncEngineFixedRows
             .Be(Describe(await h.ReadServerAsync(ct)), "端末がサーバーの内容になる");
         local.Folders[1].Name.Should().Be("f1");
         local.Items[1].Title.Should().Be("server-edit");
+    }
+
+    /// <summary>
+    /// Force の洗い替えが捨てると決めた行を取得の途中に書き直すと、その行は捨てる未送信でなくなるので数え、上限を超えた
+    /// 洗い替えを断る
+    /// </summary>
+    private static async Task RefreshForceOverRowLimitWithDiscardedKeyRewrittenAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await h.Server.Folders.InsertAsync(new ModelFolderEntity { FolderId = 1, Name = "f1" }, ct);
+        await h.SyncAsync(null, ct);
+        await h.ExecuteLocalAsync(
+            "UPDATE model_folders SET name = 'local-edit' WHERE folder_id = 1",
+            ct
+        );
+
+        foreach (var id in new[] { 2, 3, 4 })
+        {
+            await h.Server.Folders.InsertAsync(
+                new ModelFolderEntity { FolderId = id, Name = $"f{id}" },
+                ct
+            );
+        }
+
+        const string anchorTable = "quicker_sync_table|";
+        var stateBefore = await h.ReadStateTablesAsync(ct);
+        var serverBefore = Describe(await h.ReadServerAsync(ct));
+        var sequenceSql =
+            $"SELECT change_seq FROM {SyncLocalTracking.RowTableName} "
+            + "WHERE table_name = 'model_folders' AND \"key\" = 1 AND dirty = 1";
+        var sequenceBefore = await h.ScalarAsync(sequenceSql, ct);
+        sequenceBefore.Should().NotBeNull("前準備の後のフォルダー 1 は未送信");
+
+        // 最初のページ（1 行）を取得した後・適用の前に、捨てると決めたフォルダー 1 を端末でもう一度書く（記録つき）
+        var wrote = false;
+        h.Faults.ArmInterrupt(
+            ModelActor.Device1,
+            ModelInterruptPoint.AfterServerFetchBeforeApply,
+            ModelActor.Server,
+            async () =>
+            {
+                await h.ExecuteLocalAsync(
+                    "UPDATE model_folders SET name = 'rewritten' WHERE folder_id = 1",
+                    ct
+                );
+                wrote = true;
+            }
+        );
+
+        var thrown = await Record.ExceptionAsync(() =>
+            h.RefreshAsync(
+                new SyncRefreshOptions
+                {
+                    BatchSize = 1,
+                    DownloadRowLimit = 2,
+                    Force = true,
+                    DiscardLocalUnboundedBinaries = true,
+                },
+                ct
+            )
+        );
+
+        wrote.Should().BeTrue("取得の途中の端末の書き込みが流れた");
+        h.Faults.InterruptTimedOut.Should().BeNull("取得の途中の端末の書き込みはロックを待たない");
+        thrown
+            .Should()
+            .BeOfType<SyncDownloadTooLargeException>(
+                "書き直した行は捨てる未送信でなく、上限を超えた"
+            );
+        var tooLarge = (SyncDownloadTooLargeException)thrown!;
+        tooLarge.RowLimit.Should().Be(2);
+        tooLarge
+            .PendingChanges.Should()
+            .Equal([new SyncPendingChange("model_folders", 1)], "数えるのは書き直した 1 行");
+
+        var local = await h.ReadLocalAsync(ct);
+        local.Folders.Keys.Order().Should().Equal([1], "サーバーの新しい行は適用されない");
+        local.Folders[1].Name.Should().Be("rewritten", "書き直した内容のまま残る");
+        var sequenceAfter = await h.ScalarAsync(sequenceSql, ct);
+        sequenceAfter.Should().NotBeNull("書き直した行は未送信のまま");
+        sequenceAfter.Should().NotBe(sequenceBefore, "書き直しで連番が進んだ");
+        Describe(await h.ReadServerAsync(ct)).Should().Be(serverBefore, "洗い替えは何も送らない");
+        (await h.ReadStateTablesAsync(ct))
+            .Where(line => line.StartsWith(anchorTable, StringComparison.Ordinal))
+            .Should()
+            .Equal(
+                stateBefore.Where(line => line.StartsWith(anchorTable, StringComparison.Ordinal)),
+                "再開点は進まない"
+            );
+    }
+
+    /// <summary>
+    /// 洗い替えの取得の途中に端末で書いた未送信は、Force が捨てる未送信でないので数え、上限を超えた洗い替えを断る
+    /// </summary>
+    private static async Task RefreshOverRowLimitWithChangeDuringFetchAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await h.Server.Folders.InsertAsync(new ModelFolderEntity { FolderId = 1, Name = "f1" }, ct);
+        await h.SyncAsync(null, ct);
+
+        foreach (var id in new[] { 2, 3, 4 })
+        {
+            await h.Server.Folders.InsertAsync(
+                new ModelFolderEntity { FolderId = id, Name = $"f{id}" },
+                ct
+            );
+        }
+
+        var rowTable = SyncLocalTracking.RowTableName + "|";
+        const string anchorTable = "quicker_sync_table|";
+        var stateBefore = await h.ReadStateTablesAsync(ct);
+        var serverBefore = Describe(await h.ReadServerAsync(ct));
+        (
+            await h.ScalarAsync(
+                $"SELECT COUNT(*) FROM {SyncLocalTracking.RowTableName} WHERE dirty = 1",
+                ct
+            )
+        )
+            .Should()
+            .Be("0", "前準備の後の端末に未送信は無い");
+
+        // 最初のページ（1 行）を取得した後・適用の前に、端末で記録つきの書き込みを 1 つ流す（洗い替えの間は端末の割り込みを
+        // 起こさない仕掛けなので、書き手はサーバーの他者として仕掛ける。書くのは端末の DB）
+        var wrote = false;
+        h.Faults.ArmInterrupt(
+            ModelActor.Device1,
+            ModelInterruptPoint.AfterServerFetchBeforeApply,
+            ModelActor.Server,
+            async () =>
+            {
+                await h.ExecuteLocalAsync(
+                    "INSERT INTO model_folders (folder_id, parent_id, name) VALUES (50, NULL, 'during')",
+                    ct
+                );
+                wrote = true;
+            }
+        );
+
+        var thrown = await Record.ExceptionAsync(() =>
+            h.RefreshAsync(
+                new SyncRefreshOptions
+                {
+                    BatchSize = 1,
+                    DownloadRowLimit = 2,
+                    DiscardLocalUnboundedBinaries = true,
+                },
+                ct
+            )
+        );
+
+        wrote.Should().BeTrue("取得の途中の端末の書き込みが流れた");
+        h.Faults.InterruptTimedOut.Should().BeNull("取得の途中の端末の書き込みはロックを待たない");
+        thrown
+            .Should()
+            .BeOfType<SyncDownloadTooLargeException>("上限を超え、途中で書いた未送信がある");
+        var tooLarge = (SyncDownloadTooLargeException)thrown!;
+        tooLarge.RowLimit.Should().Be(2);
+        tooLarge.FetchedRowCount.Should().Be(3, "1 行ずつのページの 3 つ目で上限を超える");
+        tooLarge
+            .PendingChanges.Should()
+            .Equal([new SyncPendingChange("model_folders", 1)], "数えるのは途中で書いた 1 行");
+
+        var local = await h.ReadLocalAsync(ct);
+        local
+            .Folders.Keys.Order()
+            .Should()
+            .Equal([1, 50], "サーバーの新しい行は適用されず、途中で書いた行は残る");
+        local.Folders[50].Name.Should().Be("during");
+        Describe(await h.ReadServerAsync(ct)).Should().Be(serverBefore, "洗い替えは何も送らない");
+
+        var stateAfter = await h.ReadStateTablesAsync(ct);
+        stateAfter
+            .Where(line => line.StartsWith(anchorTable, StringComparison.Ordinal))
+            .Should()
+            .Equal(
+                stateBefore.Where(line => line.StartsWith(anchorTable, StringComparison.Ordinal)),
+                "再開点は進まない"
+            );
+        stateBefore
+            .Where(line => line.StartsWith(rowTable, StringComparison.Ordinal))
+            .Except(stateAfter)
+            .Should()
+            .BeEmpty("前からある行の状態は変わらない");
+        stateAfter
+            .Where(line => line.StartsWith(rowTable, StringComparison.Ordinal))
+            .Except(stateBefore)
+            .Should()
+            .ContainSingle("途中で書いた行の未送信だけが増える")
+            .Which.Should()
+            .StartWith(rowTable + "model_folders|50|");
     }
 
     /// <summary>記録しない書き込み：書いた行は記録されず、前からある記録は変わらない</summary>
@@ -1576,6 +3276,18 @@ internal static class SyncEngineFixedRows
     }
 
     /// <summary>DB の内容を比べられる文字列にする（4 表と blob）</summary>
+    /// <summary>表の行だけ（blob を除く）を並べた文字列</summary>
+    private static string DescribeRows(ModelDbState state) =>
+        string.Join(
+            "\n",
+            ModelTables.All.SelectMany(table =>
+                state
+                    .Rows(table)
+                    .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                    .Select(pair => $"{table}/{pair.Key}={pair.Value}")
+            )
+        );
+
     private static string Describe(ModelDbState state) =>
         string.Join(
             "\n",

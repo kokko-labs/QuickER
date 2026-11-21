@@ -108,6 +108,13 @@ internal static class SyncModelNotGenerated
                     "同期のエンジンが分岐に読むのは、その端末の手元の記録（ジャーナル・ミラー版・受理記録・blob のコピー待ち）とサーバーの行と版だけで、サーバーは端末ごとの状態を持たない。3 台でどの端末にもほかの端末が 2 台そろい、その 2 台の書き込みが重なる形が生まれ、4 台目でエンジンが新しく読むものは無い",
                     Random
                 ),
+                NotGenerated.Accepted(
+                    "small-download-row-limit",
+                    "既定より小さい取得の行数の上限（SyncOptions.DownloadRowLimit）",
+                    "乱数の同期の手は上限を製品の既定（300,000 行）のまま渡し、乱数の世界の行数は上限に届かない。小さい上限の水準を足すと、上限を超えて断られた実行を判定役が扱う必要がある。上限を超えて断る形・超えても降ろす形は決まった形の行と決定的なシナリオが持つ",
+                    Random
+                        + " の行 `dl-row-limit-exceeded-with-unsent-change-refuses-and-applies-nothing` / `dl-row-limit-exceeded-after-upload-applies-everything` / `dl-row-limit-equal-to-fetched-rows-is-not-refused` / `refresh-force-over-row-limit-discards-unsent-and-is-not-refused`・`table:SyncEngineFixed` の行 `refresh-over-row-limit-with-change-written-during-fetch-is-refused` / `refresh-force-over-row-limit-with-discarded-key-rewritten-during-fetch-is-refused`"
+                ),
             ]
         );
 }

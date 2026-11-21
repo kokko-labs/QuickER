@@ -172,6 +172,9 @@ internal sealed class SyncModelJudgeBreakSync(
     /// <summary>包んだエンジンの宣言を引き継ぐ（包みは取得の仕方を変えない）</summary>
     public bool RefetchesHeldRowsInSameRun => inner.RefetchesHeldRowsInSameRun;
 
+    /// <summary>包んだエンジンの宣言を引き継ぐ（包みは降ろす行の上限の扱いを変えない）</summary>
+    public bool RefusesDownloadOverRowLimit => inner.RefusesDownloadOverRowLimit;
+
     public async Task<ModelSyncOutcome> RunAsync(
         ModelSyncKind kind,
         SyncOptions options,

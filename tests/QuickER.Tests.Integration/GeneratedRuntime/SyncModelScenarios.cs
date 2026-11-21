@@ -59,6 +59,13 @@ internal sealed record SyncModelScenario(
     /// </summary>
     public IReadOnlySet<string>? ExpectedJudgeSignatures { get; init; }
 
+    /// <summary>
+    /// 小さい塊の端末（<see cref="SyncModelEngineDevice.OnSmallChunks"/>）で流すと、塊の経路の持ち越し（最後の段で書く行）が
+    /// 1 行以上起きる形か。控えとの照合の Fact（<see cref="SyncSupportAdoSqliteEngineRuntimeTests.SmallChunkScenarios_MatchLedger"/>）が、
+    /// 印のある行で持ち越しが起きたことを照らす（起きなければ形が塊をまたいでいない）
+    /// </summary>
+    public bool CarriesAcrossChunks { get; init; }
+
     /// <summary>この転送のテストで流すか</summary>
     public bool RunsOn(SyncModelTransport transport) =>
         Transports.Contains(SyncModelTransport.Direct)
@@ -1619,6 +1626,7 @@ internal static partial class SyncModelScenarios
         list.AddRange(EngineConflictsScenarios());
         list.AddRange(EngineRefreshScenarios());
         list.AddRange(EngineBlobsScenarios());
+        list.AddRange(EngineLargeDownloadScenarios());
         list.AddRange(JudgeScenarios());
 
         return list;

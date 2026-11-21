@@ -38,6 +38,39 @@ internal static class SyncModelEngineDevice
             Name = options.Name + "+engine",
         };
 
+    /// <summary>小さい塊の端末の、塊へ入る閾値（取得した行がこれを超えたら塊の経路を考える）</summary>
+    public const int SmallChunkThreshold = 2;
+
+    /// <summary>小さい塊の端末の、塊の大きさ</summary>
+    public const int SmallChunkSize = 2;
+
+    /// <summary>
+    /// 世界の組み方の端末の作り方を、塊へ入る閾値と塊の大きさを小さくした新しいエンジンの端末へ差し替える（名前に
+    /// <c>+engine-small-chunks</c> を足す）。各端末のエンジンの取得ごとの道（1 回で全部・塊・断る）を <paramref name="routes"/> が数える
+    /// </summary>
+    /// <param name="options">元の組み方（サーバー役・転送経路はそのまま）</param>
+    /// <param name="routes">取得ごとの道を数える入れ物（世界の全端末で共有する）</param>
+    public static SyncModelWorldOptions OnSmallChunks(
+        SyncModelWorldOptions options,
+        SyncModelDownloadRoutes routes
+    ) =>
+        options with
+        {
+            CreateDevice = (request, ct) =>
+                CreateAsync(
+                    request,
+                    ct,
+                    engine =>
+                    {
+                        engine.ChunkThreshold = SmallChunkThreshold;
+                        engine.ChunkSize = SmallChunkSize;
+                        engine.DownloadRouteObserved = routes.Note;
+                        engine.CarriedRowsApplied = routes.NoteCarried;
+                    }
+                ),
+            Name = options.Name + "+engine-small-chunks",
+        };
+
     /// <summary>
     /// 記録しない書き込みの口：接続を開き、製品の <c>SyncLocalTracking.WriteUntrackedAsync</c>（適用中の印を立てた 1 つの
     /// トランザクションで書き込みロックを持つ）の上で、その接続を関数へ渡す。接続は破棄する
@@ -65,9 +98,19 @@ internal static class SyncModelEngineDevice
     /// <summary>端末 1 台を作る（<see cref="SyncModelWorldOptions.CreateDevice"/> へ渡す形）</summary>
     /// <param name="request">端末の注文</param>
     /// <param name="ct">キャンセルトークン</param>
-    public static async Task<SyncModelDevice> CreateAsync(
+    public static Task<SyncModelDevice> CreateAsync(
         SyncModelDeviceRequest request,
         CancellationToken ct
+    ) => CreateAsync(request, ct, configure: null);
+
+    /// <summary>端末 1 台を作り、組んだエンジンを渡して内部の値を整えさせる</summary>
+    /// <param name="request">端末の注文</param>
+    /// <param name="ct">キャンセルトークン</param>
+    /// <param name="configure">組んだエンジンを整える関数（null なら製品の既定のまま）</param>
+    private static async Task<SyncModelDevice> CreateAsync(
+        SyncModelDeviceRequest request,
+        CancellationToken ct,
+        Action<TrackedSyncEngine>? configure
     )
     {
         if (request.ExternalTables)
@@ -119,6 +162,7 @@ internal static class SyncModelEngineDevice
                     rowStore
                 ),
             ]);
+            configure?.Invoke(engine);
 
             device.Install(
                 new SyncModelDeviceParts
@@ -152,6 +196,65 @@ internal static class SyncModelEngineDevice
 }
 
 /// <summary>
+/// 新しいエンジンの取得ごとの道（<c>TrackedSyncDownloadRoute</c>＝1 回で全部・塊・断る）を数える入れ物。小さい塊の端末
+/// （<see cref="SyncModelEngineDevice.OnSmallChunks"/>）のエンジンの観測の口へつなぐ。並列に流れる世界から呼ばれてもよい
+/// </summary>
+internal sealed class SyncModelDownloadRoutes
+{
+    private long _single;
+    private long _chunked;
+    private long _refused;
+
+    /// <summary>1 回で全部適用した取得の数</summary>
+    public long Single => Interlocked.Read(ref _single);
+
+    /// <summary>塊ごとに適用した取得の数</summary>
+    public long Chunked => Interlocked.Read(ref _chunked);
+
+    /// <summary>断った取得の数</summary>
+    public long Refused => Interlocked.Read(ref _refused);
+
+    private long _carried;
+
+    /// <summary>塊の経路の最後の段で書いた、持ち越した行の数の合計</summary>
+    public long Carried => Interlocked.Read(ref _carried);
+
+    /// <summary>最後の段の持ち越した行の数を足す（エンジンの観測の口へ渡す形）</summary>
+    /// <param name="rows">持ち越した行の数</param>
+    public void NoteCarried(int rows) => Interlocked.Add(ref _carried, rows);
+
+    /// <summary>取得 1 回の道を数える（エンジンの観測の口へ渡す形）</summary>
+    /// <param name="route">決まった道</param>
+    public void Note(TrackedSyncDownloadRoute route)
+    {
+        switch (route)
+        {
+            case TrackedSyncDownloadRoute.Single:
+                Interlocked.Increment(ref _single);
+                break;
+
+            case TrackedSyncDownloadRoute.Chunked:
+                Interlocked.Increment(ref _chunked);
+                break;
+
+            case TrackedSyncDownloadRoute.Refused:
+                Interlocked.Increment(ref _refused);
+                break;
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(route), route, null);
+        }
+    }
+
+    /// <summary>出力の 1 行（道ごとの数）</summary>
+    public override string ToString() =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"download routes: single {Single}, chunked {Chunked}, refused {Refused}, carried rows {Carried}"
+        );
+}
+
+/// <summary>
 /// 新しいエンジンの端末のエンジンの面。<c>TrackedSyncEngine</c> を呼び、結果を <see cref="ModelSyncOutcome"/> へ写す
 /// （<see cref="ProductModelDeviceSync"/> と同じ形）。エンジンの例外はそのまま通す。
 /// </summary>
@@ -176,6 +279,11 @@ internal sealed class EngineModelDeviceSync(TrackedSyncEngine engine, ILocalRowS
     /// 新しいエンジンは、同期と洗い替えの取得で保留した行があれば、上限を取り直してもう 1 回だけ取得する（同じ実行の中）
     /// </summary>
     public bool RefetchesHeldRowsInSameRun => true;
+
+    /// <summary>
+    /// 新しいエンジンは、1 回の取得が降ろす行が上限を超え、範囲の表に未送信の変更があれば、何も適用せずに断る
+    /// </summary>
+    public bool RefusesDownloadOverRowLimit => true;
 
     public async Task<ModelSyncOutcome> RunAsync(
         ModelSyncKind kind,

@@ -63,6 +63,31 @@ internal static class SyncModelKnownFailures
             "rotate-three-codes-without-refresh-does-not-settle",
             "1/no-quiesce:unique-swap:model_items"
         ),
+        // 受け入れ：塊をまたぐ形の行（ChunkBoundaryScenarios）のうち、行どうしの循環（両方の行が新しい）と一意な値の入れ替えは、
+        // 今のエンジンでは降ろせない（ダウンロードがその行で毎回打ち切る）。新しいエンジンは 1 回で全部の道でも塊の道でも、保留した
+        // 行をまとめて 1 つのトランザクションで書いて入れる（控え sync-engine-scenario-ledger.md と小さい塊の端末の照合が持つ）
+        .. CurrentEngineCannotLoad(
+            "chunk-cross-table-cycle-both-new",
+            RowCycleReason,
+            "5/expect-result",
+            "5/expect-rows:model_folders",
+            "5/expect-rows:model_items",
+            "1/no-quiesce:conflicts-or-truncations"
+        ),
+        .. CurrentEngineCannotLoad(
+            "chunk-selfref-cycle-across-chunks",
+            RowCycleReason,
+            "5/expect-result",
+            "5/expect-rows:model_folders",
+            "1/no-quiesce:conflicts-or-truncations"
+        ),
+        .. CurrentEngineCannotLoad(
+            "chunk-unique-swap-across-chunks",
+            "docs/code-generation.md の既知の割り切り「Rows whose unique values were rotated on the device or on the server are not carried across.」（今のエンジンは入れ替えた 2 行を適用できず毎回打ち切る。RefreshAsync で解消する）",
+            "5/expect-result",
+            "5/expect-rows:model_items",
+            "1/no-quiesce:unique-swap:model_items"
+        ),
         // 洗い替えの取得の後にサーバーの他者が親を消すと、バッチの古い写しの子が消えた親を指したまま入る
         Entry(
             "AG-R1",
@@ -110,7 +135,33 @@ internal static class SyncModelKnownFailures
     /// 正規形が広すぎて、種を限らずに数えるとほかの不具合を隠す署名（決定的な項目の正規形から乱数の項目を作らず、種を名指しした
     /// 項目 <see cref="SeedNamedRandomEntries"/> だけで数える）
     /// </summary>
-    private static readonly HashSet<string> SeedOnlySignatures = [RefreshStaleParentSignature];
+    /// <remarks>
+    /// 塊をまたぐ形の行で今のエンジンが降ろせない形の項目（<see cref="CurrentEngineCannotLoad"/>）の署名のうち、行の期待の手の違反と
+    /// 分類できない静止化の失敗も含める（種に作ると種の不具合を広く隠す。一意な値の入れ替えの署名はほかの項目が正規形を持つので
+    /// 含めない）
+    /// </remarks>
+    private static readonly HashSet<string> SeedOnlySignatures =
+    [
+        RefreshStaleParentSignature,
+        "5/expect-result",
+        "5/expect-rows:model_folders",
+        "5/expect-rows:model_items",
+        "1/no-quiesce:conflicts-or-truncations",
+    ];
+
+    /// <summary>塊をまたぐ形の行のうち、行どうしの循環（両方の行が新しい）を今のエンジンが降ろせない理由</summary>
+    private const string RowCycleReason =
+        "docs/code-generation.md の既知の割り切り「rows that refer to each other in a cycle ... cannot be loaded back one at a time, so the reload stops at them, as the download does.」（今のエンジンのダウンロードは、互いのキーを持つ 2 行を 1 行ずつ入れられず毎回打ち切る）";
+
+    /// <summary>今のエンジンが降ろせない形の行の、署名ごとの受け入れの項目</summary>
+    /// <param name="scenario">シナリオの名前</param>
+    /// <param name="reason">docs の既知の割り切りを名指しした理由</param>
+    /// <param name="signatures">今のエンジンで出る署名の全部</param>
+    private static IEnumerable<KnownEntry> CurrentEngineCannotLoad(
+        string scenario,
+        string reason,
+        params string[] signatures
+    ) => signatures.Select(signature => AcceptedEntry("CH-B", reason, scenario, signature));
 
     /// <summary>
     /// 種を名指しした乱数の項目（分類できない静止化の失敗のように、正規形が広くて種を限らないとほかの不具合を隠す署名を、種で絞って

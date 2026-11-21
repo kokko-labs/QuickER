@@ -50,6 +50,13 @@ internal interface IModelDeviceSync
     /// 期待の手 <see cref="WhenEngineDeclaresOp"/> が枝を選ぶ
     /// </summary>
     bool RefetchesHeldRowsInSameRun { get; }
+
+    /// <summary>
+    /// 1 回の取得が降ろす行が <c>SyncOptions.DownloadRowLimit</c> を超え、範囲の表に未送信の変更があるとき、何も適用せずに
+    /// <c>SyncDownloadTooLargeException</c> で断るエンジンか（真＝断る。偽＝上限を見ずに降ろす）。決まった形の行の期待の手
+    /// <see cref="WhenEngineDeclaresOp"/> が枝を選ぶ
+    /// </summary>
+    bool RefusesDownloadOverRowLimit { get; }
 }
 
 /// <summary>
@@ -106,6 +113,9 @@ internal sealed class ProductModelDeviceSync(SyncEngine engine) : IModelDeviceSy
 
     /// <summary>製品のエンジンは、取得を同じ実行の中で取り直さない（打ち切った行は後の実行が降ろす）</summary>
     public bool RefetchesHeldRowsInSameRun => false;
+
+    /// <summary>製品のエンジンは、降ろす行の数の上限を読まない（上限を超えても未送信があっても降ろす）</summary>
+    public bool RefusesDownloadOverRowLimit => false;
 
     public async Task<ModelSyncOutcome> RunAsync(
         ModelSyncKind kind,

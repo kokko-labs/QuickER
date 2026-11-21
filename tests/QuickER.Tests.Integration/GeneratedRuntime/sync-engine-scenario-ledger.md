@@ -2,7 +2,7 @@
 
 # 新しいエンジンの端末の決定的なシナリオの控え
 
-green: 373 / unsupported: 99 / differs: 20
+green: 383 / unsupported: 99 / differs: 20
 
 | シナリオ | 結果 | 詳細 | 今のエンジン |
 |---|---|---|---|
@@ -77,6 +77,12 @@ green: 373 / unsupported: 99 / differs: 20
 | blob-thrown-serverwins-then-collect-overwrites-newer-server-blob | green |  | green |
 | blob-uploaded-blob-does-not-echo | green |  | green |
 | c2-serverwins-out-of-scope-delete | green |  | green |
+| chunk-cross-table-cycle-both-new | green |  | known |
+| chunk-delete-stage-parent-gone-after-next-sync | green |  | green |
+| chunk-selfref-cycle-across-chunks | green |  | known |
+| chunk-selfref-parent-in-later-chunk | green |  | green |
+| chunk-taker-before-releaser | green |  | green |
+| chunk-unique-swap-across-chunks | green |  | known |
 | conc-local-edit-during-download-is-not-overwritten-by-batch | differs | 5/expect-result | green |
 | conc-local-insert-during-download-is-not-deleted-by-propagation | green |  | green |
 | conflict-collected-by-default-with-both-rows | unsupported | ExpectFacetOp:journal | green |
@@ -105,6 +111,9 @@ green: 373 / unsupported: 99 / differs: 20
 | dl-propagation-can-be-turned-off | green |  | green |
 | dl-propagation-removes-rows-missing-on-server | green |  | green |
 | dl-repeated-sync-downloads-nothing | green |  | green |
+| dl-row-limit-equal-to-fetched-rows-is-not-refused | green |  | green |
+| dl-row-limit-exceeded-after-upload-applies-everything | green |  | green |
+| dl-row-limit-exceeded-with-unsent-change-refuses-and-applies-nothing | green |  | green |
 | dl-server-update-after-upload-is-still-downloaded | green |  | green |
 | dl-table-emptied-outside-sync | green |  | green |
 | e2-leftover-unset-key-entry | unsupported | LeftoverUnsetKeyEntryOp | green |
@@ -422,6 +431,7 @@ green: 373 / unsupported: 99 / differs: 20
 | refresh-force-discards-pending-changes | unsupported | ExpectFacetOp:journal | green |
 | refresh-force-forgets-row-gone-on-both-sides-and-same-key-is-inserted | green |  | green |
 | refresh-force-in-a-foreign-key-cycle-replaces-pending-changes | unsupported | ExpectFacetOp:journal | green |
+| refresh-force-over-row-limit-discards-unsent-and-is-not-refused | green |  | green |
 | refresh-honors-foreign-key-order | differs | 5/expect-result | green |
 | refresh-leaves-anchor-next-sync-resumes-from | green |  | green |
 | refresh-leaves-local-only-tables-alone | green |  | green |
