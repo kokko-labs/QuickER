@@ -15,6 +15,10 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ### Fixed
 
+#### AI chat & mock generation
+
+- **GitHub Copilot can connect through GitHub Copilot CLI 1.0.113 and later** — With these CLI versions, the Copilot connection (chat and mock generation) failed at startup with a protocol version mismatch. GitHub Copilot CLI 1.0.113 or later is now required, and with a CLI that QuickER cannot talk to, the message says whether to update the CLI or QuickER.
+
 #### Diagram files
 
 - **An external change to the open diagram file is no longer missed while another program holds the file open without sharing** — since 0.4.0, a backup or antivirus tool that opened the file right after an external save could make QuickER drop the notice of that change

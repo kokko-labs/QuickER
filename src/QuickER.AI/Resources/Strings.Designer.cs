@@ -774,6 +774,18 @@ namespace QuickER.AI.Resources {
             }
         }
 
+        public static string Copilot_CliProtocolTooOld {
+            get {
+                return ResourceManager.GetString("Copilot_CliProtocolTooOld", resourceCulture);
+            }
+        }
+
+        public static string Copilot_CliProtocolTooNew {
+            get {
+                return ResourceManager.GetString("Copilot_CliProtocolTooNew", resourceCulture);
+            }
+        }
+
         public static string Copilot_PathHasQuote {
             get {
                 return ResourceManager.GetString("Copilot_PathHasQuote", resourceCulture);

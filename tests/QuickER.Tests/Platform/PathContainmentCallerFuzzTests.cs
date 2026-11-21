@@ -1,6 +1,6 @@
 using System.IO;
 using AwesomeAssertions;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 using QuickER.AI;
 using QuickER.AI.Mock;
 using QuickER.Platform;

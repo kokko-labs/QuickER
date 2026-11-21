@@ -11,13 +11,13 @@
           "Microsoft.Extensions.AI.Abstractions": "10.5.1"
         }
       },
-      "GitHub.Copilot.SDK": {
+      "Microsoft.Copilot.SDK": {
         "type": "Direct",
-        "requested": "[1.0.26, )",
-        "resolved": "1.0.26",
-        "contentHash": "z5irU7ylg09KnZIE/82lbk08ZZ6S0mHc0RA+EzYrOxYrdBm+GEx+QDLM5dqOYE0xwvBxWRIkSKeGHeUcMkQGuA==",
+        "requested": "[2.0.1, )",
+        "resolved": "2.0.1",
+        "contentHash": "SQGOlI/M429CEHBwwf9UxVMUwZLx6uKrbNT/F6FgYyEgO7xHf5xRLV6JiaNv8fmH8k5d4rvmOXpqnY6aiBtmsA==",
         "dependencies": {
-          "Microsoft.Extensions.AI.Abstractions": "10.2.0"
+          "Microsoft.Extensions.AI.Abstractions": "10.11.0"
         }
       },
       "ModelContextProtocol.AspNetCore": {

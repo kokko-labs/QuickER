@@ -288,7 +288,7 @@ public class CopilotChatEngineTests
 
     /// <summary>
     /// 見張りの Ping が失敗しても、接続が生きている限りターンを終えずに次の回へ進むことを検証する。
-    /// 通常のエラー応答（SDK が IOException に包む場合を含む）では接続も捨てない。
+    /// 通常のエラー応答（SDK が投げる RemoteRpcException）でも接続を捨てない。
     /// </summary>
     /// <param name="isErrorResponse">true ならランタイムの通常のエラー応答、false なら接続が生きたままの一時的な例外</param>
     [Theory(

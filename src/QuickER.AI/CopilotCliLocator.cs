@@ -8,9 +8,9 @@ namespace QuickER.AI;
 /// </summary>
 /// <remarks>
 /// <para>
-/// GitHub.Copilot.SDK は既定でビルド時に取得した CLI を同梱して起動するが、QuickER は
+/// Microsoft.Copilot.SDK は既定でビルド時に取得したランタイムを同梱して使うが、QuickER は
 /// <c>CopilotSkipCliDownload</c> でそれをオプトアウトし、ユーザーが自分でインストールした
-/// copilot をここで検出して <c>RuntimeConnection.ForStdio(検出パス)</c> へ渡す
+/// copilot をここで検出して <c>RuntimeConnection.ForSpawnedStdio(検出パス)</c> へ渡す
 /// （認証もユーザーのログイン状態をそのまま使うため、CLI の実体はユーザーのものである必要がある）。
 /// </para>
 /// <para><see cref="CodexCliLocator"/> と同型で、走査本体は <see cref="PathExecutableResolver"/> と共有する。</para>
@@ -31,7 +31,7 @@ public static class CopilotCliLocator
     /// （検証を通ったパスをそのまま返す）。
     /// </summary>
     /// <remarks>
-    /// copilot の起動は GitHub.Copilot.SDK の内側で行われ、QuickER は引数を組み立てない。
+    /// copilot の起動は Microsoft.Copilot.SDK の内側で行われ、QuickER は引数を組み立てない。
     /// そのため <c>.cmd</c> シムに対して codex / claude と同じ cmd.exe ラップは掛けられず、
     /// ここで掛けられる防御は「シムのパス自体に引用符・<c>%</c>・<c>!</c> が無いこと」の確認だけになる
     /// （引用符は正規の Windows パスには現れず、含まれていれば引用の切断を狙ったもの。

@@ -1,5 +1,5 @@
 using System.IO;
-using GitHub.Copilot;
+using Microsoft.Copilot;
 using QuickER.AI;
 using QuickER.Platform;
 using QuickER.Tests.TestSupport.Engines;

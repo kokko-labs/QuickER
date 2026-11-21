@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <!--
-    GitHub Copilot SDK は既定でビルド時に Copilot CLI を npm から取得してアプリ出力へ同梱するが、
+    Microsoft Copilot SDK は既定でビルド時に Copilot CLI を npm から取得してアプリ出力へ同梱するが、
     QuickER はユーザーがインストール済みの copilot 実行ファイルを PATH から検出して使う方針のため
     ダウンロードをオプトアウトする（ビルドのネットワーク依存と配布サイズ肥大を避ける）。
   -->
@@ -23,7 +23,7 @@
 
   <ItemGroup>
     <PackageReference Include="Anthropic" />
-    <PackageReference Include="GitHub.Copilot.SDK" />
+    <PackageReference Include="Microsoft.Copilot.SDK" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" />
     <PackageReference Include="OpenAI" />
   </ItemGroup>

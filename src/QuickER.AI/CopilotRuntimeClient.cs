@@ -1,7 +1,9 @@
+using System.Globalization;
 using System.IO;
 using System.Text.Json;
-using GitHub.Copilot;
-using GitHub.Copilot.Rpc;
+using System.Text.RegularExpressions;
+using Microsoft.Copilot;
+using Microsoft.Copilot.Rpc;
 using Microsoft.Extensions.AI;
 using QuickER.AI.Resources;
 using QuickER.Mcp;
@@ -9,13 +11,17 @@ using QuickER.Mcp;
 namespace QuickER.AI;
 
 /// <summary>
-/// GitHub.Copilot.SDK を用いた <see cref="ICopilotRuntimeClient"/> の実装。
+/// Microsoft.Copilot.SDK を用いた <see cref="ICopilotRuntimeClient"/> の実装。
 /// ユーザーがインストール済みの copilot 実行ファイルを PATH から検出して stdio 接続で子プロセス起動し、
 /// セッションイベント（差分・ツール要求・アイドル・エラー）を SDK 非依存のイベントへ翻訳する。
 /// </summary>
 /// <remarks>
 /// <para>
 /// 認証はユーザーの CLI ログイン状態をそのまま使う（<c>UseLoggedInUser</c>）。GitHubToken は扱わない。
+/// </para>
+/// <para>
+/// SDK 2.x は SDK プロトコル 4 だけを話し、プロトコル 4 を話すのは GitHub Copilot CLI 1.0.113 以降。
+/// 版の合わない CLI では起動が断られるので、その失敗を利用者向けの案内へ訳す（<see cref="TranslateStartFailure"/>）。
 /// </para>
 /// <para>
 /// ツールは「AIFunction を伴わない宣言」（<see cref="CopilotToolDeclaration"/>）として渡す。SDK は
@@ -112,20 +118,10 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
 
         try
         {
-            client = new CopilotClient(
-                new CopilotClientOptions
-                {
-                    // SDK 同梱 CLI ではなくユーザーがインストールした copilot を明示的に起動する
-                    Connection = RuntimeConnection.ForStdio(executable),
-                    // ユーザーの CLI ログイン状態（OAuth トークン / gh CLI 認証）をそのまま使う
-                    UseLoggedInUser = true,
-                    // アプリのカレントディレクトリを触らせないよう、無害な一時フォルダに閉じ込める
-                    WorkingDirectory = workingDirectory,
-                }
-            );
+            client = new CopilotClient(CreateClientOptions(executable, workingDirectory));
             await client.StartAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch
+        catch (Exception ex)
         {
             // 起動に失敗した接続の一時フォルダは残さない（再試行のたびに新しいフォルダを作るため、
             // 消さないと %TEMP% に溜まる）
@@ -142,12 +138,109 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
             }
 
             BackendWorkingDirectory.TryDelete(workingDirectory);
+
+            // プロトコルの不一致は SDK の生の文言でなく、何を更新すればよいかの案内で知らせる
+            if (TranslateStartFailure(ex) is { } translated)
+            {
+                throw translated;
+            }
+
             throw;
         }
 
         _workingDirectory = workingDirectory;
         _client = client;
     }
+
+    /// <summary>SDK のクライアントの設定を組み立てる</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Mode = CodingAgent</c> は SDK 1.x の既定（モード未指定＝<c>CopilotCli</c>）と同じ振る舞い。
+    /// SDK 2.x はモードの指定を必須にし、<c>CopilotCli</c> を振る舞いを変えずに <c>CodingAgent</c> へ改名した。
+    /// 組込みのファイル編集・シェル実行を持つので、モック生成（<see cref="CopilotSessionOptions.AllowWorkspaceTools"/>）が使える。
+    /// チャットは許可リスト（<c>AvailableTools</c>）と許可要求の拒否で、宣言したツールだけに絞る。
+    /// </para>
+    /// <para>
+    /// パスを渡した <c>ForSpawnedStdio</c> は、SDK 同梱のランタイムでなくそのパスを子プロセスとして起動する
+    /// （SDK 2.x の既定はアプリの中に読み込む形だが、QuickER は利用者が入れた copilot を使う方針）。
+    /// 作業フォルダは子プロセスの起動の設定なので、接続の側に置く。
+    /// </para>
+    /// </remarks>
+    /// <param name="executable">起動する copilot の実行ファイルのパス</param>
+    /// <param name="workingDirectory">copilot の子プロセスの作業フォルダ</param>
+    private static CopilotClientOptions CreateClientOptions(
+        string executable,
+        string workingDirectory
+    ) =>
+        new()
+        {
+            Mode = CopilotClientMode.CodingAgent,
+            // SDK 同梱のランタイムではなく、利用者がインストールした copilot を明示的に起動する。
+            // アプリのカレントディレクトリを触らせないよう、無害な一時フォルダに閉じ込める
+            Runtime = RuntimeConnection.ForSpawnedStdio(
+                path: executable,
+                workingDirectory: workingDirectory
+            ),
+            // ユーザーの CLI ログイン状態（OAuth トークン / gh CLI 認証）をそのまま使う
+            GitHub = { UseLoggedInUser = true },
+        };
+
+    /// <summary>SDK のプロトコルの不一致の文言（<c>CopilotClient.VerifyProtocolVersionAsync</c> が投げる形）</summary>
+    /// <remarks>
+    /// SDK は不一致を型で見分けられる例外にしないため、文言で判定する。SDK の文言が変わったら、本物の SDK を通す
+    /// テスト（<c>CopilotRuntimeClientConnectionTests.Start_WhenLaunchFails_LeavesNoWorkingDirectory</c> の
+    /// 行 <c>protocol-3-runtime</c>）が赤になる
+    /// </remarks>
+    private static readonly Regex ProtocolMismatchPattern = new(
+        "^SDK protocol version mismatch: SDK supports versions ([0-9]+)-([0-9]+), but server reports version ([0-9]+)\\.",
+        RegexOptions.CultureInvariant
+    );
+
+    /// <summary>
+    /// 起動の失敗がプロトコルの不一致なら、利用者向けの案内の例外へ訳す（それ以外は null）
+    /// </summary>
+    /// <remarks>
+    /// CLI の版が SDK の範囲より下なら CLI の更新を、上なら QuickER の更新を案内する。
+    /// CLI が版を報告しない形は、どちらを更新すべきか決められないので訳さない（SDK の文言のまま）。
+    /// 元の例外は InnerException に残す
+    /// </remarks>
+    /// <param name="exception">SDK の起動が投げた例外</param>
+    internal static InvalidOperationException? TranslateStartFailure(Exception exception)
+    {
+        if (exception is not InvalidOperationException)
+        {
+            return null;
+        }
+
+        var match = ProtocolMismatchPattern.Match(exception.Message);
+
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var minimum = ParseVersion(match.Groups[1].Value);
+        var maximum = ParseVersion(match.Groups[2].Value);
+        var server = ParseVersion(match.Groups[3].Value);
+
+        if (server < minimum)
+        {
+            return new InvalidOperationException(Strings.Copilot_CliProtocolTooOld, exception);
+        }
+
+        if (server > maximum)
+        {
+            return new InvalidOperationException(Strings.Copilot_CliProtocolTooNew, exception);
+        }
+
+        return null;
+    }
+
+    /// <summary>文言から読んだ版の数字を整数にする（桁あふれは最大値＝範囲より上として扱う）</summary>
+    private static long ParseVersion(string digits) =>
+        long.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : long.MaxValue;
 
     /// <inheritdoc />
     public async Task<CopilotAuthInfo> GetAuthStatusAsync(
@@ -206,24 +299,24 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
             ? CopilotWorkspacePermissionPolicy.NormalizeRoot(sessionDirectory)
             : string.Empty;
 
-        var config = new SessionConfig
+        var config = new CreateSessionOptions
         {
             ClientName = ClientName,
             // 空文字は「CLI 既定モデルに任せる」の意味なので、指定なし（null）として渡す
             Model = NormalizeOptionalText(options.Model),
-            // 差分イベント（AssistantMessageDeltaEvent）で逐次表示する
-            Streaming = true,
             WorkingDirectory = sessionDirectory,
-            // 組込みツール許可時は作業フォルダ配下だけを承認し、それ以外の要求（ER 図編集に不要な
-            // ファイル編集・シェル等）は自動拒否する
-            OnPermissionRequest = options.AllowWorkspaceTools
-                ? HandleWorkspacePermissionRequestAsync
-                : HandlePermissionRequestAsync,
         };
+        // 差分イベント（AssistantMessageDeltaEvent）で逐次表示する
+        config.Events.Streaming = true;
+        // 組込みツール許可時は作業フォルダ配下だけを承認し、それ以外の要求（ER 図編集に不要な
+        // ファイル編集・シェル等）は自動拒否する
+        config.Permissions.OnRequest = options.AllowWorkspaceTools
+            ? HandleWorkspacePermissionRequestAsync
+            : HandlePermissionRequestAsync;
 
         if (toolNames.Count > 0)
         {
-            config.Tools = options
+            config.Tools.Definitions = options
                 .Tools.Select(tool => (AIFunctionDeclaration)new CopilotToolDeclaration(tool))
                 .ToList();
         }
@@ -231,7 +324,7 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
         // 絞らないときは代入しない（SDK の既定のまま＝全ツール）
         if (ResolveAvailableTools(options.AllowWorkspaceTools, toolNames) is { } availableTools)
         {
-            config.AvailableTools = availableTools;
+            config.Tools.AvailableTools = availableTools;
         }
 
         if (!string.IsNullOrWhiteSpace(options.Instructions))
@@ -340,11 +433,11 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
 
     /// <summary>SDK の呼び出しの失敗が、copilot ランタイムとの接続が切れたことを表すか</summary>
     /// <remarks>
-    /// SDK は JSON-RPC の呼び出しの失敗を、型がちょうど <see cref="IOException"/> の例外に包み、元の例外を
-    /// InnerException に入れる。接続断は内側が SDK 内部の <c>ConnectionLostException</c>（GitHub.Copilot.SDK 1.0.26）で、
-    /// 止まった後の呼び出しなどは内側を持たない（1.0.14 の実機で確かめた形）。この 2 つだけを接続断とする。
-    /// ランタイムが返した通常のエラー応答（内側が <see cref="RemoteRpcException"/>）や派生型（ファイルの不在など）では
-    /// 接続を捨てない（会話の文脈を失うため）
+    /// SDK は JSON-RPC の接続が切れた失敗を、型がちょうど <see cref="IOException"/> の例外に包み、SDK 内部の
+    /// <c>ConnectionLostException</c> を InnerException に入れる（Microsoft.Copilot.SDK 2.0.1）。止まった接続への呼び出しなどは
+    /// 内側を持たない <see cref="IOException"/> になる。この 2 つだけを接続断とする。
+    /// ランタイムが返した通常のエラー応答（SDK 2.x は包まずに <see cref="RemoteRpcException"/> を投げる）や
+    /// <see cref="IOException"/> の派生型（ファイルの不在など）では接続を捨てない（会話の文脈を失うため）
     /// </remarks>
     /// <param name="exception">SDK の呼び出しが投げた例外</param>
     internal static bool IsConnectionLost(Exception exception) =>
@@ -356,7 +449,7 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
 
     /// <summary>SDK 内部の接続断の例外の型（internal なので名前で引く。見つからなければ null）</summary>
     internal static readonly Type? ConnectionLostExceptionType =
-        typeof(CopilotClient).Assembly.GetType("GitHub.Copilot.ConnectionLostException");
+        typeof(CopilotClient).Assembly.GetType("Microsoft.Copilot.ConnectionLostException");
 
     /// <summary>セッションで使わせるツールの許可リストを決める（null＝絞らない）</summary>
     /// <remarks>
@@ -490,10 +583,10 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
     /// 許可要求がイベントとして保留されターンが止まるため、拒否側の既定として必ず与える
     /// （Codex の「承認要求は安全側で拒否」と同じ方針）。
     /// </remarks>
-    // GHCP001: SDK が PermissionDecision を試験的 API として印付けしているが、許可要求への応答は
-    // この型でしか表現できない（ハンドラを与えないと要求が保留されターンが止まる）。使用箇所を
-    // このメソッドへ閉じ込めたうえで局所的に抑止する。
-#pragma warning disable GHCP001
+    // MCPSDK001: SDK が PermissionDecision の種類（承認・拒否）を試験的 API として印付けしているが、
+    // 許可要求への応答はこの型でしか表現できない（ハンドラを与えないと要求が保留されターンが止まる）。
+    // 使用箇所をこのメソッドへ閉じ込めたうえで局所的に抑止する。
+#pragma warning disable MCPSDK001
     private Task<PermissionDecision> HandlePermissionRequestAsync(
         PermissionRequest request,
         PermissionInvocation invocation
@@ -531,7 +624,7 @@ public sealed class CopilotRuntimeClient : ICopilotRuntimeClient
         PermissionDeclined?.Invoke(this, DescribePermissionRequest(request));
         return Task.FromResult(PermissionDecision.Reject(OutsideWorkspaceDeclineFeedback));
     }
-#pragma warning restore GHCP001
+#pragma warning restore MCPSDK001
 
     /// <summary>許可要求が、このセッションで宣言したツールの呼び出しか</summary>
     /// <param name="request">Copilot から届いた許可要求</param>

@@ -12,7 +12,7 @@ public enum ErChatBackendKind
     /// <summary>Claude Code 接続（ローカルの Claude Code CLI をヘッドレス利用）</summary>
     ClaudeCode,
 
-    /// <summary>GitHub Copilot 接続（ローカルの Copilot CLI を GitHub.Copilot.SDK 経由で利用）</summary>
+    /// <summary>GitHub Copilot 接続（ローカルの Copilot CLI を Microsoft.Copilot.SDK 経由で利用）</summary>
     Copilot,
 }
 

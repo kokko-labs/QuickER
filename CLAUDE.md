@@ -31,7 +31,7 @@ csharpier format .                                       # 整形（グローバ
 - テストは 2 プロジェクト構成: `tests/QuickER.Tests`（net10.0-windows / WPF 依存＝**Windows でのみ実行可能**）と `tests/QuickER.Tests.Integration`（net10.0・WPF 非依存＝クロスプラットフォーム。実 DB 統合＋生成コードのランタイムテスト）
   - CI は windows-latest（全体ビルド＋全テスト）と ubuntu-latest（Integration のみ・実コンテナ＝実 DB 検証の唯一の CI 経路）の 2 ジョブ
   - Windows のジョブのテストは TEMP / TMP をランナーの一時領域へ向ける（既定の C: の一時領域はファイルの作成・削除が遅い。`WorkflowGuardTests.WindowsTestStep_PutsTempFilesOnRunnerTemp` が固定）
-  - 補助の console exe `tests/QuickER.Tests.FakeCodexAppServer`（CodexAppServerClient のテストの偽の app-server・テストは持たない）を QuickER.Tests が参照して出力へコピーする
+  - 補助の console exe `tests/QuickER.Tests.FakeCodexAppServer`（Codex の app-server と Copilot のランタイムの偽物で、起動の引数で型を分ける＝CodexAppServerClient と CopilotRuntimeClient のテストが実プロセスとして起動する・テストは持たない）を QuickER.Tests が参照して出力へコピーする
 - **テストのフォルダ構成は src のプロジェクト構成をミラー**する（`tests/QuickER.Tests/{Dialects|Model|Document|Provider|Provider.SqlServer|Provider.PostgreSql|Provider.MySql|Provider.Oracle|Provider.Sqlite|CodeGen.CSharp|CodeGen.UI|CodeReverse.CSharp|Db.UI|AI|AI.UI|AI.Chat|AI.Mock|Extensibility|Platform|Settings|Gui|Gui.Common|Cli|Mcp|Mcp.Tools}/`＝SUT の所在プロジェクトに対応・namespace はフォルダ追従で `QuickER.Tests.{フォルダ}`）
   - Gui/ 配下はさらに Behaviors/Converters/Services/ViewModels/Views/UndoRedo をミラーする
   - `QuickER.Tests/Dialects/` は QuickER.Dialects を SUT とする単体テストで、`QuickER.Tests.Integration/Dialects/` はアプリの DB 面の実 DB 検証（名前が近いだけで別物）
@@ -498,6 +498,7 @@ QuickER.Db.UI      → Extensibility, Gui.Abstractions, Gui.Common, Provider, Pl
 ### AI チャット
 
 - **Copilot のシェル許可は、パスが取れないなら全要素が許可リスト（`dotnet` のみ）のときだけ承認し、URL 参照・書き込みリダイレクトは両方の枝で拒否する**：緩めると `dotnet build && curl … | sh` のような連結が通る。`dotnet` 自体が外へ出る経路は塞げない（残余）。ガード：`OsBoundary/ShellPermission`。→ `src/QuickER.AI/CLAUDE.md`「Copilot のシェル許可」
+- **Copilot の接続は SDK 2.x（SDK プロトコル 4＝GitHub Copilot CLI 1.0.113 以降）で利用者が入れた copilot をパスで起動し、版の合わない CLI の起動の失敗は `CopilotRuntimeClient.TranslateStartFailure` が SDK の文言から版を読んで、CLI か QuickER の更新の案内へ訳す（版を報告しない形は訳さない）**：訳さないと SDK の生の英語の文言が出て、何を更新すればよいか分からない。SDK の文言・起動の契約が変わると訳が黙って止まり、パスを渡さないと同梱していないランタイムを探して起動できない。ガード：`CopilotRuntimeClientConnectionTests.Start_WhenLaunchFails_LeavesNoWorkingDirectory`（行 `protocol-3-runtime`＝本物の SDK に偽のランタイムを起動させる）・`CopilotRuntimeClientConnectionTests.SdkFailureShapes_AreClassified`。→ `src/QuickER.AI/CLAUDE.md`「Copilot の SDK プロトコル」
 - **内蔵チャットの CLI バックエンドは作業フォルダを `%TEMP%\QuickER\{backend}\<guid>` へ隔離し、Codex は read-only を明示する**：実行フォルダが承認なしで読まれる。モック生成側は出力先へ書くので workspace-write。ガード：`BackendWorkingDirectoryTests`・`CodexAppServerClientStartInfoTests`。→ `src/QuickER.AI/CLAUDE.md`「CLI バックエンドの作業フォルダ」
 - **Codex への送信は書き込みを取り消しと競わせ、書き込みロックは書き込みが終わるまで持ってちょうど 1 回手放す**：同期のパイプの書き込みはプールが詰まると取り消しが効かず、要求が取り消しでもタイムアウトでも戻らない。先に手放すと次の行が混ざり、手放し忘れると以後の送信が止まる。ガード：`CodexAppServerClientConnectionTests.Request_CanceledBeforeWriteEnds_ReleasesWriteLockOnceWhenWriteEnds`。→ `src/QuickER.AI/CLAUDE.md`「Codex の送信の取り消しと書き込みロック」
 - **チャットエンジン 4 種のツール実行と活動通知は `ChatToolInvocation` を通す**：通知を保護しないと購読側の例外で実行済みの呼び出しに「未実行」の結果が積まれ、AI が二重に操作する。引数は `Func<string>` で try の内側で取り出す。ガード：`ChatToolInvocationTests`・`rule:chat-engine-tool-invocation-uses`・`rule:chat-engine-tool-invocation-copies`・`Ai/ChatEngines`。→ `src/QuickER.AI/CLAUDE.md`「ツール実行と活動通知」
