@@ -183,14 +183,28 @@ public sealed class WorkflowGuardTests
     /// サンプルの csproj は QuickER.slnx に入っている。ステップの中でビルドし直すと重複するうえ、
     /// 複数行の run では途中のビルドの失敗が後続の成功で隠れる。
     /// </remarks>
-    [Fact(DisplayName = "ci.yml の dotnet build は QuickER.slnx の 1 回だけ")]
+    [Fact(
+        DisplayName = "ci.yml の dotnet build は build-and-test の QuickER.slnx の 1 回と、integration-tests-windows の Integration の 1 回だけ"
+    )]
     public void SampleSteps_DoNotRebuild()
     {
-        Regex
-            .Matches(ReadWorkflow("ci.yml"), @"dotnet build[^\r\n]*")
-            .Select(match => match.Value)
+        var jobs = Jobs(ReadWorkflow("ci.yml"));
+        var builds = jobs.ToDictionary(
+            job => job.Key,
+            job =>
+                Regex
+                    .Matches(job.Value, @"dotnet build[^\r\n]*")
+                    .Select(match => match.Value)
+                    .ToList()
+        );
+
+        builds["build-and-test"].Should().Equal("dotnet build QuickER.slnx");
+        builds[WindowsIntegrationJob].Should().Equal($"dotnet build {IntegrationProject}");
+        builds
+            .Where(job => job.Key is not "build-and-test" and not WindowsIntegrationJob)
+            .SelectMany(job => job.Value)
             .Should()
-            .Equal("dotnet build QuickER.slnx");
+            .BeEmpty("ほかのジョブは dotnet build の手順を持たない");
     }
 
     /// <summary>Windows のテストの一時ファイルはランナーの一時領域へ置く</summary>
@@ -203,23 +217,27 @@ public sealed class WorkflowGuardTests
     [Theory(
         DisplayName = "Windows で全件を流すテストの手順は TEMP と TMP をランナーの一時領域へ向ける"
     )]
-    [InlineData("ci.yml")]
-    [InlineData("publish.yml")]
-    [InlineData("release.yml")]
-    public void WindowsTestStep_PutsTempFilesOnRunnerTemp(string workflow)
+    [InlineData("ci.yml", "build-and-test", "dotnet test " + UnitTestProject + " --no-build")]
+    [InlineData(
+        "ci.yml",
+        WindowsIntegrationJob,
+        "dotnet test " + IntegrationProject + " --no-build"
+    )]
+    [InlineData("publish.yml", "publish", "dotnet test QuickER.slnx --no-build")]
+    [InlineData("release.yml", "release", "dotnet test QuickER.slnx -c Release --no-build")]
+    public void WindowsTestStep_PutsTempFilesOnRunnerTemp(
+        string workflow,
+        string job,
+        string command
+    )
     {
-        var lines = ReadWorkflow(workflow).ReplaceLineEndings("\n").Split('\n');
-        var start = Array.FindIndex(lines, line => line.Trim() == "- name: テスト");
+        var steps = JobSteps(Jobs(ReadWorkflow(workflow))[job])
+            .Where(step => Regex.IsMatch(step, @"^\s*- name: テスト\s*$", RegexOptions.Multiline))
+            .ToList();
 
-        start.Should().BeGreaterThanOrEqualTo(0, "Windows のジョブにテストの手順がある");
-        var body = string.Join(
-            "\n",
-            lines
-                .Skip(start + 1)
-                .TakeWhile(line => !line.TrimStart().StartsWith("- ", StringComparison.Ordinal))
-        );
-        body.Should().MatchRegex(@"dotnet test QuickER\.slnx (-c Release )?--no-build");
-        AssertTempOnRunnerTemp(body);
+        steps.Should().ContainSingle($"{job} にテストの手順がちょうど 1 つある");
+        steps[0].Should().Contain(command, $"{job} のテストの手順は {command} で流す");
+        AssertTempOnRunnerTemp(steps[0]);
     }
 
     /// <summary>夜間のワークフローは定時と手動でだけ動く</summary>
@@ -360,34 +378,119 @@ public sealed class WorkflowGuardTests
     /// <summary>CI の Windows のテストは TRX を書き、失敗した実行にも成果物として残す</summary>
     /// <remarks>
     /// MTP のコンソールは表示名だけを出すので、テストのクラスごとの時間（P5 の時間の比較）は TRX の完全修飾名で読む。
-    /// <c>QuickER.slnx</c> は 2 つのプロジェクトを流すので、TRX のファイル名は指定しない（指定するとプロジェクトどうしで同じ名前に上書きする）。
+    /// TRX のファイル名は指定しない（アセンブリ名_TFM_アーキテクチャ.trx で書かれ、手元で slnx を流しても上書きし合わない）。
+    /// 成果物の名前はジョブごとに別にする（重ならないことは <see cref="TestProjects_RunInWindowsJobsAndIntegrationAlsoOnStrictLinux"/>）。
     /// </remarks>
-    [Fact(
+    [Theory(
         DisplayName = "ci.yml の Windows のテストは TRX を書き、if: always() の upload-artifact で保存する"
     )]
-    public void WindowsTestStep_KeepsTestResultsAsArtifacts()
+    [InlineData("build-and-test", UnitTestProject, "build-and-test-trx")]
+    [InlineData(WindowsIntegrationJob, IntegrationProject, "integration-tests-windows-trx")]
+    public void WindowsTestStep_KeepsTestResultsAsArtifacts(
+        string job,
+        string project,
+        string artifact
+    )
     {
-        var job = Jobs(ReadWorkflow("ci.yml"))["build-and-test"];
-        var testSteps = JobSteps(job)
-            .Where(step => step.Contains("dotnet test QuickER.slnx", StringComparison.Ordinal))
-            .ToList();
+        var body = Jobs(ReadWorkflow("ci.yml"))[job];
+        var testSteps = FullTestSteps(body);
 
         testSteps
             .Should()
             .ContainSingle(
-                "全件のテストの手順はちょうど 1 つ（単発のテストの報告の dotnet test は別の手順）"
+                $"{job} の全件のテストの手順はちょうど 1 つ（単発のテストの報告の dotnet test は絞り込みつきの別の手順）"
             );
 
-        var testStep = testSteps[0];
-
-        testStep
+        testSteps[0]
             .Should()
-            .Contain(
+            .Contain($"dotnet test {project} --no-build", $"{job} は {project} を流す")
+            .And.Contain(
                 $"--report-trx --results-directory \"{CiResultsDirectory}\"",
                 "TRX をランナーの一時領域へ書く"
             )
-            .And.NotContain("--report-trx-filename", "2 つのプロジェクトが同じ名前に上書きしない");
-        AssertKeptArtifact(job, $"{CiResultsDirectory}/*.trx", "build-and-test");
+            .And.NotContain("--report-trx-filename", "ファイル名はアセンブリ名から付ける");
+        AssertKeptArtifact(body, $"{CiResultsDirectory}/*.trx", job);
+        ArtifactNames(body).Should().Equal(artifact);
+    }
+
+    /// <summary>どのテストのプロジェクトも Windows のジョブで流れ、Integration は厳格の Ubuntu でも流れる</summary>
+    /// <remarks>
+    /// Windows のテストは build-and-test（QuickER.Tests）と integration-tests-windows（Integration）に分けている（1 つのジョブで
+    /// 流すと 2 つのプロジェクトが同じ 4 コアを取り合い、遅いランナーでは 30 分に収まらない）。分けた形を崩すと、テストのプロジェクトが
+    /// どの Windows のジョブからも黙って落ちるか、build-and-test を <c>QuickER.slnx</c> に戻して Windows で Integration を 2 回流す。
+    /// テストのプロジェクトは照合の行 <c>test-projects-run-on-mtp</c> と同じ関数で集める（写しを作らない）。
+    /// Windows の全件のテストの手順が流すプロジェクトを多重集合で比べるので、足りない・2 回流す・プロジェクトでないもの（slnx）を流す、
+    /// のどれでも赤になる。
+    /// </remarks>
+    [Fact(
+        DisplayName = "ci.yml はどのテストのプロジェクトも Windows のジョブで 1 回ずつ流し、Integration は Integration だけをビルドした別のジョブと、厳格の Ubuntu のジョブでも流す"
+    )]
+    public void TestProjects_RunInWindowsJobsAndIntegrationAlsoOnStrictLinux()
+    {
+        var jobs = Jobs(ReadWorkflow("ci.yml"));
+        var runs = jobs.Select(job =>
+                (
+                    Job: job.Key,
+                    RunsOn: Regex
+                        .Match(job.Value, @"(?m)^    runs-on: (?<os>\S+)\s*$")
+                        .Groups["os"]
+                        .Value,
+                    Steps: FullTestSteps(job.Value)
+                )
+            )
+            .ToList();
+        var testProjects = TestSupport
+            .Guards.ParityRows.TestProjectFiles()
+            .Select(path => Path.GetRelativePath(Root, path).Replace('\\', '/'))
+            .ToList();
+
+        testProjects.Should().Contain([UnitTestProject, IntegrationProject]);
+        runs.Where(run => run.RunsOn == "windows-latest")
+            .SelectMany(run => run.Steps.Select(TestedTarget))
+            .Should()
+            .BeEquivalentTo(
+                testProjects,
+                "どのテストのプロジェクトも Windows のどれかのジョブでちょうど 1 回流れる"
+            );
+        runs.Single(run => run.Job == "build-and-test")
+            .Steps.Select(TestedTarget)
+            .Should()
+            .Equal(
+                [UnitTestProject],
+                "build-and-test は Integration を流さない（Integration は integration-tests-windows が流す）"
+            );
+
+        // integration-tests-windows：テストの手順の前に Integration のビルドを持ち、テストは --no-build で流す
+        var windowsIntegration = JobSteps(jobs[WindowsIntegrationJob]);
+        var build = windowsIntegration.FindIndex(step =>
+            Regex.IsMatch(
+                step,
+                $@"(?m)^\s+run: dotnet build {Regex.Escape(IntegrationProject)}\s*$"
+            )
+        );
+        var test = windowsIntegration.FindIndex(step => IsFullTestStep(step, IntegrationProject));
+
+        build.Should().BeGreaterThanOrEqualTo(0, "Integration だけをビルドする手順がある");
+        test.Should().BeGreaterThan(build, "テストの手順はビルドの後");
+        windowsIntegration[test]
+            .Should()
+            .Contain($"dotnet test {IntegrationProject} --no-build", "上のビルドを使い回す");
+
+        // Ubuntu：Integration を厳格モードで流すジョブがある（実 DB の唯一の CI 経路）
+        runs.Where(run => run.RunsOn == "ubuntu-latest")
+            .SelectMany(run => run.Steps)
+            .Where(step => TestedTarget(step) == IntegrationProject)
+            .Should()
+            .ContainSingle("Integration を流す Ubuntu の手順がちょうど 1 つある")
+            .Which.Should()
+            .MatchRegex(
+                @"(?m)^\s+QUICKER_REQUIRE_DOCKER: ""1""\s*$",
+                "Ubuntu の Integration は厳格モードで流す（コンテナが動かなければ赤）"
+            );
+
+        jobs.Values.SelectMany(ArtifactNames)
+            .Should()
+            .OnlyHaveUniqueItems("ci.yml の成果物の名前はジョブどうしで重ならない");
     }
 
     /// <summary>変異テストのワークフローは定時と手動でだけ動き、毎晩と週 1 回の 2 つの定時を持つ</summary>
@@ -565,10 +668,8 @@ public sealed class WorkflowGuardTests
         environmentIndex
             .Should()
             .BeGreaterThan(
-                ciSteps.FindIndex(step =>
-                    step.Contains("dotnet test QuickER.slnx", StringComparison.Ordinal)
-                ),
-                "全件のテストの後に流す（ビルドを使い回す）"
+                ciSteps.FindIndex(step => IsFullTestStep(step, UnitTestProject)),
+                "QuickER.Tests の全件のテストの後に流す（ビルドを使い回す）"
             );
         AssertTempOnRunnerTemp(environmentStep);
     }
@@ -912,9 +1013,7 @@ public sealed class WorkflowGuardTests
         var save = steps.FindIndex(step =>
             step.Contains("uses: actions/cache/save@", StringComparison.Ordinal)
         );
-        var test = steps.FindIndex(step =>
-            step.Contains("dotnet test QuickER.slnx", StringComparison.Ordinal)
-        );
+        var test = steps.FindIndex(step => IsFullTestStep(step, UnitTestProject));
 
         new[] { build, restore, census, save, test }
             .Should()
@@ -1018,6 +1117,44 @@ public sealed class WorkflowGuardTests
 
     /// <summary>CI の Windows のテストが TRX を書くフォルダ（テストの手順と保存の手順で同じ値）</summary>
     private const string CiResultsDirectory = "${{ runner.temp }}/test-results";
+
+    /// <summary>QuickER.Tests のプロジェクト（リポジトリのルートからの相対パス）</summary>
+    private const string UnitTestProject = "tests/QuickER.Tests/QuickER.Tests.csproj";
+
+    /// <summary>QuickER.Tests.Integration のプロジェクト（リポジトリのルートからの相対パス）</summary>
+    private const string IntegrationProject =
+        "tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj";
+
+    /// <summary>ci.yml の Integration を Windows で流すジョブ</summary>
+    private const string WindowsIntegrationJob = "integration-tests-windows";
+
+    /// <summary>
+    /// ジョブの全件を流す <c>dotnet test</c> の手順（絞り込みの無いもの。単発のテストの報告の入口は <c>--filter</c> つきなので入らない）
+    /// </summary>
+    private static List<string> FullTestSteps(string jobBody) =>
+        JobSteps(jobBody)
+            .Where(step => Regex.IsMatch(step, @"(?m)^\s+run: dotnet test \S+"))
+            .Where(step => !step.Contains("--filter", StringComparison.Ordinal))
+            .ToList();
+
+    /// <summary>手順が <paramref name="project"/> の全件を流す <c>dotnet test</c> の手順か</summary>
+    private static bool IsFullTestStep(string step, string project) =>
+        Regex.IsMatch(step, $@"(?m)^\s+run: dotnet test {Regex.Escape(project)} ")
+        && !step.Contains("--filter", StringComparison.Ordinal);
+
+    /// <summary><c>dotnet test</c> の手順が流す対象（プロジェクトかソリューションのパス）</summary>
+    private static string TestedTarget(string step) =>
+        Regex.Match(step, @"(?m)^\s+run: dotnet test (?<target>\S+)").Groups["target"].Value;
+
+    /// <summary>ジョブが保存する成果物の名前（upload-artifact の手順の <c>name:</c>）</summary>
+    private static IEnumerable<string> ArtifactNames(string jobBody) =>
+        JobSteps(jobBody)
+            .Where(step =>
+                step.Contains("uses: actions/upload-artifact@", StringComparison.Ordinal)
+            )
+            .Select(step => Regex.Match(step, @"(?m)^\s+name: (?<name>\S+)\s*$"))
+            .Where(match => match.Success)
+            .Select(match => match.Groups["name"].Value);
 
     /// <summary>変異テストが結果を書くフォルダ（Stryker の手順と保存の手順で同じ値）</summary>
     private const string MutationResultsDirectory =
