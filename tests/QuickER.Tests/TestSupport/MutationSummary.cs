@@ -86,10 +86,14 @@ internal sealed record MutationSummary(
 /// <param name="Solution">Stryker に渡したテストだけのソリューションの正本（リポジトリの根からの相対パス）</param>
 /// <param name="Set">Stryker を呼ぶ間だけ立てた環境変数（「名前=値」・書かれた順）</param>
 /// <param name="Removed">Stryker を呼ぶ間だけ外した環境変数（書かれた順）</param>
+/// <param name="ZeroTestRetries">
+/// テストを 0 件と数えて止まった Stryker を呼び直した回数（記録に無ければ 0。フィールドを持たない前の版の記録も読み戻せる）
+/// </param>
 internal sealed record MutationRunEnvironment(
     string Solution,
     IReadOnlyList<string> Set,
-    IReadOnlyList<string> Removed
+    IReadOnlyList<string> Removed,
+    int ZeroTestRetries = 0
 )
 {
     /// <summary>run-environment.json を読む（無いか読めなければ null）</summary>
@@ -116,7 +120,12 @@ internal sealed record MutationRunEnvironment(
                     .. root.GetProperty("removed")
                         .EnumerateArray()
                         .Select(name => name.GetString() ?? ""),
-                ]
+                ],
+                root.TryGetProperty("zeroTestRetries", out var retries)
+                && retries.ValueKind == JsonValueKind.Number
+                && retries.TryGetInt32(out var count)
+                    ? count
+                    : 0
             );
         }
         catch (Exception exception)
@@ -623,6 +632,14 @@ internal static class MutationSummaries
         }
 
         builder.Append('\n');
+
+        if (environment.ZeroTestRetries > 0)
+        {
+            builder.Append(
+                CultureInfo.InvariantCulture,
+                $"  - Stryker がテストを 0 件と数えて止まったので、{environment.ZeroTestRetries} 回呼び直した（テストのサーバーの接続待ちの時間切れ。続くようなら原因を調べる）\n"
+            );
+        }
 
         if (environment.Set.Contains("QUICKER_SKIP_DOCKER=1", StringComparer.Ordinal))
         {
