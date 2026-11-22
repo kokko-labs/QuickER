@@ -127,12 +127,14 @@ internal static partial class SourceRules
                 ),
             },
             // 変異テストの範囲のプロジェクトでは、早く抜ける if の条件の || の 2 つ目以降の項で宣言した out の変数と、条件のパターンの
-            // 変数（単独の is not { } x を含む）を if の後ろで使わない。Stryker が if の跳び（continue / break / return; / throw）を消す
+            // 変数（単独の is not { } x を含む）を if の後ろで使わない。初期化子なしに宣言した変数を if / else if の鎖の枝で代入し、
+            // 最後の else の跳びで抜けて鎖の後ろで読む形も使わない。Stryker が跳び（continue / break / return; / throw）を消す
             // 変異で変数が確実に代入されなくなり（CS0165）、そのメソッドの変異を全部外す（Safe Mode）。項ごとに早く抜ける if に分けて
-            // out の呼び出しを 1 つ目の項にするか、初期化子つきの変数を null で判定するか、肯定形の then で使う
+            // out の呼び出しを 1 つ目の項にするか、初期化子つきの変数を null で判定するか、肯定形の then で使うか、跳びを鎖の先頭の
+            // 早抜けにする
             SourceRule.Forbid(
                 "mutation-safe-mode-jump-guards",
-                "変異テストの範囲で、早く抜ける if の || の 2 つ目以降の項の out の変数と条件のパターンの変数を if の後ろで使わない（跳びを消す変異が CS0165 になり、Stryker がそのメソッドの変異を全部外す）",
+                "変異テストの範囲で、早く抜ける if の || の 2 つ目以降の項の out の変数と条件のパターンの変数、if / else if の枝で代入して最後の else の跳びで抜ける初期化子の無い変数を if の後ろで使わない（跳びを消す変異が CS0165 になり、Stryker がそのメソッドの変異を全部外す）",
                 Src.Within("QuickER.Model")
                     .Within("QuickER.Provider")
                     .Within("QuickER.CodeGen.CSharp"),

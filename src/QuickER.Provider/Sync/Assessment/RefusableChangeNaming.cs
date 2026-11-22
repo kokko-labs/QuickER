@@ -65,25 +65,21 @@ internal static class RefusableChangeNaming
                 }
             }
 
-            IEnumerable<RefusableChange> empty;
-            IEnumerable<RefusableChange> rowDependent;
-
-            if (readd >= 0)
-            {
-                empty = refusable.EmptyColumn.Where(c => c.Index > drop.Index && c.Index < readd);
-                rowDependent = refusable.RowDependent.Where(c =>
-                    c.Index > drop.Index && c.Index <= readd
-                );
-            }
-            else if (!IsUserSelectedDrop(drop.Step))
-            {
-                empty = refusable.EmptyColumn.Where(c => c.Index > drop.Index);
-                rowDependent = refusable.RowDependent.Where(c => c.Index > drop.Index);
-            }
-            else
+            // 付け直さない削除のうち利用者が選んだものは、利用者が消すと決めた制約なので、断られうる文が後ろにあっても名指ししない
+            // （名指しするのは、付け直すはずの制約と、消すはずの表・列や置き換える主キーが来ないまま外れて残る暗黙の削除）
+            if (readd < 0 && IsUserSelectedDrop(drop.Step))
             {
                 continue;
             }
+
+            // 範囲：付け直すなら付ける文まで（列が空でないと通らない変更は付ける文を含まず、ほかの断られうる文は含む）、
+            // 付け直さないなら外す文より後ろの全部
+            var empty = refusable.EmptyColumn.Where(c =>
+                c.Index > drop.Index && (readd < 0 || c.Index < readd)
+            );
+            var rowDependent = refusable.RowDependent.Where(c =>
+                c.Index > drop.Index && (readd < 0 || c.Index <= readd)
+            );
 
             var emptyWarning = Warning(
                 SyncPlanWarningKind.ConstraintRebuildAroundEmptyColumnChange,
