@@ -544,7 +544,7 @@
 - 適用はローカルの Save フックを呼ばない（`ILocalRowStore` で書く）。
 - 再開点は表ごとに状態の表（`quicker_sync_table`）に持ち、ローカルの行の版の列からは導かない。洗い替えも同期も再開点を書く。
 - 未送信の行で表の取得を打ち切らない。未送信の行はサーバーの行で上書きせずにローカルの内容を残す（ローカルの行が無く、サーバーがそのキーを知らないときだけサーバーの行が入る）。サーバーが知らないキーで端末が作った行は、その行の手前で表の再開点を止める（越えると、ローカルの行が消えた後にサーバーの行が二度と降りない）。
-- ガード：決定的なシナリオ（`SyncModelRuntimeTests.Scenario_FailsExactlyAsListed`。もう 1 回の取得は行 `fk-parent-created-between-table-fetches-arrives-in-same-sync`）・乱数の種（`SyncSupportAdoSqliteEngineRuntimeTests.RandomSeeds_ConvergeWithoutLoss`）・`SyncEngineFixedRows`（行 `refresh-and-sync-leave-nothing-to-fetch-again`・`unsent-insert-then-delete-of-unknown-key-takes-server-row-on-download`）。
+- ガード：決定的なシナリオ（`SyncModelRuntimeTests.Scenario_FailsExactlyAsListed`。もう 1 回の取得は行 `fk-parent-created-between-table-fetches-arrives-in-same-sync`）・乱数の種（`SyncSupportAdoSqliteEngineRuntimeTests.RandomSeeds_ConvergeWithoutLoss`）・`SyncEngineFixedRows`（行 `refresh-and-sync-leave-nothing-to-fetch-again`・`unsent-insert-then-delete-of-unknown-key-takes-server-row-on-download`・適用が Save フックを呼ばないことは `download-does-not-run-local-save-hooks`＝行を飛ばすフックを登録しても降りた行が入り、フックの呼ばれた数が増えない）。
 
 ### 新しいエンジンの送信
 
@@ -554,7 +554,24 @@
 - ServerWins が戻した行の版の列は、戻したサーバーの行の版になる。
 - ServerWins の実行が戻せなかった行の決定は、行の状態に印（`sw_seq`）を残して後の実行へ持ち越す（印の後に編集が無ければ、後の実行がその行を送らずにサーバーの行で戻す）。
 - 持ち越した決定は、後の書き込み（無制限バイナリ列だけの書き込みを含む）が行の連番を進めれば行ごと外れ、次の同期は行を列と一緒に送る（サーバーが知らない行なら挿入として全列を送る）。
-- ガード：決定的なシナリオと乱数の種（実行ごとの照合 `5/carry:*`・`5/stale-overwrite`・`5/local-discard`）・シナリオ `blob-only-edit-after-serverwins-discarded-unknown-insert-uploads-row-and-blob`・`SyncEngineFixedRows`（行 `failure-after-server-write-before-settle-is-reported-until-local-wins`）。
+- ガード：決定的なシナリオと乱数の種（実行ごとの照合 `5/carry:*`・`5/stale-overwrite`・`5/local-discard`）・シナリオ `blob-only-edit-after-serverwins-discarded-unknown-insert-uploads-row-and-blob`・`SyncEngineFixedRows`（行 `failure-after-server-write-before-settle-is-reported-until-local-wins`・戻した行の版の列は `sync-vo-serverwins-restores-row-with-server-version`）。
+
+### 新しいエンジンの未送信の一覧と捨てる口
+
+- 一覧（`TrackedSyncEngine.GetPendingChangesAsync`）は、エンジンの表の未送信の行を変更の順に `SyncPendingRow`（表の名前・キーのテキスト・削除か・サーバーが知っているか・捨てる印があるか・読んだときの行の連番）で返す。エンジンに渡していない表の行は返さない。
+  - 実行のロックを取らない（専用の接続で読むだけ）。実行の最中に読んだ一覧は、その時点までにコミットされた状態を映す。ロックを待つ形にすると、長い同期の間、画面が一覧を読めない。
+- 捨てる口（`DiscardPendingChangesAsync` の行を渡す版と型を渡す版・`DiscardAllPendingChangesAsync`）は、行に持ち越した ServerWins の決定と同じ印（`sw_seq` を行の連番にする。「新しいエンジンの送信」）を立てるだけで、行の内容と未送信は変えない。
+  - 捨てた行は未送信のまま残り、その表を範囲に含む次の実行（同期・送信だけ・受信だけ）が、ポリシーに依らず、その行を送らずにサーバーの行で戻す（取得した差分に無ければサーバーからキーで読む。サーバーに行が無ければ端末から消す）。同期の結果の `LocalRowChanges` には `DiscardedByServerWins` で載る。表を範囲から外した実行は、印のある行をそのまま残す。
+  - 捨てた後にその行をもう一度書くと連番が進み、印は効かなくなる（書いた内容が送られる）。
+  - 未送信だけを外す形にしない。端末の内容がサーバーと食い違ったまま残り、その後の同期が追いつくかが場合による。
+  - 行を渡す版は、今も未送信で、連番が渡した行の連番のままの行にだけ印を立てる（一覧の後に書かれた編集を捨てない）。戻り値は、呼び出しの後に印が立っている渡した行の数（すでに立っていた行も数える）。
+  - 3 つとも、実行のロックの中の 1 つの `BEGIN IMMEDIATE` のトランザクションで、未送信を読んでから印を立てる（連番の確かめは、そのトランザクションの中で読んだ値で行う）。実行の途中で印を立てると、その実行が読み終えた後の印になり、捨てたはずの行が送られる。
+  - エンジンの表でない表の行・型は、何も変えずに `ArgumentException` で断る。
+- 洗い替えは、捨てる印が今の連番と同じ行を未送信に数えない。`Force` の有無に依らず、その行で断らずに、`Force` で捨てる行と同じ扱いでサーバーの行に置き換える（サーバーに無い行は端末から消す。取得の上限の未送信の数え方・塊ごとに確定する経路・blob を捨てる洗い替えも同じ扱い）。
+  - 印を立てた後に書き直した行（連番がずれた行）は未送信に数え、`Force` なしなら `SyncPendingChangesException` で断る。印の無い未送信がほかにあれば断り、例外の件数は印の無い行だけ。
+  - 判定は `RefreshCoreAsync` の 1 か所（未送信＝印が今の連番と同じでない行）。印のある行も数えると、利用者が捨てると決めた変更のために洗い替えが断られ、`Force` を付けると捨てるつもりのない未送信まで捨てることになる。連番を見ずに印の有無だけで外すと、捨てた後に書き直した内容を洗い替えが黙って捨てる。
+- 一覧の「捨てる印があるか」は、ServerWins の実行が戻せずに持ち越した決定の行でも真になる（同じ印）。
+- ガード：`SyncEngineFixedRows` の `pending-*` の行（`pending-list-names-unsent-rows`・`pending-list-and-discard-cover-only-engine-tables`・`pending-list-does-not-wait-for-run-and-discard-does`・`pending-discard-settles-collect-conflict-with-server-row`・サーバーで変わっていない行をキーで読み直す `pending-discard-row-unchanged-on-server-is-read-back-*` の 3 行＝同期・送信だけ・受信だけ・`pending-discard-then-rewrite-is-sent`・`pending-discard-insert-unknown-to-server-removes-row`・`pending-discard-delete-brings-row-back`・`pending-discard-with-stale-row-is-not-discarded`・`pending-discard-by-table-and-all`・`pending-discard-is-kept-for-run-that-excludes-table`・`pending-discard-refuses-unknown-table-and-type`・洗い替えは `pending-discard-is-replaced-by-refresh-without-force`・`pending-discard-rewritten-row-still-refuses-refresh`・`pending-discard-does-not-hide-other-unsent-rows-from-refresh`・`pending-discard-is-replaced-by-chunked-refresh`・`pending-discard-is-not-counted-for-refresh-row-limit`・`pending-discard-rewritten-during-fetch-is-counted-for-refresh-row-limit`）。mutation 実証済み（洗い替えが印のある行も未送信に数えると、置き換える行・塊の経路の行・上限の 2 行・件数の行が赤。連番を見ずに印の有無だけで外すと `pending-discard-rewritten-row-still-refuses-refresh` だけが赤。例外の件数を範囲の未送信の全部から作ると `pending-discard-does-not-hide-other-unsent-rows-from-refresh` だけが赤。印を立てない・連番を確かめずに立てる・型を渡す版が全部の表に立てる・一覧がエンジンの表でない行も返す・一覧の捨てる印をいつも偽にする・一覧を実行のロックの中へ戻す・捨てる口から実行のロックを外す、のそれぞれで対応する行が赤）。
 
 ### 新しいエンジンの無制限バイナリ列
 
@@ -565,7 +582,7 @@
 
 ### 新しいエンジンの洗い替え
 
-- 拒否の順は、引数（取得の大きさ・除外の型）→ blob の損失 → 範囲の外からの参照 → 未送信（`Force` で捨てる）。`Force` で抜けられない拒否を先に出し、どれも何も変えない。
+- 拒否の順は、引数（取得の大きさ・除外の型）→ blob の損失 → 範囲の外からの参照 → 未送信（`Force` で捨てる。捨てる印が今の連番と同じ行は未送信に数えず、`Force` で捨てる行と同じ扱いで置き換える＝「新しいエンジンの未送信の一覧と捨てる口」）。`Force` で抜けられない拒否を先に出し、どれも何も変えない。
 - 表を空にせず、上限までのサーバーの行で置き換える（同じ適用でサーバーに無い行を消す）。件数は、消した行（サーバーに無かった行）・書いた行・捨てた未送信の行を数える。
 - blob を捨てる洗い替えは、範囲の表の、未送信の無い全行の除外した無制限バイナリ列を適用の中で空にし（NOT NULL の列は空の値、ほかは NULL）、写し待ちを消す。未送信の行は、行の状態の表の印で文の中から外す（未送信の行の数をパラメータに束縛しない）。
   - 未送信の行を外す条件は `TrackedSyncEngine.NotUnsentCondition` の 1 か所が組む：`<表のキーの列> NOT IN (SELECT s."key" FROM quicker_sync_row AS s WHERE s.table_name = @table AND s.dirty = 1 AND s."key" IS NOT NULL)`。
@@ -585,6 +602,7 @@
 
 - 取得は表ごとにページを 1 つずつ流す（`ITrackedSyncTable.FetchPagesAsync`）。サーバーの全キーは別の呼び出し（`FetchServerKeysAsync`）で、削除伝搬を使う実行だけが取る。
   - サーバーの差分ソースへの呼び出しの順は「表ごとに、行のページを全部取ってから、その表のキー」。同期のモデルの割り込みの点と失敗の注入がこの順に依るので、変えない。
+  - 差分ソースが「続きがある」と答えたのに再開点が進まないときは、表を名指しした `InvalidOperationException` で止める（守りは `TrackedSyncTable` の取得の 1 か所で、同期・受信だけ・洗い替えのどれも通る）。版ありの表は、最後の行の版が無い・空・そのバッチに渡した再開点と同じとき。版なしの表は、ページの最後の行のキーが渡したキーと同じ（キーのテキストで比べる）とき。守りが無いと、利用者が差し替えた差分ソースの誤りで、同期と洗い替えが終わらずに回り続ける。
 - 1 回の取得と適用（`DownloadOnceAsync`）ごとに、取得した行を範囲の表の全部を通して数える（版なしの表の行も数える）。
 - 合計が `DownloadRowLimit`（`SyncOptions`・`SyncRefreshOptions`。既定 300,000）を初めて超えた時点で 1 回だけ、範囲の表の未送信の行を読む（`ReadUnsentInScopeAsync`）。未送信があれば、適用の前に `SyncDownloadTooLargeException`（取得した行数・上限・表ごとの未送信の行の数）で断る。
   - 断った実行は取得した行を捨て、端末の行・行の状態の表・再開点を変えない。取得の前の blob の写しと、同期の送信の段は、断る前に流れている。
@@ -593,7 +611,7 @@
   - 範囲の外の表の未送信は数えない。上限ちょうどは断らない（断るのは超えたとき）。
   - 未送信が無ければ、塊ごとに確定する経路へ入る（下の節）。
 - 今のエンジン（`SyncEngine`）は `DownloadRowLimit` を読まない。
-- ガード：同期のモデルの決定的なシナリオ（`SyncModelRuntimeTests` の行 `dl-row-limit-exceeded-with-unsent-change-refuses-and-applies-nothing`・`dl-row-limit-exceeded-after-upload-applies-everything`・`dl-row-limit-equal-to-fetched-rows-is-not-refused`・`refresh-force-over-row-limit-discards-unsent-and-is-not-refused`）・`SyncEngineFixedRows`（行 `refresh-over-row-limit-with-change-written-during-fetch-is-refused`・`refresh-force-over-row-limit-with-discarded-key-rewritten-during-fetch-is-refused`）。mutation 実証済み（未送信があっても断らない・未送信が無くても断る・「超えたら」を「以上なら」にする・洗い替えでも捨てる行を未送信に数える・洗い替えのときは断らない・洗い替えが捨てる行をキーだけで外す・行を表ごとに数え直す、のそれぞれで対応する行が赤）。
+- ガード：同期のモデルの決定的なシナリオ（`SyncModelRuntimeTests` の行 `dl-row-limit-exceeded-with-unsent-change-refuses-and-applies-nothing`・`dl-row-limit-exceeded-after-upload-applies-everything`・`dl-row-limit-equal-to-fetched-rows-is-not-refused`・`refresh-force-over-row-limit-discards-unsent-and-is-not-refused`）・`SyncEngineFixedRows`（行 `refresh-over-row-limit-with-change-written-during-fetch-is-refused`・`refresh-force-over-row-limit-with-discarded-key-rewritten-during-fetch-is-refused`・進まない差分ソースは `non-advancing-source-*` の 4 行＝同期と洗い替え × 版ありと版なしが例外で終わり、端末・状態の表・再開点・サーバーが前のまま）。mutation 実証済み（進まない差分ソースの守りを版あり・版なしで 1 つずつ外すと、対応する 2 行が赤。未送信があっても断らない・未送信が無くても断る・「超えたら」を「以上なら」にする・洗い替えでも捨てる行を未送信に数える・洗い替えのときは断らない・洗い替えが捨てる行をキーだけで外す・行を表ごとに数え直す、のそれぞれで対応する行が赤）。
 
 ### 新しいエンジンの塊ごとに確定する経路
 
@@ -648,6 +666,7 @@
 - 塊ごとに確定する経路は、入口の時点で行を取り終えていない表のサーバーのキーを、行より先に取る（削除の段が全部の表のキーを使うため）。キーを取った後・その表の行を取る前にサーバーで消えた行は、その実行では端末に残り、次の実行の削除伝搬で消える。ガード：`SyncEngineFixedRows`（行 `chunk-row-gone-after-keys-stays-until-next-sync`）。
 - 塊ごとに確定する経路の削除の段は、塊より前に流れる。サーバーに無い親を消すと、端末の子（サーバーでは別の親へ付け替わっているが、その行は後の塊で降りる）が外部キーの違反になる形では、親を残す。1 回で全部の道なら同じ適用で消える親が、その実行の後も端末に残り、次の実行の削除伝搬で消える。ガード：同期のモデルの決定的なシナリオ（`SyncModelRuntimeTests` の行 `chunk-delete-stage-parent-gone-after-next-sync`。小さい塊の端末と直結の Theory の違いは `SyncModelSmallChunkScenarioDifferences` が理由つきで宣言する）。
 - 塊ごとに確定する経路の持ち越しの行は、最後の段まで全部メモリに持つ（数の上限は無い）。
+- 記録の仕組みを通らずに入った行（端末にもサーバーにも同じ行があるが、行の状態の表に状態が無い行）は、最初の同期か洗い替えが状態を付ける前に書くと、送信が正しく決まらない。更新は、サーバーが知らない行の未送信として記録され、Collect の同期が毎回 `DuplicateOnServer` の競合を報告する。削除は送られず、次の同期でサーバーの行が端末へ戻る（競合の報告は無い）。書く前に同期か洗い替えを 1 回流せば、その後の編集は競合なしに上がる。ガード：`SyncEngineFixedRows`（行 `stateless-row-update-before-first-sync-is-reported-as-duplicate-on-server`・`stateless-row-delete-before-first-sync-comes-back`・`stateless-rows-take-state-from-first-sync-then-edit-uploads-*` の 2 行＝同期と洗い替え）。
 - サーバーへの書き込みが通った後に決着が失敗すると、次の Collect は自分が書いた行を相手に ModifiedOnServer を報告し続け、LocalWins の同期で収束する（docs の既知の制限）。ガード：`SyncEngineFixedRows`（行 `failure-after-server-write-before-settle-is-reported-until-local-wins`）。
 
 ## ガードテストの一覧

@@ -308,6 +308,41 @@ internal static class SyncEngineFixedRows
                     + "その後の同期は何も送らず何も降ろさない（往復が定常になる）",
                 SyncVoServerVersionWrittenBackAsync
             ),
+            Row(
+                "sync-vo-serverwins-restores-row-with-server-version",
+                "SyncVoFixture の端末で、サーバーの他者と端末が同じ行を編集した後の ServerWins の同期は、端末の行をサーバーの"
+                    + "内容に戻し、値オブジェクトの版の列もサーバーのその行の版にする。続く同期は何も送らず何も降ろさない",
+                SyncVoServerWinsRestoresWithServerVersionAsync
+            ),
+            Row(
+                "stateless-row-update-before-first-sync-is-reported-as-duplicate-on-server",
+                "記録の仕組みを通らずに入った行（端末とサーバーに同じ内容・行の状態も再開点も無い）を、最初の同期の前に "
+                    + "Repository で更新すると、Collect の同期はその行を DuplicateOnServer で報告し、端末の内容のまま"
+                    + "サーバーが知らない未送信として残す。もう一度の Collect の同期も同じに報告する",
+                StatelessRowUpdateBeforeFirstSyncAsync
+            ),
+            Row(
+                "stateless-row-delete-before-first-sync-comes-back",
+                "記録の仕組みを通らずに入った行を、最初の同期の前に Repository で削除すると、同期は削除を送らず競合も報告せず、"
+                    + "サーバーの行は残り、端末に行が戻る",
+                StatelessRowDeleteBeforeFirstSyncAsync
+            ),
+            .. new[] { "sync", "refresh" }.Select(first =>
+                Row(
+                    $"stateless-rows-take-state-from-first-sync-then-edit-uploads-{first}",
+                    $"記録の仕組みを通らずに入った行は、書く前に流した最初の実行（{first}）で何も送らず端末の内容も変わらずに"
+                        + "行の状態を得て、その後に Repository で更新した同期は競合なしにサーバーへ上がる",
+                    (h, ct) => StatelessRowsTakeStateFromFirstRunAsync(h, first, ct)
+                )
+            ),
+            Row(
+                "download-does-not-run-local-save-hooks",
+                "端末のフォルダーのリポジトリに行を飛ばす Before の Save フックがあっても（そのリポジトリのグラフ保存では呼ばれて"
+                    + "行を飛ばす）、同期が降ろすサーバーの新しい行と更新はフックを通らずに端末へ入る",
+                DownloadDoesNotRunLocalSaveHooksAsync
+            ),
+            .. NonAdvancingSourceRows(),
+            .. PendingRows(),
         ];
 
         return new ScenarioTable<SyncEngineFixedCase>(EngineIds.GeneratedRuntime, rows);
@@ -875,6 +910,101 @@ internal static class SyncEngineFixedRows
                 ),
             (h, ct) => ChunkRefreshFailureAsync(h, kind, next, ct)
         );
+
+    /// <summary>
+    /// 進まない差分ソースの行（同期・洗い替え × 版ありの表＝品目・版なしの表＝ラベル）。差分ソースが「まだ続きがある」と答え
+    /// 続けて同じページを返すと、実行は止まらずに回り続けずに、表の名前を名指しした例外で終わり、何も適用しない
+    /// </summary>
+    private static IEnumerable<ScenarioRow<SyncEngineFixedCase>> NonAdvancingSourceRows() =>
+        from refresh in new[] { false, true }
+        from versioned in new[] { true, false }
+        select Row(
+            $"non-advancing-source-{(refresh ? "refresh" : "sync")}-{(versioned ? "versioned" : "versionless")}"
+                + "-fails-instead-of-looping",
+            (refresh ? "洗い替え" : "同期")
+                + "で、"
+                + (
+                    versioned
+                        ? "版ありの表（品目）の差分ソースが、再開点を進めない同じバッチを"
+                        : "版なしの表（ラベル）の差分ソースが、最後のキーを進めない同じページを"
+                )
+                + "「まだ続きがある」と返し続けると、実行は回り続けずに表の名前と not making progress を含む "
+                + "InvalidOperationException で終わり、端末の行・行の状態の表・再開点の表とサーバーの行は実行の前のまま",
+            (h, ct) => NonAdvancingSourceAsync(h, refresh, versioned, ct)
+        );
+
+    /// <summary>
+    /// 進まない差分ソース：端末とサーバーにフォルダー 1・品目 1 と 2・ラベル l1 をそろえた後、サーバーの他者がフォルダー 1・
+    /// 品目 1・ラベル l1 を書き換える（先に取得するフォルダーの表の変更が、途中まで適用されていないことを見る）。対象の表の
+    /// 差分ソースだけを進まない包みにしたエンジンで実行を流す
+    /// </summary>
+    private static async Task NonAdvancingSourceAsync(
+        SyncEngineFixedHarness h,
+        bool refresh,
+        bool versioned,
+        CancellationToken ct
+    )
+    {
+        var lastWriteWins = new SyncOptions { Mode = SyncMode.LastWriteWins };
+        await SeedItemsAsync(h, ct);
+        await h.Server.Labels.InsertAsync(
+            new ModelLabelEntity
+            {
+                LabelCode = "l1",
+                FolderId = 1,
+                Caption = "c1",
+            },
+            ct
+        );
+        await h.SyncAsync(lastWriteWins, ct);
+
+        var folder = (await h.Server.Folders.GetByIdAsync(1, ct))!;
+        folder.Name = "f1-server";
+        (await h.Server.Folders.UpdateAsync(folder, cancellationToken: ct)).Should().BeTrue();
+        var item = (await h.Server.Items.GetByIdAsync(1, ct))!;
+        item.Title = "server-edit";
+        (await h.Server.Items.UpdateAsync(item, cancellationToken: ct)).Should().BeTrue();
+        var label = (await h.Server.Labels.GetByIdAsync("l1", ct))!;
+        label.Caption = "c1-server";
+        (await h.Server.Labels.UpdateAsync(label, cancellationToken: ct)).Should().BeTrue();
+
+        var table = versioned ? ModelTables.Items : ModelTables.Labels;
+        var nonAdvancing = new NonAdvancingSource(table);
+        var engine = h.CreateEngine(observe: null, nonAdvancing: nonAdvancing);
+        var localBefore = Describe(await h.ReadLocalAsync(ct));
+        var stateBefore = await h.ReadStateTablesAsync(ct);
+        var serverBefore = Describe(await h.ReadServerAsync(ct));
+
+        // 版なしの表は後勝ちのモードでだけ取得する。洗い替えは blob を運ぶ（端末の品目が blob を持つので、捨てる洗い替えは
+        // 取得の前に blob の損失で断る）
+        var thrown = refresh
+            ? await Record.ExceptionAsync(() =>
+                h.RefreshAsync(new SyncRefreshOptions { IncludeUnboundedBinary = true }, ct, engine)
+            )
+            : await Record.ExceptionAsync(() =>
+                h.SyncAsync(versioned ? null : lastWriteWins, ct, engine)
+            );
+
+        thrown
+            .Should()
+            .BeOfType<InvalidOperationException>(
+                "進まない差分ソースは、回り続けずに（取得の回数の上限の例外にならずに）進まないことの例外で終わる"
+            );
+        thrown!.Message.Should().Contain(table).And.Contain("not making progress");
+        nonAdvancing
+            .Calls.Should()
+            .BeGreaterThanOrEqualTo(
+                2,
+                "進まない包みが 2 回目の取得まで呼ばれている（空振りでない）"
+            );
+        Describe(await h.ReadLocalAsync(ct))
+            .Should()
+            .Be(localBefore, "端末の業務の表の行は実行の前のまま（先に取得した表も適用されない）");
+        (await h.ReadStateTablesAsync(ct))
+            .Should()
+            .Equal(stateBefore, "行の状態の表と再開点の表は実行の前のまま");
+        Describe(await h.ReadServerAsync(ct)).Should().Be(serverBefore, "サーバーの行は変わらない");
+    }
 
     /// <summary>洗い替えの種類の行の名前の部分</summary>
     private static string KindName(ChunkRefreshKind kind) =>
@@ -3626,6 +3756,1292 @@ internal static class SyncEngineFixedRows
         third.Downloaded.Should().Be(0, "自分の変更を取り戻さない");
         third.DeletedLocally.Should().Be(0);
         (await device.ReadUnsentAsync(ct)).Should().BeEmpty();
+    }
+
+    /// <summary>SyncVoFixture の端末：ServerWins で戻した行の値オブジェクトの版の列はサーバーの版になる</summary>
+    private static async Task SyncVoServerWinsRestoresWithServerVersionAsync(
+        SyncEngineFixedHarness _,
+        CancellationToken ct
+    )
+    {
+        using var server = await SyncVoFixtureTestServer.CreateAsync(ct);
+        using var device = await SyncVoFixtureEngineDevice.CreateAsync(server.Orders, ct);
+        await device.Orders.InsertAsync(NewVoOrder(5, "dave"), ct);
+        (await device.Engine.SyncAsync(null, ct)).Conflicts.Should().BeEmpty();
+
+        var key = V.OrderIdValue.Create(5);
+        var versionBefore = (await device.Orders.GetByIdAsync(key, ct))!.RowVer!.Value;
+
+        // サーバーの他者が同じ行を編集する（サーバーの版が進む）
+        var onServer = (await server.OrdersRaw.GetByIdAsync(key, ct))!;
+        onServer.Title = V.TitleValue.Create("server-edit");
+        (await server.Writer.UpdateAsync(onServer, cancellationToken: ct)).Should().BeTrue();
+
+        // 端末も同じ行を編集する
+        var local = (await device.Orders.GetByIdAsync(key, ct))!;
+        local.Title = V.TitleValue.Create("local-edit");
+        await device.Orders.UpdateAsync(local, cancellationToken: ct);
+
+        var result = await device.Engine.SyncAsync(
+            new V.SyncOptions { ConflictPolicy = V.SyncConflictPolicy.ServerWins },
+            ct
+        );
+
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(0, "ServerWins は端末の編集を送らない");
+        var restored = (await device.Orders.GetByIdAsync(key, ct))!;
+        var stored = (await server.OrdersRaw.GetByIdAsync(key, ct))!;
+        restored.Title.Value.Should().Be("server-edit", "端末の行はサーバーの内容に戻る");
+        restored
+            .RowVer!.Value.Should()
+            .Equal(stored.RowVer!.Value, "値オブジェクトの版の列もサーバーのその行の版になる");
+        restored
+            .RowVer.Value.Should()
+            .NotEqual(versionBefore, "サーバーの他者の編集で版は進んでいた");
+        (await device.ReadUnsentAsync(ct)).Should().BeEmpty();
+
+        var again = await device.Engine.SyncAsync(null, ct);
+
+        again.Uploaded.Should().Be(0, "戻した行を送り直さない");
+        again.Downloaded.Should().Be(0, "戻した行を取り直さない");
+        again.DeletedLocally.Should().Be(0);
+        again.Conflicts.Should().BeEmpty();
+        (await device.ReadUnsentAsync(ct)).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 記録の仕組みを通らずに入った行を作る：サーバーにフォルダー 1 を入れ、端末へは同じキー・同じ内容の行を記録しない書き込みで
+    /// 入れる（同期は流さないので、行の状態も再開点も無い）
+    /// </summary>
+    private static async Task SeedStatelessFolderAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await h.Server.Folders.InsertAsync(new ModelFolderEntity { FolderId = 1, Name = "f1" }, ct);
+        await h.ExecuteUntrackedAsync(
+            "INSERT INTO model_folders (folder_id, name) VALUES (1, 'f1')",
+            ct
+        );
+        (await h.ScalarAsync($"SELECT count(*) FROM {SyncLocalTracking.RowTableName}", ct))
+            .Should()
+            .Be("0", "行の状態が無い");
+        (await h.ScalarAsync("SELECT count(*) FROM quicker_sync_table", ct))
+            .Should()
+            .Be("0", "再開点が無い");
+        DescribeRows(await h.ReadLocalAsync(ct))
+            .Should()
+            .Be(DescribeRows(await h.ReadServerAsync(ct)), "端末とサーバーに同じ行がある");
+    }
+
+    /// <summary>記録の仕組みを通らずに入った行の観測（同期の結果・端末とサーバーの行・未送信の一覧）を 1 つの文字列にする</summary>
+    private static async Task<string> ObserveStatelessAsync(
+        SyncEngineFixedHarness h,
+        string label,
+        SyncResult result,
+        CancellationToken ct
+    ) =>
+        $"{label}: uploaded={result.Uploaded} downloaded={result.Downloaded} deleted={result.DeletedLocally} "
+        + $"conflicts=[{string.Join(", ", result.Conflicts.Select(c => $"{c.TableName}/{c.KeyText}:{c.Reason}"))}] "
+        + $"changes=[{string.Join(", ", result.LocalRowChanges.Select(c => $"{c.TableName}/{c.KeyText}:{c.Reason}"))}]\n"
+        + $"local:\n{DescribeRows(await h.ReadLocalAsync(ct))}\nserver:\n{DescribeRows(await h.ReadServerAsync(ct))}\n"
+        + $"pending=[{string.Join(", ", (await PendingAsync(h, ct)).Select(p => p.ToString()))}]";
+
+    /// <summary>記録の仕組みを通らずに入った行を最初の同期の前に更新すると、同期は DuplicateOnServer を報告し続ける</summary>
+    private static async Task StatelessRowUpdateBeforeFirstSyncAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedStatelessFolderAsync(h, ct);
+        var folder = (await h.Folders.GetByIdAsync(1, ct))!;
+        folder.Name = "local-edit";
+        (await h.Folders.UpdateAsync(folder, cancellationToken: ct)).Should().BeTrue();
+
+        foreach (var label in new[] { "first", "second" })
+        {
+            var result = await h.SyncAsync(null, ct);
+            var observed = await ObserveStatelessAsync(h, label, result, ct);
+
+            result
+                .Conflicts.Select(conflict =>
+                    (conflict.TableName, conflict.KeyText, conflict.Reason)
+                )
+                .Should()
+                .Equal(
+                    [(ModelTables.Folders, "1", SyncConflictReason.DuplicateOnServer)],
+                    $"サーバーが知らない行の挿入として送り、同じキーの行がサーバーにある（{observed}）"
+                );
+            (await h.ReadLocalAsync(ct))
+                .Folders[1]
+                .Name.Should()
+                .Be("local-edit", $"Collect は端末の内容を残す（{observed}）");
+            (await h.ReadServerAsync(ct))
+                .Folders[1]
+                .Name.Should()
+                .Be("f1", $"サーバーは変わらない（{observed}）");
+            (await PendingAsync(h, ct))
+                .Should()
+                .Equal(
+                    [(ModelTables.Folders, "1", false, false, false)],
+                    $"サーバーが知らない未送信として残る（{observed}）"
+                );
+        }
+    }
+
+    /// <summary>記録の仕組みを通らずに入った行を最初の同期の前に削除すると、削除は送られず行が戻る</summary>
+    private static async Task StatelessRowDeleteBeforeFirstSyncAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedStatelessFolderAsync(h, ct);
+        (await h.Folders.DeleteAsync(1, ct)).Should().BeTrue();
+
+        var result = await h.SyncAsync(null, ct);
+        var observed = await ObserveStatelessAsync(h, "sync", result, ct);
+
+        result.Conflicts.Should().BeEmpty($"競合は報告されない（{observed}）");
+        result.Uploaded.Should().Be(0, $"削除は送られない（{observed}）");
+        (await h.ReadServerAsync(ct))
+            .Folders.Should()
+            .ContainKey(1, $"サーバーの行は残る（{observed}）");
+        (await h.ReadLocalAsync(ct))
+            .Folders.Should()
+            .ContainKey(1, $"端末に行が戻る（{observed}）");
+        await ShouldMatchServerWithNothingPendingAsync(
+            h,
+            $"端末とサーバーが同じ（{observed}）",
+            ct
+        );
+    }
+
+    /// <summary>記録の仕組みを通らずに入った行は、最初の実行（同期か洗い替え）で行の状態を得て、その後の編集が上がる</summary>
+    private static async Task StatelessRowsTakeStateFromFirstRunAsync(
+        SyncEngineFixedHarness h,
+        string first,
+        CancellationToken ct
+    )
+    {
+        await SeedStatelessFolderAsync(h, ct);
+        var localBefore = Describe(await h.ReadLocalAsync(ct));
+        var serverBefore = Describe(await h.ReadServerAsync(ct));
+
+        if (first == "sync")
+        {
+            var initial = await h.SyncAsync(null, ct);
+            var observed = await ObserveStatelessAsync(h, "first-sync", initial, ct);
+            initial.Conflicts.Should().BeEmpty(observed);
+            initial.Uploaded.Should().Be(0, $"何も送らない（{observed}）");
+        }
+        else
+        {
+            await h.RefreshAsync(new SyncRefreshOptions { IncludeUnboundedBinary = true }, ct);
+        }
+
+        Describe(await h.ReadLocalAsync(ct))
+            .Should()
+            .Be(localBefore, "最初の実行は端末の内容を変えない");
+        Describe(await h.ReadServerAsync(ct))
+            .Should()
+            .Be(serverBefore, "最初の実行はサーバーを変えない");
+        (await PendingAsync(h, ct)).Should().BeEmpty("最初の実行の後に未送信は無い");
+
+        var folder = (await h.Folders.GetByIdAsync(1, ct))!;
+        folder.Name = "local-edit";
+        (await h.Folders.UpdateAsync(folder, cancellationToken: ct)).Should().BeTrue();
+
+        var result = await h.SyncAsync(null, ct);
+        var afterEdit = await ObserveStatelessAsync(h, "edit-sync", result, ct);
+
+        result.Conflicts.Should().BeEmpty($"競合なしに上がる（{afterEdit}）");
+        result.Uploaded.Should().Be(1, afterEdit);
+        (await h.ReadServerAsync(ct)).Folders[1].Name.Should().Be("local-edit", afterEdit);
+        await ShouldMatchServerWithNothingPendingAsync(
+            h,
+            $"端末とサーバーが同じ（{afterEdit}）",
+            ct
+        );
+    }
+
+    /// <summary>適用はローカルの Save フックを通らない（同じフックは端末のグラフ保存では呼ばれて行を飛ばす）</summary>
+    private static async Task DownloadDoesNotRunLocalSaveHooksAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await h.Server.Folders.InsertAsync(new ModelFolderEntity { FolderId = 1, Name = "f1" }, ct);
+        await h.SyncAsync(null, ct);
+
+        var calls = 0;
+        h.BeforeFolderSave = (_, _) =>
+        {
+            Interlocked.Increment(ref calls);
+
+            return Task.FromResult(false);
+        };
+
+        try
+        {
+            // 空振りでないことの確かめ：端末のリポジトリのグラフ保存ではフックが呼ばれ、行を飛ばす
+            var skipped = new ModelFolderEntity { FolderId = 9, Name = "skipped" };
+            skipped.MarkAdded();
+            await h.Folders.SaveAsync(skipped, cancellationToken: ct);
+            Volatile.Read(ref calls).Should().Be(1, "端末のグラフ保存ではフックが呼ばれる");
+            (await h.ReadLocalAsync(ct))
+                .Folders.Should()
+                .NotContainKey(9, "フックが飛ばした行は書かれない");
+
+            // 本題：サーバーの新しい行と更新を同期で降ろす
+            await h.Server.Folders.InsertAsync(
+                new ModelFolderEntity { FolderId = 2, Name = "f2" },
+                ct
+            );
+            var onServer = (await h.Server.Folders.GetByIdAsync(1, ct))!;
+            onServer.Name = "server-edit";
+            (await h.Server.Folders.UpdateAsync(onServer, cancellationToken: ct)).Should().BeTrue();
+
+            var result = await h.SyncAsync(null, ct);
+
+            result.Conflicts.Should().BeEmpty();
+            result.Downloaded.Should().Be(2, "新しい行と更新の 2 行が降りる");
+            var local = await h.ReadLocalAsync(ct);
+            local.Folders[2].Name.Should().Be("f2", "新しい行はフックに飛ばされずに入る");
+            local.Folders[1].Name.Should().Be("server-edit", "更新もフックに飛ばされずに入る");
+            Volatile.Read(ref calls).Should().Be(1, "適用はローカルの Save フックを呼ばない");
+        }
+        finally
+        {
+            h.BeforeFolderSave = null;
+        }
+
+        await ShouldMatchServerWithNothingPendingAsync(h, "端末とサーバーが同じ", ct);
+    }
+
+    /// <summary>未送信の行の一覧と、行を捨てる口の行</summary>
+    private static IEnumerable<ScenarioRow<SyncEngineFixedCase>> PendingRows() =>
+        [
+            Row(
+                "pending-list-names-unsent-rows",
+                "サーバーが知っている品目の更新・端末で作ったフォルダーの挿入・サーバーが知っている品目の削除の後、未送信の"
+                    + "一覧は変更の順に、表・キーのテキスト・削除か・サーバーが知っているか・捨てる印なしを返す。同期の後は空",
+                PendingListAsync
+            ),
+            Row(
+                "pending-list-does-not-wait-for-run-and-discard-does",
+                "同期がサーバー役の待ちの点で止まっている間、未送信の一覧は同期を待たずに読めてその時点の未送信を返し、"
+                    + "全部を捨てる口は同期の終わりを待つ（同期を進めた後に完了する）",
+                PendingListDoesNotWaitForRunAsync
+            ),
+            Row(
+                "pending-discard-settles-collect-conflict-with-server-row",
+                "サーバーの他者と端末が同じ品目を編集して Collect の同期が ModifiedOnServer を報告した後、一覧から選んで捨てると"
+                    + "（戻り値 1・一覧の印が立つ）、次の Collect の同期は競合なし・何も送らずにサーバーの内容へ戻し、"
+                    + "LocalRowChanges に DiscardedByServerWins で載せる。一覧は空",
+                DiscardSettlesCollectConflictAsync
+            ),
+            .. new[] { "sync", "upload-only", "download-only" }.Select(run =>
+                Row(
+                    $"pending-discard-row-unchanged-on-server-is-read-back-{run}",
+                    $"サーバーでは変わっていない（再開点を過ぎた）品目を端末だけが編集して捨てると、次の実行（{run}）が"
+                        + "サーバーの内容へ戻し、サーバーは変わらず、一覧は空",
+                    (h, ct) => DiscardUnchangedRowAsync(h, run, ct)
+                )
+            ),
+            Row(
+                "pending-discard-then-rewrite-is-sent",
+                "捨てた後に同じ品目をもう一度書くと、一覧の捨てる印が外れ、次の同期が書いた内容をサーバーへ送る",
+                DiscardThenRewriteAsync
+            ),
+            Row(
+                "pending-discard-insert-unknown-to-server-removes-row",
+                "端末で作っただけのフォルダーを捨てると、次の同期の後、その行は端末にもサーバーにも無い",
+                DiscardUnknownInsertAsync
+            ),
+            Row(
+                "pending-discard-delete-brings-row-back",
+                "サーバーが知っている品目の削除を捨てると、次の同期の後、端末に行が blob ごと戻り、サーバーの行は残る",
+                DiscardDeleteAsync
+            ),
+            Row(
+                "pending-discard-with-stale-row-is-not-discarded",
+                "一覧を読んだ後に品目をもう一度書き、古い一覧の行を渡して捨てると、戻り値 0 で印は立たず、次の同期が書いた"
+                    + "内容を送る",
+                DiscardStaleRowAsync
+            ),
+            Row(
+                "pending-discard-by-table-and-all",
+                "2 つの表に未送信があるとき、型を渡す口はその表の行だけに印を立て、全部を捨てる口は残りにも立てる。次の同期の後、"
+                    + "どの行もサーバーの内容で、サーバーは変わらない",
+                DiscardByTableAndAllAsync
+            ),
+            Row(
+                "pending-discard-is-kept-for-run-that-excludes-table",
+                "品目を捨てた後、品目の表を外した同期は行を端末の内容のまま残し、一覧に捨てる印つきで残る。外さない次の同期で"
+                    + "サーバーの内容に戻る",
+                DiscardKeptForExcludingRunAsync
+            ),
+            Row(
+                "pending-discard-refuses-unknown-table-and-type",
+                "エンジンの表でない表の名前の行・エンジンの表でない型・null を渡すと、それぞれ ArgumentException・"
+                    + "ArgumentNullException で断り、行の状態の表は変わらない",
+                DiscardRefusesAsync
+            ),
+            Row(
+                "pending-list-and-discard-cover-only-engine-tables",
+                "フォルダーと品目の 2 表だけで組んだエンジンでは、ラベルの未送信の行は一覧に出ず、全部を捨てる口も印を立てず、"
+                    + "ラベルの表の名前の行を渡すと ArgumentException で断る。4 表のエンジンの一覧には、ラベルの行が捨てる印なしで残る",
+                CoverOnlyEngineTablesAsync
+            ),
+            Row(
+                "pending-discard-is-replaced-by-refresh-without-force",
+                "端末だけが編集した品目を捨てた後、Force なしの洗い替えは断らずに終わり（DiscardedChanges 1）、品目はサーバーの"
+                    + "内容になり、一覧は空で、サーバーは変わらない。端末で作っただけのフォルダーを捨てた後の Force なしの洗い替えも"
+                    + "断らず（DiscardedChanges 1）、そのフォルダーは端末に無い",
+                DiscardReplacedByRefreshAsync
+            ),
+            Row(
+                "pending-discard-rewritten-row-still-refuses-refresh",
+                "品目を捨てた後に同じ品目をもう一度書くと、Force なしの洗い替えは SyncPendingChangesException（PendingCount 1）で"
+                    + "断り、端末と行の状態の表は変わらない",
+                DiscardRewrittenRefusesRefreshAsync
+            ),
+            Row(
+                "pending-discard-does-not-hide-other-unsent-rows-from-refresh",
+                "フォルダーと品目に未送信があり品目だけを捨てると、Force なしの洗い替えは SyncPendingChangesException で断り、"
+                    + "例外の件数は捨てる印の無いフォルダーの 1 件だけ。端末と行の状態の表は変わらない",
+                DiscardDoesNotHideOtherUnsentAsync
+            ),
+            Row(
+                "pending-discard-is-replaced-by-chunked-refresh",
+                "捨てる印のある品目（題名の編集と blob の書き込み）を持つ端末の、塊ごとに確定する blob を捨てる Force なしの"
+                    + "洗い替えは、塊の道を通って断らずに終わり、捨てた品目はサーバーの内容で、どの品目の blob も空になり、"
+                    + "未送信が残らない",
+                DiscardReplacedByChunkedRefreshAsync
+            ),
+            Row(
+                "pending-discard-is-not-counted-for-refresh-row-limit",
+                "捨てる印のある行だけが未送信の端末の、降ろす行の上限を超える Force なしの洗い替えは "
+                    + "SyncDownloadTooLargeException で断らずに終わり、捨てた行はサーバーの内容になり、サーバーの新しい行も入る",
+                DiscardNotCountedForRowLimitAsync
+            ),
+            Row(
+                "pending-discard-rewritten-during-fetch-is-counted-for-refresh-row-limit",
+                "捨てる印のある行を、Force なしの洗い替えの取得の途中に端末がもう一度書く（連番が進む）と、その行は未送信に"
+                    + "数え、降ろす行の上限を超えた洗い替えは SyncDownloadTooLargeException で断る（端末の行は書き直した内容の"
+                    + "未送信のまま、サーバーと再開点は変わらない）",
+                DiscardRewrittenDuringFetchCountedForRowLimitAsync
+            ),
+        ];
+
+    /// <summary>サーバーにフォルダー 1 と品目 1・2 を入れ、blob を運ぶ同期で端末へ降ろす</summary>
+    private static async Task SeedPendingAsync(SyncEngineFixedHarness h, CancellationToken ct)
+    {
+        await SeedItemsAsync(h, ct);
+        await h.SyncAsync(WithBlobs, ct);
+    }
+
+    /// <summary>未送信の一覧（表・キー・削除か・サーバーが知っているか・捨てる印）</summary>
+    private static async Task<
+        List<(string Table, string Key, bool IsDelete, bool Known, bool Discarded)>
+    > PendingAsync(SyncEngineFixedHarness h, CancellationToken ct) =>
+        (await h.Engine.GetPendingChangesAsync(ct))
+            .Select(row =>
+                (row.TableName, row.KeyText, row.IsDelete, row.KnownToServer, row.IsDiscarded)
+            )
+            .ToList();
+
+    /// <summary>一覧から 1 行を選ぶ</summary>
+    private static async Task<SyncPendingRow> PendingRowAsync(
+        SyncEngineFixedHarness h,
+        string table,
+        string key,
+        CancellationToken ct
+    ) =>
+        (await h.Engine.GetPendingChangesAsync(ct)).Single(row =>
+            row.TableName == table && row.KeyText == key
+        );
+
+    private static async Task SetServerTitleAsync(
+        SyncEngineFixedHarness h,
+        int key,
+        string title,
+        CancellationToken ct
+    )
+    {
+        var item = (await h.Server.Items.GetByIdAsync(key, ct))!;
+        item.Title = title;
+        (await h.Server.Items.UpdateAsync(item, cancellationToken: ct)).Should().BeTrue();
+    }
+
+    private static Task SetLocalTitleAsync(
+        SyncEngineFixedHarness h,
+        int key,
+        string title,
+        CancellationToken ct
+    ) => h.ExecuteLocalAsync($"UPDATE model_items SET title = '{title}' WHERE item_id = {key}", ct);
+
+    /// <summary>端末とサーバーの内容が同じで、未送信が無いこと</summary>
+    private static async Task ShouldMatchServerWithNothingPendingAsync(
+        SyncEngineFixedHarness h,
+        string because,
+        CancellationToken ct
+    )
+    {
+        Describe(await h.ReadLocalAsync(ct))
+            .Should()
+            .Be(Describe(await h.ReadServerAsync(ct)), because);
+        (await h.Engine.GetPendingChangesAsync(ct)).Should().BeEmpty("未送信は残らない");
+    }
+
+    /// <summary>未送信の一覧の中身と順と、同期の後に空になること</summary>
+    private static async Task PendingListAsync(SyncEngineFixedHarness h, CancellationToken ct)
+    {
+        await SeedPendingAsync(h, ct);
+        (await h.Engine.GetPendingChangesAsync(ct)).Should().BeEmpty("同期の直後は未送信なし");
+
+        await SetLocalTitleAsync(h, 1, "local-edit", ct);
+        await h.ExecuteLocalAsync(
+            "INSERT INTO model_folders (folder_id, name) VALUES (2, 'local-new')",
+            ct
+        );
+        await h.ExecuteLocalAsync("DELETE FROM model_items WHERE item_id = 2", ct);
+
+        var listed = await h.Engine.GetPendingChangesAsync(ct);
+        listed
+            .Select(row =>
+                (row.TableName, row.KeyText, row.IsDelete, row.KnownToServer, row.IsDiscarded)
+            )
+            .Should()
+            .Equal(
+                [
+                    (ModelTables.Items, "1", false, true, false),
+                    (ModelTables.Folders, "2", false, false, false),
+                    (ModelTables.Items, "2", true, true, false),
+                ],
+                "変更の順に、表・キー・削除か・サーバーが知っているか・捨てる印を返す"
+            );
+        listed
+            .Select(row => row.ChangeNumber)
+            .Should()
+            .BeInAscendingOrder("変更の連番の順")
+            .And.OnlyHaveUniqueItems();
+
+        var result = await h.SyncAsync(WithBlobs, ct);
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(3);
+        await ShouldMatchServerWithNothingPendingAsync(h, "同期で 3 つとも上がる", ct);
+    }
+
+    /// <summary>
+    /// 一覧は実行を待たず、全部を捨てる口は実行の終わりを待つ：同期をサーバーへの書き込みの直前で止め、その間の一覧と捨てる口の
+    /// 完了と、手順の順序を記録する
+    /// </summary>
+    private static async Task PendingListDoesNotWaitForRunAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedPendingAsync(h, ct);
+        await SetLocalTitleAsync(h, 1, "local-edit", ct);
+
+        var log = new List<string>();
+
+        void Note(string step)
+        {
+            lock (log)
+            {
+                log.Add(step);
+            }
+        }
+
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        h.Faults.Syncing = ModelActor.Device1;
+        h.Faults.ArmInterrupt(
+            ModelActor.Device1,
+            ModelInterruptPoint.BeforeServerWrite,
+            ModelActor.Server,
+            async () =>
+            {
+                reached.TrySetResult();
+                await release.Task;
+            }
+        );
+
+        Task<IReadOnlyList<SyncPendingRow>> list;
+        bool listDoneWhileHeld;
+        bool discardDoneWhileHeld;
+        SyncResult synced;
+        int discarded;
+
+        try
+        {
+            var sync = Task.Run(
+                async () =>
+                {
+                    var result = await h.Engine.SyncAsync(WithBlobs, ct);
+                    Note("sync-done");
+
+                    return result;
+                },
+                ct
+            );
+            await reached.Task.WaitAsync(ReachTimeout, ct);
+
+            // 一覧：同期が止まっている間に完了するか（上限は安全のためだけ）
+            list = h.Engine.GetPendingChangesAsync(ct);
+            listDoneWhileHeld = await Task.WhenAny(list, Task.Delay(ReachTimeout, ct)) == list;
+            Note("listed");
+
+            // 全部を捨てる口：同期が止まっている間は完了しない
+            var discard = Task.Run(
+                async () =>
+                {
+                    var count = await h.Engine.DiscardAllPendingChangesAsync(ct);
+                    Note("discard-done");
+
+                    return count;
+                },
+                ct
+            );
+            discardDoneWhileHeld =
+                await Task.WhenAny(discard, Task.Delay(SecondRunWindow, ct)) == discard;
+            Note("release");
+            release.TrySetResult();
+            synced = await sync.WaitAsync(ReachTimeout, ct);
+            discarded = await discard.WaitAsync(ReachTimeout, ct);
+        }
+        finally
+        {
+            release.TrySetResult();
+            h.Faults.Syncing = null;
+        }
+
+        listDoneWhileHeld.Should().BeTrue("未送信の一覧は、同期の終わりを待たずに読める");
+        (await list)
+            .Select(row => (row.TableName, row.KeyText, row.IsDiscarded))
+            .Should()
+            .Equal(
+                [(ModelTables.Items, "1", false)],
+                "同期の最中に読んだ一覧は、その時点までにコミットされた未送信を映す"
+            );
+        discardDoneWhileHeld.Should().BeFalse("全部を捨てる口は、同期が止まっている間は完了しない");
+        log.IndexOf("listed")
+            .Should()
+            .BeLessThan(
+                log.IndexOf("release"),
+                $"一覧は同期を進める前に済む（記録：{string.Join(", ", log)}）"
+            );
+        log.IndexOf("discard-done")
+            .Should()
+            .BeGreaterThan(
+                log.IndexOf("release"),
+                $"捨てる口は同期を進めた後に完了する（記録：{string.Join(", ", log)}）"
+            );
+        synced.Uploaded.Should().Be(1, "止めていた同期は編集を送り終える");
+        discarded.Should().Be(0, "同期の終わりを待った捨てる口には、もう捨てる未送信が無い");
+        await ShouldMatchServerWithNothingPendingAsync(h, "編集がサーバーへ上がっている", ct);
+    }
+
+    /// <summary>Collect の競合を報告された行を捨てると、次の Collect の同期がサーバーの内容で決着する</summary>
+    private static async Task DiscardSettlesCollectConflictAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedPendingAsync(h, ct);
+        await SetServerTitleAsync(h, 1, "server-edit", ct);
+        await SetLocalTitleAsync(h, 1, "local-edit", ct);
+
+        var collect = await h.SyncAsync(WithBlobs, ct);
+        collect
+            .Conflicts.Select(conflict => (conflict.TableName, conflict.KeyText, conflict.Reason))
+            .Should()
+            .Equal([(ModelTables.Items, "1", SyncConflictReason.ModifiedOnServer)]);
+        (await h.ReadLocalAsync(ct))
+            .Items[1]
+            .Title.Should()
+            .Be("local-edit", "Collect は端末の内容を残す");
+        (await PendingAsync(h, ct))
+            .Should()
+            .Equal([(ModelTables.Items, "1", false, true, false)], "未送信のまま残る");
+
+        var row = await PendingRowAsync(h, ModelTables.Items, "1", ct);
+        (await h.Engine.DiscardPendingChangesAsync([row], ct)).Should().Be(1);
+        (await PendingAsync(h, ct))
+            .Should()
+            .Equal(
+                [(ModelTables.Items, "1", false, true, true)],
+                "捨てる印が立ち、未送信のまま残る"
+            );
+
+        var next = await h.SyncAsync(WithBlobs, ct);
+        next.Conflicts.Should().BeEmpty("捨てた行は競合にならない");
+        next.Uploaded.Should().Be(0, "捨てた行は送らない");
+        next.LocalRowChanges.Should()
+            .Contain(
+                new SyncLocalRowChange(
+                    ModelTables.Items,
+                    "1",
+                    SyncLocalRowChangeReason.DiscardedByServerWins
+                )
+            );
+        (await h.ReadLocalAsync(ct)).Items[1].Title.Should().Be("server-edit");
+        await ShouldMatchServerWithNothingPendingAsync(h, "端末がサーバーの内容になる", ct);
+    }
+
+    /// <summary>サーバーで変わっていない行を捨てると、どの実行の種類もサーバーからキーで読んで戻す</summary>
+    private static async Task DiscardUnchangedRowAsync(
+        SyncEngineFixedHarness h,
+        string run,
+        CancellationToken ct
+    )
+    {
+        await SeedPendingAsync(h, ct);
+        await SetLocalTitleAsync(h, 1, "local-edit", ct);
+        var serverBefore = Describe(await h.ReadServerAsync(ct));
+
+        (await h.Engine.DiscardAllPendingChangesAsync(ct)).Should().Be(1);
+
+        switch (run)
+        {
+            case "sync":
+                (await h.SyncAsync(WithBlobs, ct)).Conflicts.Should().BeEmpty();
+
+                break;
+
+            case "upload-only":
+                var conflicts = new List<SyncConflict>();
+                (await h.Engine.UploadAsync(WithBlobs, conflicts, ct)).Uploaded.Should().Be(0);
+                conflicts.Should().BeEmpty();
+
+                break;
+
+            default:
+                await h.Engine.DownloadAsync(WithBlobs, ct);
+
+                break;
+        }
+
+        (await h.ReadLocalAsync(ct))
+            .Items[1]
+            .Title.Should()
+            .Be("t1", "捨てた行はサーバーの内容に戻る");
+        Describe(await h.ReadServerAsync(ct)).Should().Be(serverBefore, "サーバーは変わらない");
+        await ShouldMatchServerWithNothingPendingAsync(h, "端末がサーバーの内容になる", ct);
+    }
+
+    /// <summary>捨てた後に書き直すと、印が外れて書いた内容が送られる</summary>
+    private static async Task DiscardThenRewriteAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedPendingAsync(h, ct);
+        await SetLocalTitleAsync(h, 1, "first-edit", ct);
+        (
+            await h.Engine.DiscardPendingChangesAsync(
+                [await PendingRowAsync(h, ModelTables.Items, "1", ct)],
+                ct
+            )
+        )
+            .Should()
+            .Be(1);
+        await SetLocalTitleAsync(h, 1, "second-edit", ct);
+        (await PendingAsync(h, ct))
+            .Should()
+            .Equal(
+                [(ModelTables.Items, "1", false, true, false)],
+                "書き直すと捨てる印は効かなくなる"
+            );
+
+        var result = await h.SyncAsync(WithBlobs, ct);
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(1, "書き直した内容が送られる");
+        (await h.ReadServerAsync(ct)).Items[1].Title.Should().Be("second-edit");
+        await ShouldMatchServerWithNothingPendingAsync(h, "端末とサーバーが同じ", ct);
+    }
+
+    /// <summary>サーバーが知らない挿入を捨てると、端末から消える</summary>
+    private static async Task DiscardUnknownInsertAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedPendingAsync(h, ct);
+        await h.ExecuteLocalAsync(
+            "INSERT INTO model_folders (folder_id, name) VALUES (5, 'local-only')",
+            ct
+        );
+        (await PendingAsync(h, ct))
+            .Should()
+            .Equal([(ModelTables.Folders, "5", false, false, false)]);
+        (
+            await h.Engine.DiscardPendingChangesAsync(
+                [await PendingRowAsync(h, ModelTables.Folders, "5", ct)],
+                ct
+            )
+        )
+            .Should()
+            .Be(1);
+
+        var result = await h.SyncAsync(WithBlobs, ct);
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(0);
+        (await h.ReadLocalAsync(ct)).Folders.Should().NotContainKey(5, "端末から消える");
+        (await h.ReadServerAsync(ct)).Folders.Should().NotContainKey(5, "サーバーへ送らない");
+        await ShouldMatchServerWithNothingPendingAsync(h, "端末とサーバーが同じ", ct);
+    }
+
+    /// <summary>サーバーが知っている行の削除を捨てると、行が端末へ戻る</summary>
+    private static async Task DiscardDeleteAsync(SyncEngineFixedHarness h, CancellationToken ct)
+    {
+        await SeedPendingAsync(h, ct);
+        await h.ExecuteLocalAsync("DELETE FROM model_items WHERE item_id = 2", ct);
+        (await PendingAsync(h, ct)).Should().Equal([(ModelTables.Items, "2", true, true, false)]);
+        (
+            await h.Engine.DiscardPendingChangesAsync(
+                [await PendingRowAsync(h, ModelTables.Items, "2", ct)],
+                ct
+            )
+        )
+            .Should()
+            .Be(1);
+
+        var result = await h.SyncAsync(WithBlobs, ct);
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(0);
+        (await h.ReadServerAsync(ct)).Items.Should().ContainKey(2, "サーバーの行は残る");
+        (await h.ReadLocalAsync(ct)).Items.Should().ContainKey(2, "端末に行が戻る");
+        await ShouldMatchServerWithNothingPendingAsync(h, "blob ごと端末とサーバーが同じ", ct);
+    }
+
+    /// <summary>一覧の後に書き直した行は、古い一覧の行では捨てられない</summary>
+    private static async Task DiscardStaleRowAsync(SyncEngineFixedHarness h, CancellationToken ct)
+    {
+        await SeedPendingAsync(h, ct);
+        await SetLocalTitleAsync(h, 1, "first-edit", ct);
+        var stale = await PendingRowAsync(h, ModelTables.Items, "1", ct);
+        await SetLocalTitleAsync(h, 1, "second-edit", ct);
+
+        (await h.Engine.DiscardPendingChangesAsync([stale], ct))
+            .Should()
+            .Be(0, "連番が進んだ行には印を立てない");
+        (await PendingAsync(h, ct))
+            .Should()
+            .Equal([(ModelTables.Items, "1", false, true, false)], "印は立たない");
+
+        var result = await h.SyncAsync(WithBlobs, ct);
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(1);
+        (await h.ReadServerAsync(ct)).Items[1].Title.Should().Be("second-edit", "書いた内容を送る");
+        await ShouldMatchServerWithNothingPendingAsync(h, "端末とサーバーが同じ", ct);
+    }
+
+    /// <summary>型を渡す口はその表だけ、全部を捨てる口は残りにも印を立てる</summary>
+    private static async Task DiscardByTableAndAllAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedPendingAsync(h, ct);
+        await h.ExecuteLocalAsync(
+            "UPDATE model_folders SET name = 'local-folder' WHERE folder_id = 1",
+            ct
+        );
+        await SetLocalTitleAsync(h, 1, "local-item", ct);
+        var serverBefore = Describe(await h.ReadServerAsync(ct));
+
+        (await h.Engine.DiscardPendingChangesAsync(typeof(ModelItemEntity), ct))
+            .Should()
+            .Be(1, "品目の表の行だけに立てる");
+        (await PendingAsync(h, ct))
+            .Should()
+            .Equal(
+                [
+                    (ModelTables.Folders, "1", false, true, false),
+                    (ModelTables.Items, "1", false, true, true),
+                ],
+                "フォルダーの行には印が立たない"
+            );
+
+        (
+            await h.Engine.DiscardPendingChangesAsync(
+                [await PendingRowAsync(h, ModelTables.Items, "1", ct)],
+                ct
+            )
+        )
+            .Should()
+            .Be(1, "すでに印のある行も、捨てる行として数える");
+
+        (await h.Engine.DiscardAllPendingChangesAsync(ct))
+            .Should()
+            .Be(2, "全部の未送信の行に立てる");
+        (await PendingAsync(h, ct))
+            .Should()
+            .Equal([
+                (ModelTables.Folders, "1", false, true, true),
+                (ModelTables.Items, "1", false, true, true),
+            ]);
+
+        var result = await h.SyncAsync(WithBlobs, ct);
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(0);
+        Describe(await h.ReadServerAsync(ct)).Should().Be(serverBefore, "サーバーは変わらない");
+        await ShouldMatchServerWithNothingPendingAsync(h, "どの行もサーバーの内容", ct);
+    }
+
+    /// <summary>表を外した実行は、捨てる印の行に触らない</summary>
+    private static async Task DiscardKeptForExcludingRunAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedPendingAsync(h, ct);
+        await SetLocalTitleAsync(h, 1, "local-edit", ct);
+        (await h.Engine.DiscardAllPendingChangesAsync(ct)).Should().Be(1);
+
+        var excluding = await h.SyncAsync(
+            new SyncOptions
+            {
+                IncludeUnboundedBinary = true,
+                ExcludedEntityTypes = [typeof(ModelItemEntity)],
+            },
+            ct
+        );
+        excluding.Conflicts.Should().BeEmpty();
+        (await h.ReadLocalAsync(ct))
+            .Items[1]
+            .Title.Should()
+            .Be("local-edit", "表を外した同期は行を端末の内容のまま残す");
+        (await h.ReadServerAsync(ct)).Items[1].Title.Should().Be("t1");
+        (await PendingAsync(h, ct))
+            .Should()
+            .Equal([(ModelTables.Items, "1", false, true, true)], "捨てる印つきで残る");
+
+        (await h.SyncAsync(WithBlobs, ct)).Conflicts.Should().BeEmpty();
+        (await h.ReadLocalAsync(ct)).Items[1].Title.Should().Be("t1");
+        await ShouldMatchServerWithNothingPendingAsync(h, "外さない同期でサーバーの内容に戻る", ct);
+    }
+
+    /// <summary>エンジンの表でない表・型と null を断り、何も変えない</summary>
+    private static async Task DiscardRefusesAsync(SyncEngineFixedHarness h, CancellationToken ct)
+    {
+        await SeedPendingAsync(h, ct);
+        await SetLocalTitleAsync(h, 1, "local-edit", ct);
+        var known = await PendingRowAsync(h, ModelTables.Items, "1", ct);
+        var stateBefore = await h.ReadStateTablesAsync(ct);
+
+        var unknownTable = await Record.ExceptionAsync(() =>
+            h.Engine.DiscardPendingChangesAsync(
+                [known, known with { TableName = "no_such_table" }],
+                ct
+            )
+        );
+        unknownTable
+            .Should()
+            .BeOfType<ArgumentException>()
+            .Which.Message.Should()
+            .Contain("no_such_table", "表の名前を名指しする");
+
+        var unknownType = await Record.ExceptionAsync(() =>
+            h.Engine.DiscardPendingChangesAsync(typeof(string), ct)
+        );
+        unknownType
+            .Should()
+            .BeOfType<ArgumentException>()
+            .Which.Message.Should()
+            .Contain(nameof(String));
+
+        (
+            await Record.ExceptionAsync(() =>
+                h.Engine.DiscardPendingChangesAsync((IEnumerable<SyncPendingRow>)null!, ct)
+            )
+        )
+            .Should()
+            .BeOfType<ArgumentNullException>();
+        (await Record.ExceptionAsync(() => h.Engine.DiscardPendingChangesAsync((Type)null!, ct)))
+            .Should()
+            .BeOfType<ArgumentNullException>();
+
+        (await h.ReadStateTablesAsync(ct))
+            .Should()
+            .Equal(stateBefore, "断った呼び出しは行の状態の表を変えない");
+    }
+
+    /// <summary>一覧と捨てる口は、そのエンジンの表の行だけを扱う</summary>
+    private static async Task CoverOnlyEngineTablesAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedPendingAsync(h, ct);
+        await h.ExecuteLocalAsync(
+            "INSERT INTO model_labels (label_code, folder_id, caption) VALUES ('L1', 1, 'local')",
+            ct
+        );
+        await SetLocalTitleAsync(h, 1, "local-edit", ct);
+        var narrow = h.CreateFolderAndItemEngine();
+
+        (await narrow.GetPendingChangesAsync(ct))
+            .Select(row => (row.TableName, row.KeyText))
+            .Should()
+            .Equal([(ModelTables.Items, "1")], "エンジンの表でないラベルの行は一覧に出ない");
+        (await narrow.DiscardAllPendingChangesAsync(ct))
+            .Should()
+            .Be(1, "エンジンの表の行だけに印を立てる");
+
+        var label = await PendingRowAsync(h, ModelTables.Labels, "L1", ct);
+        (await Record.ExceptionAsync(() => narrow.DiscardPendingChangesAsync([label], ct)))
+            .Should()
+            .BeOfType<ArgumentException>()
+            .Which.Message.Should()
+            .Contain(ModelTables.Labels);
+
+        (await PendingAsync(h, ct))
+            .Should()
+            .Equal(
+                [
+                    (ModelTables.Labels, "L1", false, false, false),
+                    (ModelTables.Items, "1", false, true, true),
+                ],
+                "ラベルの行には印が立たず、品目の行にだけ立つ"
+            );
+    }
+
+    /// <summary>blob を運ぶ、Force なしの洗い替え</summary>
+    private static readonly SyncRefreshOptions RefreshWithBlobs = new()
+    {
+        IncludeUnboundedBinary = true,
+    };
+
+    /// <summary>
+    /// 捨てる印のある行は、Force なしの洗い替えが未送信に数えずにサーバーの内容で置き換える（サーバーに無い行は端末から消す）
+    /// </summary>
+    private static async Task DiscardReplacedByRefreshAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedPendingAsync(h, ct);
+        var serverBefore = Describe(await h.ReadServerAsync(ct));
+
+        // サーバーが知っている行：端末だけが編集して捨てる
+        await SetLocalTitleAsync(h, 1, "local-edit", ct);
+        (
+            await h.Engine.DiscardPendingChangesAsync(
+                [await PendingRowAsync(h, ModelTables.Items, "1", ct)],
+                ct
+            )
+        )
+            .Should()
+            .Be(1);
+
+        var refreshed = await h.RefreshAsync(RefreshWithBlobs, ct);
+
+        refreshed.DiscardedChanges.Should().Be(1, "捨てる印のある行の変更を捨てる");
+        (await h.ReadLocalAsync(ct))
+            .Items[1]
+            .Title.Should()
+            .Be("t1", "捨てた行はサーバーの内容になる");
+        Describe(await h.ReadServerAsync(ct)).Should().Be(serverBefore, "サーバーは変わらない");
+        await ShouldMatchServerWithNothingPendingAsync(h, "端末がサーバーの内容になる", ct);
+
+        // サーバーが知らない行：端末で作っただけのフォルダーを捨てる
+        await h.ExecuteLocalAsync(
+            "INSERT INTO model_folders (folder_id, name) VALUES (5, 'local-only')",
+            ct
+        );
+        (
+            await h.Engine.DiscardPendingChangesAsync(
+                [await PendingRowAsync(h, ModelTables.Folders, "5", ct)],
+                ct
+            )
+        )
+            .Should()
+            .Be(1);
+
+        var second = await h.RefreshAsync(RefreshWithBlobs, ct);
+
+        second.DiscardedChanges.Should().Be(1, "捨てる印のある挿入の変更を捨てる");
+        (await h.ReadLocalAsync(ct))
+            .Folders.Should()
+            .NotContainKey(5, "サーバーに無い行は端末から消える");
+        Describe(await h.ReadServerAsync(ct)).Should().Be(serverBefore, "サーバーは変わらない");
+        await ShouldMatchServerWithNothingPendingAsync(h, "端末がサーバーの内容になる", ct);
+    }
+
+    /// <summary>捨てた後に書き直した行は、Force なしの洗い替えが未送信に数えて断る</summary>
+    private static async Task DiscardRewrittenRefusesRefreshAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedPendingAsync(h, ct);
+        await SetLocalTitleAsync(h, 1, "first-edit", ct);
+        (await h.Engine.DiscardAllPendingChangesAsync(ct)).Should().Be(1);
+        await SetLocalTitleAsync(h, 1, "second-edit", ct);
+        (await PendingAsync(h, ct))
+            .Should()
+            .Equal(
+                [(ModelTables.Items, "1", false, true, false)],
+                "書き直すと捨てる印は効かなくなる（前提）"
+            );
+        var stateBefore = await h.ReadStateTablesAsync(ct);
+        var localBefore = Describe(await h.ReadLocalAsync(ct));
+
+        var thrown = await Record.ExceptionAsync(() => h.RefreshAsync(RefreshWithBlobs, ct));
+
+        var refused = thrown
+            .Should()
+            .BeOfType<SyncPendingChangesException>("書き直した行は未送信に数える")
+            .Which;
+        refused.PendingCount.Should().Be(1);
+        refused.PendingChanges.Should().Equal([new SyncPendingChange(ModelTables.Items, 1)]);
+        Describe(await h.ReadLocalAsync(ct)).Should().Be(localBefore, "端末は変わらない");
+        (await h.ReadStateTablesAsync(ct))
+            .Should()
+            .Equal(stateBefore, "断った洗い替えは行の状態の表を変えない");
+    }
+
+    /// <summary>
+    /// 捨てる印のある行があっても、印の無いほかの未送信の行で Force なしの洗い替えは断り、例外の件数は印の無い行だけを数える
+    /// </summary>
+    private static async Task DiscardDoesNotHideOtherUnsentAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedPendingAsync(h, ct);
+        await h.ExecuteLocalAsync(
+            "UPDATE model_folders SET name = 'local-folder' WHERE folder_id = 1",
+            ct
+        );
+        await SetLocalTitleAsync(h, 1, "local-item", ct);
+        (
+            await h.Engine.DiscardPendingChangesAsync(
+                [await PendingRowAsync(h, ModelTables.Items, "1", ct)],
+                ct
+            )
+        )
+            .Should()
+            .Be(1);
+        (await PendingAsync(h, ct))
+            .Should()
+            .Equal(
+                [
+                    (ModelTables.Folders, "1", false, true, false),
+                    (ModelTables.Items, "1", false, true, true),
+                ],
+                "品目にだけ捨てる印がある（前提）"
+            );
+        var stateBefore = await h.ReadStateTablesAsync(ct);
+        var localBefore = Describe(await h.ReadLocalAsync(ct));
+
+        var thrown = await Record.ExceptionAsync(() => h.RefreshAsync(RefreshWithBlobs, ct));
+
+        var refused = thrown
+            .Should()
+            .BeOfType<SyncPendingChangesException>("印の無いフォルダーの未送信がある")
+            .Which;
+        refused.PendingCount.Should().Be(1, "数えるのは印の無い行だけ");
+        refused
+            .PendingChanges.Should()
+            .Equal(
+                [new SyncPendingChange(ModelTables.Folders, 1)],
+                "表ごとの内訳にも捨てる印のある品目は入らない"
+            );
+        Describe(await h.ReadLocalAsync(ct)).Should().Be(localBefore, "端末は変わらない");
+        (await h.ReadStateTablesAsync(ct))
+            .Should()
+            .Equal(stateBefore, "断った洗い替えは行の状態の表を変えない");
+    }
+
+    /// <summary>
+    /// 塊ごとに確定する経路：<see cref="SeedDiscardedBlobWritesAsync"/> の準備に品目 10 の題名の編集を足し、未送信の全部（品目 10・
+    /// 12）を捨ててから、Force なしの blob を捨てる洗い替え（取得の大きさ 3・閾値 2・塊 2）を流す。印のある行は Force で捨てる行と
+    /// 同じに扱われ、置き換えた塊がサーバーの内容を書いて blob を空にする
+    /// </summary>
+    private static async Task DiscardReplacedByChunkedRefreshAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedDiscardedBlobWritesAsync(h, ct);
+        await SetLocalTitleAsync(h, 10, "local-edit", ct);
+        (await h.Engine.DiscardAllPendingChangesAsync(ct)).Should().Be(2, "品目 10 と 12 を捨てる");
+        var serverBefore = Describe(await h.ReadServerAsync(ct));
+        var routes = new List<TrackedSyncDownloadRoute>();
+        var engine = SmallChunks(h.CreateEngine());
+        engine.DownloadRouteObserved = routes.Add;
+
+        var result = await h.RefreshAsync(
+            new SyncRefreshOptions { BatchSize = 3, DiscardLocalUnboundedBinaries = true },
+            ct,
+            engine
+        );
+
+        routes.Should().Equal([TrackedSyncDownloadRoute.Chunked], "洗い替えは塊の道を通る");
+        result.DiscardedChanges.Should().Be(2);
+        var local = await h.ReadLocalAsync(ct);
+        local.Items[10].Title.Should().Be("t10", "捨てた品目はサーバーの内容になる");
+        local
+            .Items.OrderBy(pair => pair.Key)
+            .Select(pair => pair.Key + "=" + pair.Value.PayloadHex)
+            .Should()
+            .Equal(
+                ["10=", "11=", "12=", "13="],
+                "blob を捨てる洗い替えの後、捨てた行も含めてどの品目の blob も空"
+            );
+        DescribeRows(local)
+            .Should()
+            .Be(DescribeRows(await h.ReadServerAsync(ct)), "blob の外の内容は端末とサーバーで同じ");
+        Describe(await h.ReadServerAsync(ct)).Should().Be(serverBefore, "サーバーは変わらない");
+        (await h.Engine.GetPendingChangesAsync(ct)).Should().BeEmpty("未送信は残らない");
+    }
+
+    /// <summary>
+    /// 降ろす行の上限：フォルダー 1 を降ろして端末で編集し、捨ててから、サーバーにフォルダー 2〜4 を足し、取得の大きさ 1・上限 2
+    /// の Force なしの洗い替えを流す。印のある行は上限の未送信に数えないので、断らずに 4 行が入る
+    /// </summary>
+    private static async Task DiscardNotCountedForRowLimitAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await h.Server.Folders.InsertAsync(new ModelFolderEntity { FolderId = 1, Name = "f1" }, ct);
+        await h.SyncAsync(null, ct);
+        await h.ExecuteLocalAsync(
+            "UPDATE model_folders SET name = 'local-edit' WHERE folder_id = 1",
+            ct
+        );
+        (await h.Engine.DiscardAllPendingChangesAsync(ct)).Should().Be(1);
+
+        foreach (var id in new[] { 2, 3, 4 })
+        {
+            await h.Server.Folders.InsertAsync(
+                new ModelFolderEntity { FolderId = id, Name = $"f{id}" },
+                ct
+            );
+        }
+
+        var serverBefore = Describe(await h.ReadServerAsync(ct));
+
+        var thrown = await Record.ExceptionAsync(async () =>
+        {
+            var result = await h.RefreshAsync(
+                new SyncRefreshOptions
+                {
+                    BatchSize = 1,
+                    DownloadRowLimit = 2,
+                    DiscardLocalUnboundedBinaries = true,
+                },
+                ct
+            );
+            result.DiscardedChanges.Should().Be(1, "捨てる印のある行の変更を捨てる");
+        });
+
+        thrown.Should().BeNull("捨てる印のある行は上限の未送信に数えない");
+        var local = await h.ReadLocalAsync(ct);
+        local.Folders.Keys.Order().Should().Equal([1, 2, 3, 4], "サーバーの行が全部入る");
+        local.Folders[1].Name.Should().Be("f1", "捨てた行はサーバーの内容になる");
+        Describe(await h.ReadServerAsync(ct)).Should().Be(serverBefore, "サーバーは変わらない");
+        await ShouldMatchServerWithNothingPendingAsync(h, "端末がサーバーの内容になる", ct);
+    }
+
+    /// <summary>
+    /// 捨てる印のある行を Force なしの洗い替えの取得の途中に書き直すと、その行は未送信に数え、上限を超えた洗い替えを断る
+    /// </summary>
+    private static async Task DiscardRewrittenDuringFetchCountedForRowLimitAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await h.Server.Folders.InsertAsync(new ModelFolderEntity { FolderId = 1, Name = "f1" }, ct);
+        await h.SyncAsync(null, ct);
+        await h.ExecuteLocalAsync(
+            "UPDATE model_folders SET name = 'local-edit' WHERE folder_id = 1",
+            ct
+        );
+        (await h.Engine.DiscardAllPendingChangesAsync(ct)).Should().Be(1);
+
+        foreach (var id in new[] { 2, 3, 4 })
+        {
+            await h.Server.Folders.InsertAsync(
+                new ModelFolderEntity { FolderId = id, Name = $"f{id}" },
+                ct
+            );
+        }
+
+        const string anchorTable = "quicker_sync_table|";
+        var stateBefore = await h.ReadStateTablesAsync(ct);
+        var serverBefore = Describe(await h.ReadServerAsync(ct));
+        var sequenceSql =
+            $"SELECT change_seq FROM {SyncLocalTracking.RowTableName} "
+            + "WHERE table_name = 'model_folders' AND \"key\" = 1 AND dirty = 1";
+        var sequenceBefore = await h.ScalarAsync(sequenceSql, ct);
+        sequenceBefore.Should().NotBeNull("前準備の後のフォルダー 1 は未送信");
+
+        // 最初のページ（1 行）を取得した後・適用の前に、捨てる印のあるフォルダー 1 を端末でもう一度書く（記録つき。洗い替えの
+        // 間は端末の割り込みを起こさない仕掛けなので、書き手はサーバーの他者として仕掛ける。書くのは端末の DB）
+        var wrote = false;
+        h.Faults.ArmInterrupt(
+            ModelActor.Device1,
+            ModelInterruptPoint.AfterServerFetchBeforeApply,
+            ModelActor.Server,
+            async () =>
+            {
+                await h.ExecuteLocalAsync(
+                    "UPDATE model_folders SET name = 'rewritten' WHERE folder_id = 1",
+                    ct
+                );
+                wrote = true;
+            }
+        );
+
+        var thrown = await Record.ExceptionAsync(() =>
+            h.RefreshAsync(
+                new SyncRefreshOptions
+                {
+                    BatchSize = 1,
+                    DownloadRowLimit = 2,
+                    DiscardLocalUnboundedBinaries = true,
+                },
+                ct
+            )
+        );
+
+        wrote.Should().BeTrue("取得の途中の端末の書き込みが流れた");
+        h.Faults.InterruptTimedOut.Should().BeNull("取得の途中の端末の書き込みはロックを待たない");
+        thrown
+            .Should()
+            .BeOfType<SyncDownloadTooLargeException>(
+                "書き直した行は捨てる印が効かず、上限を超えた"
+            );
+        var tooLarge = (SyncDownloadTooLargeException)thrown!;
+        tooLarge.RowLimit.Should().Be(2);
+        tooLarge
+            .PendingChanges.Should()
+            .Equal([new SyncPendingChange("model_folders", 1)], "数えるのは書き直した 1 行");
+
+        var local = await h.ReadLocalAsync(ct);
+        local.Folders.Keys.Order().Should().Equal([1], "サーバーの新しい行は適用されない");
+        local.Folders[1].Name.Should().Be("rewritten", "書き直した内容のまま残る");
+        var sequenceAfter = await h.ScalarAsync(sequenceSql, ct);
+        sequenceAfter.Should().NotBeNull("書き直した行は未送信のまま");
+        sequenceAfter.Should().NotBe(sequenceBefore, "書き直しで連番が進んだ");
+        (await PendingAsync(h, ct))
+            .Should()
+            .Equal([(ModelTables.Folders, "1", false, true, false)], "捨てる印は効かない");
+        Describe(await h.ReadServerAsync(ct)).Should().Be(serverBefore, "洗い替えは何も送らない");
+        (await h.ReadStateTablesAsync(ct))
+            .Where(line => line.StartsWith(anchorTable, StringComparison.Ordinal))
+            .Should()
+            .Equal(
+                stateBefore.Where(line => line.StartsWith(anchorTable, StringComparison.Ordinal)),
+                "再開点は進まない"
+            );
     }
 
     /// <summary>例外とその内側の例外の並び</summary>
