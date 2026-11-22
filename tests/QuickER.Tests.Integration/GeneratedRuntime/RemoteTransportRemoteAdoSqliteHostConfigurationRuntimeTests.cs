@@ -148,8 +148,11 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
         public override bool CanSeek => false;
     }
 
-    /// <summary>要求を HTTP/2 で送る（HttpClient は自分で作る要求の版を既定にしないので、ここで指定する）</summary>
-    private sealed class Http2Handler() : DelegatingHandler(new SocketsHttpHandler())
+    /// <summary>
+    /// どの要求の版も HTTP/2 に書き換えて送る（要求を作った側の版の設定に依らない。HttpClient の設定だけで HTTP/2 にする構成は
+    /// <see cref="Protocol.Http2ViaClientDefaults"/>）
+    /// </summary>
+    private sealed class Http2Handler(HttpMessageHandler inner) : DelegatingHandler(inner)
     {
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -241,6 +244,23 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
             throw new NotSupportedException();
     }
 
+    /// <summary>生成クライアントの要求の版の作り方（サーバーは HTTP/1.1 以外なら HTTP/2 だけを受ける）</summary>
+    public enum Protocol
+    {
+        /// <summary>既定の HttpClient（HTTP/1.1）</summary>
+        Http11,
+
+        /// <summary>どの要求の版も書き換えるハンドラー（<see cref="Http2Handler"/>）で HTTP/2 にする</summary>
+        Http2ViaHandler,
+
+        /// <summary>
+        /// HttpClient の <see cref="HttpClient.DefaultRequestVersion"/> と <see cref="HttpClient.DefaultVersionPolicy"/> だけで
+        /// HTTP/2 にする（利用者が HttpClient ファクトリ版の登録で設定する形。生成クライアントが自分で作る要求も、この設定に
+        /// 従わなければ HTTP/2 で届かない）
+        /// </summary>
+        Http2ViaClientDefaults,
+    }
+
     /// <summary>ホストの構成</summary>
     private sealed record HostOptions
     {
@@ -254,7 +274,10 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
 
         public Action<HttpContext, Exception>? OnServerError { get; init; }
 
-        public bool Http2 { get; init; }
+        public Protocol Protocol { get; init; } = Protocol.Http11;
+
+        /// <summary>生成クライアントのハンドラーの 100 Continue の待ち時間（null は既定の 1 秒）</summary>
+        public TimeSpan? ExpectContinueTimeout { get; init; }
     }
 
     /// <summary>起動したホストとクライアント</summary>
@@ -271,6 +294,9 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
         public required ConcurrentQueue<Exception> Hooks { get; init; }
 
         public required SemaphoreSlim Completed { get; init; }
+
+        /// <summary>サーバーに届いた要求（メソッド・パス・<c>HttpContext.Request.Protocol</c>）を届いた順に</summary>
+        public required ConcurrentQueue<(string Method, string Path, string Protocol)> Requests { get; init; }
 
         public IDocumentRemoteRepository Documents =>
             Client.GetRequiredService<IDocumentRemoteRepository>();
@@ -297,6 +323,7 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
         var log = new RecordingLoggerProvider();
         var hooks = new ConcurrentQueue<Exception>();
         var completed = new SemaphoreSlim(0);
+        var requests = new ConcurrentQueue<(string Method, string Path, string Protocol)>();
 
         await _db.ApplyDdlAsync(BinaryFixtureDefinition.Build(), Ct);
 
@@ -317,10 +344,18 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
             },
             app =>
             {
-                // 要求を処理し終えたことを、ほかのミドルウェアより外側で数える
+                // 要求を処理し終えたことを、ほかのミドルウェアより外側で数える（届いた要求の版もここで記録する）
                 app.Use(
                     async (context, next) =>
                     {
+                        requests.Enqueue(
+                            (
+                                context.Request.Method,
+                                context.Request.Path.Value ?? "",
+                                context.Request.Protocol
+                            )
+                        );
+
                         try
                         {
                             await next(context);
@@ -359,7 +394,7 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
                 builder.Logging.AddProvider(log);
                 builder.Logging.SetMinimumLevel(LogLevel.Debug);
 
-                if (options.Http2)
+                if (options.Protocol != Protocol.Http11)
                 {
                     builder.WebHost.ConfigureKestrel(kestrel =>
                         kestrel.ConfigureEndpointDefaults(listen =>
@@ -371,15 +406,37 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
         );
 
         var baseAddress = server.BaseAddress(RemotePaths.DefaultPrefix);
+
+        // スコープごとに呼ばれるので、ハンドラーも呼び出しごとに作る（HttpClient の破棄がハンドラーを破棄する）
+        HttpClient CreateClient()
+        {
+            var sockets = new SocketsHttpHandler();
+
+            if (options.ExpectContinueTimeout is { } expectContinueTimeout)
+            {
+                sockets.Expect100ContinueTimeout = expectContinueTimeout;
+            }
+
+            var clientBaseAddress = new Uri(baseAddress + "/");
+
+            return options.Protocol switch
+            {
+                Protocol.Http2ViaHandler => new HttpClient(new Http2Handler(sockets))
+                {
+                    BaseAddress = clientBaseAddress,
+                },
+                Protocol.Http2ViaClientDefaults => new HttpClient(sockets)
+                {
+                    BaseAddress = clientBaseAddress,
+                    DefaultRequestVersion = HttpVersion.Version20,
+                    DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact,
+                },
+                _ => new HttpClient(sockets) { BaseAddress = clientBaseAddress },
+            };
+        }
+
         var client = new ServiceCollection()
-            .AddGeneratedHttpRemoteRepositories(_ =>
-                options.Http2
-                    ? new HttpClient(new Http2Handler())
-                    {
-                        BaseAddress = new Uri(baseAddress + "/"),
-                    }
-                    : new HttpClient { BaseAddress = new Uri(baseAddress + "/") }
-            )
+            .AddGeneratedHttpRemoteRepositories(_ => CreateClient())
             .BuildServiceProvider();
 
         return new Host
@@ -390,6 +447,7 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
             Log = log,
             Hooks = hooks,
             Completed = completed,
+            Requests = requests,
         };
     }
 
@@ -642,10 +700,23 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
         (await ReadPayloadAsync(host)).Should().Equal(data);
     }
 
-    [Fact(DisplayName = "[RemoteHost] HTTP/2: blob の読み書きが往復する")]
-    public async Task Http2_BlobRoundTrips()
+    /// <summary>
+    /// HTTP/2 の構成で、JSON の要求（挿入）・blob の書き込み・blob の読み取りがどれも HTTP/2 でサーバーへ届き、blob が往復する。
+    /// </summary>
+    /// <remarks>
+    /// 行は要求の版の作り方。<see cref="Protocol.Http2ViaClientDefaults"/> の行は HttpClient の設定だけで HTTP/2 にするので、
+    /// 生成クライアントが自分で作る要求（blob の書き込みの PUT）がその設定を写さないと、その要求だけが HTTP/1.1 で出て、
+    /// HTTP/2 だけを受けるサーバーに届かないか、HTTP/1.1 として記録される。
+    /// <see cref="Protocol.Http2ViaHandler"/> の行はどの要求の版もハンドラーが書き換えるので、作り方に依らず HTTP/2 になる。
+    /// </remarks>
+    [Theory(
+        DisplayName = "[RemoteHost] HTTP/2: JSON の要求と blob の読み書きがどれも HTTP/2 で届き、blob が往復する"
+    )]
+    [InlineData(Protocol.Http2ViaHandler)]
+    [InlineData(Protocol.Http2ViaClientDefaults)]
+    public async Task Http2_BlobRoundTrips(Protocol protocol)
     {
-        await using var host = await StartAsync(new HostOptions { Http2 = true });
+        await using var host = await StartAsync(new HostOptions { Protocol = protocol });
         await InsertDocumentAsync(host, [1, 2, 3]);
 
         (
@@ -658,6 +729,23 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
             .Should()
             .BeTrue();
         (await ReadPayloadAsync(host)).Should().Equal([9, 8, 7]);
+
+        foreach (var request in host.Requests)
+        {
+            output.WriteLine($"{request.Method} {request.Path} {request.Protocol}");
+        }
+
+        host.Requests.Select(request => request.Method)
+            .Should()
+            .Contain(
+                ["POST", "PUT", "GET"],
+                "JSON の要求・blob の書き込み・blob の読み取りがサーバーへ届いた"
+            );
+        host.Requests.Should()
+            .OnlyContain(
+                request => request.Protocol == "HTTP/2",
+                "どの要求も HttpClient の版の設定どおり HTTP/2 で届く"
+            );
     }
 
     /// <summary>HTTP/2 で本文の途中にクライアントが取り消した要求は、分類の前に要求のトークンが立っていれば障害として記録しない。</summary>
@@ -677,7 +765,7 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
         await using var host = await StartAsync(
             new HostOptions
             {
-                Http2 = true,
+                Protocol = Protocol.Http2ViaHandler,
                 Middleware = app =>
                     app.Use(
                         (context, next) =>
@@ -842,6 +930,64 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
         using var response = await host.Raw.SendAsync(request, Ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
+        (await ReadPayloadAsync(host)).Should().Equal([1, 2, 3]);
+    }
+
+    /// <summary>
+    /// 生成クライアントの、上限を超える宣言長の blob の書き込みは、要求の版の作り方に依らず 413 の
+    /// <see cref="RemoteRepositoryException"/> になり、サーバーの blob を変えない。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 生成クライアントのアップロードは <c>Expect: 100-continue</c> を付け、サーバーがヘッダーを受け付けるまで本文を送らない。
+    /// HTTP/1.1 では、本文の送信中にサーバーが接続を閉じると 413 がリセットで失われるのを、これが防ぐ。行は要求の版の作り方で、
+    /// HTTP/2（ハンドラーで書き換える形と HttpClient の設定だけの形）でも同じ 413 になることを見る（各行の PUT が
+    /// その版で届いたことも記録で見る）。
+    /// </para>
+    /// <para>
+    /// 100 Continue の待ち時間はハンドラーの設定で、既定の 1 秒を過ぎると本文が送られて同じ競合が戻り得る。全件の並列実行で
+    /// サーバーの応答が遅れても結果が変わらないよう、このテストのクライアントだけ 30 秒にする（BinaryColumnRemoteAdoSqliteRuntimeTests
+    /// の 9b と同じ理由。生成クライアントの既定は変えない）。
+    /// </para>
+    /// </remarks>
+    [Theory(
+        DisplayName = "[RemoteHost] 上限: 生成クライアントの上限を超える blob の書き込みは、要求の版の作り方に依らず 413 の RemoteRepositoryException になり、blob を変えない"
+    )]
+    [InlineData(Protocol.Http11)]
+    [InlineData(Protocol.Http2ViaHandler)]
+    [InlineData(Protocol.Http2ViaClientDefaults)]
+    public async Task OversizedUpload_IsRefusedWith413(Protocol protocol)
+    {
+        await using var host = await StartAsync(
+            new HostOptions
+            {
+                Protocol = protocol,
+                Group = group => group.WithMetadata(new SizeLimit(1_000)),
+                ExpectContinueTimeout = TimeSpan.FromSeconds(30),
+            }
+        );
+        await InsertDocumentAsync(host, [1, 2, 3]);
+
+        var act = async () =>
+            await host.Documents.WritePayloadAsync(
+                1,
+                new MemoryStream(new byte[2_000]),
+                cancellationToken: Ct
+            );
+
+        var remote = (await act.Should().ThrowAsync<RemoteRepositoryException>()).Which;
+        await host.WaitCompletedAsync();
+        Describe(host, $"oversized upload ({protocol})", remote, null);
+
+        remote.StatusCode.Should().Be(413);
+        host.Requests.Where(request => request.Method == "PUT")
+            .Should()
+            .ContainSingle("上限を超える書き込みの PUT がサーバーへ届いた")
+            .Which.Protocol.Should()
+            .Be(
+                protocol == Protocol.Http11 ? "HTTP/1.1" : "HTTP/2",
+                "PUT はその行の要求の版で届く"
+            );
         (await ReadPayloadAsync(host)).Should().Equal([1, 2, 3]);
     }
 }

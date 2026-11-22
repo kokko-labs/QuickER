@@ -47,6 +47,10 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **The sync confirmation for dropping a unique constraint that a foreign key relies on now matches its list** — The note said "the unique constraint(s) below" but listed foreign keys; it now introduces the list as foreign keys. A foreign key relying on two dropped unique constraints is listed once, not twice.
 - **On MySQL, a sync that rebuilds two or more unique constraints on columns a foreign key references now warns and re-adds foreign keys to match the plan after one rebuild is called off** — The sync confirmation kept warnings decided before the rebuild was called off, and foreign keys to re-add were placed after new foreign keys.
 
+#### Generated code
+
+- **The blob uploads of the generated HTTP client now follow the HttpClient's `DefaultRequestVersion` and `DefaultVersionPolicy`** — until now, `Write{Column}Async` and the two-way sync's blob uploads went out as HTTP/1.1 even when the HttpClient was set to HTTP/2. Nothing changes unless HTTP/2 is configured.
+
 ## [0.4.0] - 2026-11-16
 
 Highlights of this release:

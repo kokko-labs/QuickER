@@ -10360,7 +10360,14 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         content.Headers.ContentLength = payloadLength;
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
-        using var request = new HttpRequestMessage(HttpMethod.Put, requestUri) { Content = content };
+        using var request = new HttpRequestMessage(HttpMethod.Put, requestUri)
+        {
+            Content = content,
+            // Follow the client's protocol settings like the requests HttpClient builds itself (GetAsync, DeleteAsync,
+            // PostAsJsonAsync); a request built here would otherwise always go out as HTTP/1.1
+            Version = _httpClient.DefaultRequestVersion,
+            VersionPolicy = _httpClient.DefaultVersionPolicy,
+        };
 
         // Hold the body back until the server has accepted the headers, so a declared length over the limit is
         // answered with 413 rather than lost to the reset of a connection the server closed mid-upload
