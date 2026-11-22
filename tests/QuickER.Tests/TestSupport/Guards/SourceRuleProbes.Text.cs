@@ -138,7 +138,10 @@ internal static partial class SourceRuleProbes
             // || の 2 つ目以降の項の out の宣言と、条件のどこかのパターンの変数（単独の is not { } を含む）を if の後ろで読む
             // 早く抜ける if を、continue・break・return;・throw・本体の最後の跳びで拾い、1 つ目の項の out の宣言・値を返す return・
             // 後ろで読まない・肯定形の && の then・項ごとの if・初期化子つきの変数の null の判定・ラムダの中の宣言・ブロックでない
-            // 親は拾わない
+            // 親は拾わない。
+            // 初期化子なしに宣言した変数を if / else if の鎖の枝で代入し、最後の else の跳び（continue・throw・out の代入・else if の
+            // 段数 2）で抜けて鎖の後ろで読む形も拾い、初期化子つきの変数・鎖の後ろで読まない・最後の枝が値を返す return・宣言と if の
+            // 間で代入した変数・跳びで終わる枝だけの代入・ラムダの中の代入・最後の else の無い鎖・入れ子の if の跳びの後の代入は拾わない
             new SourceRuleProbe(
                 "mutation-safe-mode-jump-guards-forms",
                 "mutation-safe-mode-jump-guards",
@@ -296,13 +299,213 @@ internal static partial class SourceRuleProbes
                                     if (key < 0 || !map.TryGetValue(key, out var value))
                                         return;
                             }
+
+                            public static void BranchAssigned(int[] items, int limit, bool keep)
+                            {
+                                foreach (var item in items)
+                                {
+                                    IEnumerable<int> chosen;
+                                    IEnumerable<int> rest;
+
+                                    if (limit >= 0)
+                                    {
+                                        chosen = items.Where(x => x > item && x < limit);
+                                        rest = items.Where(x => x > item && x <= limit);
+                                    }
+                                    else if (!keep)
+                                    {
+                                        chosen = items.Where(x => x > item);
+                                        rest = items.Where(x => x > item);
+                                    }
+                                    else
+                                    {
+                                        continue;
+                                    }
+
+                                    Console.WriteLine(chosen.Count() + rest.Count());
+                                }
+                            }
+
+                            public static string BranchAssignedThrows(Dictionary<int, string> map, int key)
+                            {
+                                string value;
+
+                                if (key > 0)
+                                {
+                                    value = map[key];
+                                }
+                                else
+                                {
+                                    throw new InvalidOperationException("missing");
+                                }
+
+                                return value;
+                            }
+
+                            public static void BranchAssignedByOut(Dictionary<int, string> map, int key, bool flag)
+                            {
+                                string value;
+
+                                if (flag)
+                                {
+                                    map.TryGetValue(key, out value);
+                                }
+                                else
+                                    return;
+
+                                Console.WriteLine(value);
+                            }
+
+                            public static void BranchInitialized(int key, bool flag)
+                            {
+                                var value = 0;
+
+                                if (flag)
+                                {
+                                    value = key;
+                                }
+                                else
+                                {
+                                    return;
+                                }
+
+                                Console.WriteLine(value);
+                            }
+
+                            public static void BranchNotReadAfter(int key, bool flag)
+                            {
+                                int value;
+
+                                if (flag)
+                                {
+                                    value = key;
+                                    Console.WriteLine(value);
+                                }
+                                else
+                                {
+                                    return;
+                                }
+
+                                Console.WriteLine(key);
+                            }
+
+                            public static int BranchValueReturn(int key, bool flag)
+                            {
+                                int value;
+
+                                if (flag)
+                                {
+                                    value = key;
+                                }
+                                else
+                                {
+                                    return -1;
+                                }
+
+                                return value;
+                            }
+
+                            public static void BranchAssignedBefore(int key, bool flag)
+                            {
+                                int value;
+                                value = key;
+
+                                if (flag)
+                                {
+                                    value = key + 1;
+                                }
+                                else
+                                {
+                                    return;
+                                }
+
+                                Console.WriteLine(value);
+                            }
+
+                            public static void BranchAssignedOnlyInJump(int key, bool flag)
+                            {
+                                int value;
+
+                                if (flag)
+                                {
+                                    return;
+                                }
+                                else
+                                {
+                                    value = key;
+                                    return;
+                                }
+                            }
+
+                            public static void BranchAssignedInLambda(int key, bool flag)
+                            {
+                                int value = 0;
+                                int other;
+                                Action set = () => { };
+
+                                if (flag)
+                                {
+                                    set = () => other = key;
+                                }
+                                else
+                                {
+                                    return;
+                                }
+
+                                set();
+                                Console.WriteLine(value + other);
+                            }
+
+                            public static void BranchWithoutElse(int key, bool flag)
+                            {
+                                int value;
+
+                                if (flag)
+                                {
+                                    value = key;
+                                }
+                                else if (key > 0)
+                                {
+                                    value = -key;
+                                }
+                                else
+                                {
+                                    value = 0;
+                                }
+
+                                Console.WriteLine(value);
+                            }
+
+                            public static void JumpInsideNested(int key, bool flag)
+                            {
+                                int value;
+
+                                if (flag)
+                                {
+                                    if (key < 0)
+                                    {
+                                        return;
+                                    }
+
+                                    value = key;
+                                }
+                                else
+                                {
+                                    value = 0;
+                                }
+
+                                Console.WriteLine(value);
+                            }
                         }
                         """,
                         "OutSecond",
                         "PatternSecond",
                         "Throws",
                         "BreaksAfterWork",
-                        "PatternOnly"
+                        "PatternOnly",
+                        "BranchAssigned",
+                        "BranchAssignedThrows",
+                        "BranchAssignedByOut"
                     ),
                 ]
             ),

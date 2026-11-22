@@ -9,7 +9,10 @@ namespace QuickER.Tests.TestSupport.Guards;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 拾うのは if 文で、次の 3 つがそろうもの。何かはそれを含むメソッドの名前。
+/// 拾うのは、同じブロックの中の if 文で、次の 2 つの形のどちらかに当たるもの。何かはそれを含むメソッドの名前。
+/// </para>
+/// <para>
+/// 形 1（条件で宣言する変数）：次の 3 つがそろうもの。
 /// </para>
 /// <list type="number">
 /// <item>条件で変数を宣言する：最上位の <c>||</c> の 2 つ目以降の項の <c>out var x</c>・<c>out T x</c>、または条件のどこかの
@@ -24,8 +27,22 @@ namespace QuickER.Tests.TestSupport.Guards;
 /// 1 つ目の項の out の宣言は呼び出しが必ず評価されるので数えない。値を返す <c>return x;</c> は Stryker が消さないので数えない。
 /// </para>
 /// <para>
-/// 読みの限界：宣言だけして if / else の枝で代入し、最後の枝の跳びで抜ける形（変数宣言に初期化子が無い形）は拾わない。
-/// 変数の読みは名前の一致で見る（同じ名前のラムダの引数も読みに数える）。
+/// 形 2（枝で代入する変数）：if / else if の鎖の先頭の if で、次の 3 つがそろうもの。
+/// </para>
+/// <list type="number">
+/// <item>鎖の最後の枝が else で、その本体（ブロックなら最後の文）が変異テストが消す跳び</item>
+/// <item>同じブロックの if より前で初期化子なしに宣言し、宣言と if の間で代入しないローカル変数を、鎖の跳びで終わらない枝で
+/// 代入する（単純な代入 <c>x = …</c> か <c>out x</c> の引数。ラムダの中の代入は数えない）</item>
+/// <item>その変数を、同じブロックの if より後ろの文で読む</item>
+/// </list>
+/// <para>
+/// 最後の else の跳びが消えると、どの枝も代入しないまま後ろへ進むので、変数が確実に代入されず（CS0165）、形 1 と同じく
+/// Stryker はそのメソッドの変異を全部外す（<c>RefusableChangeNaming.Constraints</c> で 62 件のうち 56 件が外れた）。
+/// </para>
+/// <para>
+/// 読みの限界：変数の読みと代入は名前の一致で見る（同じ名前のラムダの引数も読みに数える）。宣言と if の間の代入は、
+/// 確実に代入するかを問わず代入とみなして外す（条件つきの代入の後の鎖は拾わない）。鎖の外側のブロックへ跳ぶ形
+/// （跳びで終わる枝の中の入れ子の if の跳び）と、鎖の後ろの別のブロックの読みは見ない。
 /// </para>
 /// </remarks>
 internal static class SafeModeJumpGuards
@@ -35,32 +52,16 @@ internal static class SafeModeJumpGuards
     {
         if (
             node is not IfStatementSyntax ifStatement
-            || !EndsWithRemovableJump(ifStatement.Statement)
             || ifStatement.Parent is not BlockSyntax block
         )
         {
             return null;
         }
 
-        var operands = OrOperands(ifStatement.Condition);
-        var declared = operands
-            .Skip(1)
-            .SelectMany(OutDeclaredNames)
-            .Concat(operands.SelectMany(PatternDeclaredNames))
-            .ToHashSet(StringComparer.Ordinal);
-
-        if (declared.Count == 0)
-        {
-            return null;
-        }
-
-        var following = block.Statements.SkipWhile(statement => statement != ifStatement).Skip(1);
-
-        var readAfter = following
-            .SelectMany(statement => statement.DescendantNodes().OfType<IdentifierNameSyntax>())
-            .Any(name => declared.Contains(name.Identifier.ValueText));
-
-        if (!readAfter)
+        if (
+            !DeclaresInConditionAndReadsAfter(ifStatement, block)
+            && !AssignsInBranchesAndReadsAfter(ifStatement, block)
+        )
         {
             return null;
         }
@@ -75,6 +76,121 @@ internal static class SafeModeJumpGuards
         node is IfStatementSyntax ifStatement && EndsWithRemovableJump(ifStatement.Statement)
             ? "跳びで終わる if 文"
             : null;
+
+    /// <summary>形 1：本体が跳びで終わり、条件で宣言した変数を if の後ろで読むか</summary>
+    private static bool DeclaresInConditionAndReadsAfter(
+        IfStatementSyntax ifStatement,
+        BlockSyntax block
+    )
+    {
+        if (!EndsWithRemovableJump(ifStatement.Statement))
+        {
+            return false;
+        }
+
+        var operands = OrOperands(ifStatement.Condition);
+        var declared = operands
+            .Skip(1)
+            .SelectMany(OutDeclaredNames)
+            .Concat(operands.SelectMany(PatternDeclaredNames))
+            .ToHashSet(StringComparer.Ordinal);
+
+        return declared.Count > 0 && ReadsAfter(ifStatement, block, declared);
+    }
+
+    /// <summary>
+    /// 形 2：if / else if の鎖の最後の else が跳びで終わり、if より前で初期化子なしに宣言した変数を跳びで終わらない枝で代入し、
+    /// if の後ろで読むか
+    /// </summary>
+    private static bool AssignsInBranchesAndReadsAfter(
+        IfStatementSyntax ifStatement,
+        BlockSyntax block
+    )
+    {
+        var branches = new List<StatementSyntax>();
+        var current = ifStatement;
+
+        while (true)
+        {
+            branches.Add(current.Statement);
+
+            if (current.Else is null)
+            {
+                return false;
+            }
+
+            if (current.Else.Statement is IfStatementSyntax next)
+            {
+                current = next;
+                continue;
+            }
+
+            if (!EndsWithRemovableJump(current.Else.Statement))
+            {
+                return false;
+            }
+
+            break;
+        }
+
+        var before = block.Statements.TakeWhile(statement => statement != ifStatement).ToList();
+        var unassigned = before
+            .OfType<LocalDeclarationStatementSyntax>()
+            .SelectMany(declaration => declaration.Declaration.Variables)
+            .Where(variable => variable.Initializer is null)
+            .Select(variable => variable.Identifier.ValueText)
+            .ToHashSet(StringComparer.Ordinal);
+
+        unassigned.ExceptWith(before.SelectMany(AssignedNames));
+
+        var assignedInBranches = branches
+            .Where(branch => !EndsWithRemovableJump(branch))
+            .SelectMany(AssignedNames)
+            .Where(unassigned.Contains)
+            .ToHashSet(StringComparer.Ordinal);
+
+        return assignedInBranches.Count > 0 && ReadsAfter(ifStatement, block, assignedInBranches);
+    }
+
+    /// <summary>名前のどれかを、同じブロックの if より後ろの文で読むか（名前の一致で見る）</summary>
+    private static bool ReadsAfter(
+        IfStatementSyntax ifStatement,
+        BlockSyntax block,
+        HashSet<string> names
+    ) =>
+        block
+            .Statements.SkipWhile(statement => statement != ifStatement)
+            .Skip(1)
+            .SelectMany(statement => statement.DescendantNodes().OfType<IdentifierNameSyntax>())
+            .Any(name => names.Contains(name.Identifier.ValueText));
+
+    /// <summary>節の中で代入する変数の名前（単純な代入の左辺と out の引数。ラムダの中は除く）</summary>
+    private static IEnumerable<string> AssignedNames(SyntaxNode node)
+    {
+        var nodes = node.DescendantNodesAndSelf(descendIntoChildren: child =>
+            child is not AnonymousFunctionExpressionSyntax
+        );
+
+        foreach (var child in nodes)
+        {
+            if (
+                child is AssignmentExpressionSyntax assignment
+                && assignment.IsKind(SyntaxKind.SimpleAssignmentExpression)
+                && assignment.Left is IdentifierNameSyntax left
+            )
+            {
+                yield return left.Identifier.ValueText;
+            }
+            else if (
+                child is ArgumentSyntax argument
+                && argument.RefKindKeyword.IsKind(SyntaxKind.OutKeyword)
+                && argument.Expression is IdentifierNameSyntax target
+            )
+            {
+                yield return target.Identifier.ValueText;
+            }
+        }
+    }
 
     /// <summary>文（ブロックなら最後の文）が変異テストの消す跳びか</summary>
     private static bool EndsWithRemovableJump(StatementSyntax statement)
