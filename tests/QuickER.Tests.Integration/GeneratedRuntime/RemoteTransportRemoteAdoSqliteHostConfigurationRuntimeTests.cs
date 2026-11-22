@@ -296,7 +296,11 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
         public required SemaphoreSlim Completed { get; init; }
 
         /// <summary>サーバーに届いた要求（メソッド・パス・<c>HttpContext.Request.Protocol</c>）を届いた順に</summary>
-        public required ConcurrentQueue<(string Method, string Path, string Protocol)> Requests { get; init; }
+        public required ConcurrentQueue<(
+            string Method,
+            string Path,
+            string Protocol
+        )> Requests { get; init; }
 
         public IDocumentRemoteRepository Documents =>
             Client.GetRequiredService<IDocumentRemoteRepository>();
