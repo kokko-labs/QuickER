@@ -193,6 +193,11 @@ JSON エンベロープ（POST+Base64）とは意図的に別形式の、第 2 �
   - Expect があれば Kestrel は本文を読み始めるまで 100 Continue を送らず、HttpClient は 1024 バイトを超える本文を最終応答の前に送らずに接続を閉じる。
   - 待ち時間はハンドラーの `Expect100ContinueTimeout`（既定 1 秒・生成側では変えない。利用者は HttpClient ファクトリ版の登録で変えられる）で、過ぎると本文が送られて同じ競合が戻り得る。
   - JSON エンベロープの要求には付けない（毎回 1 往復増えるのに対し、30MB を超えるエンベロープは想定外）。
+- アップロードの要求は生成クライアントが自分で作る（`new HttpRequestMessage`）ので、HttpClient の `DefaultRequestVersion` と `DefaultVersionPolicy` を要求の `Version` と `VersionPolicy` へ写す。HttpClient が自分で作る要求（JSON の `PostAsJsonAsync`・blob の読み取りと削除の `GetAsync`・`DeleteAsync`）は元からこの設定に従う。
+  - 写さないと、利用者が HttpClient ファクトリ版の登録で HTTP/2 にしても、blob のアップロード（`Write{列}Async` と双方向同期の blob のアップロード）だけが HTTP/1.1 で出る（`HttpRequestMessage.Version` の既定は 1.1）。
+  - 既定の HttpClient（1.1・`RequestVersionOrLower`）では要求の版が写す前と同じなので、HTTP/2 を設定しない利用者の振る舞いは変わらない。
+  - 上限を超える宣言長の PUT は、HTTP/2 でも 413 の `RemoteRepositoryException` になる（HTTP/2 はストリームを接続と別に持つので、HTTP/1.1 の接続のリセットで最終応答が失われる形は起きない）。
+  - ガード：`RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests.Http2_BlobRoundTrips`（要求の版の作り方の行。HttpClient の設定だけで HTTP/2 にした行で、JSON の要求・PUT・GET がどれも HTTP/2 でサーバーに届くことを記録で見る）と `RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests.OversizedUpload_IsRefusedWith413`（版の作り方の全部の行で、上限超えの PUT がその版で届き、413 の `RemoteRepositoryException` になって blob を変えない）。
 - クライアント（`Http{Entity}RemoteRepository`）は `ResponseHeadersRead`＋`CopyToAsync` で読み、Content-Length 付きの専用の本文 `ExactLengthContent`（`HttpRemoteRepositoryCore` の private な入れ子）で書く。非シークの Stream は送信前に `ArgumentException` で検証する。
 - アップロードも Stream を `WithExactLength` 越しに読む。直結と同じ長さの契約で、違えば `ArgumentException`（ParamName=length）。HttpClient は送信中の `ArgumentException` を包まずにそのまま出す（包むのは `InvalidOperationException` と `IOException`）ので、取り出す処理は持たない。
 - 長すぎる Stream は、宣言長の本文を送り終える前に断る。`ExactLengthStream` は宣言長に届く読み取りを返す前に 1 バイト先を読む（サーバーは宣言長の本文を受け取れば書き込みを確定するので、送り終えてからでは遅い）。長さちょうどの Stream ではその先読みが終端の 0 を見るだけで、呼び出し側の Stream から余分なバイトを読まない。直結のエンジンも同じ包みを使う。
