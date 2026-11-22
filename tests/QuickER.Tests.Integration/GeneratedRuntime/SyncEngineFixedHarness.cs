@@ -18,7 +18,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// （<c>SyncLocalTrackingGuard</c>）で包んだ接続ファクトリ（<c>ObservedSqlConnectionFactory</c>）から <c>SqliteLocalRowStore</c> と
 /// リポジトリを作り、4 表の <c>TrackedSyncTable</c> で <c>TrackedSyncEngine</c> を組む。違いは 2 つ：接続文字列の
 /// <c>Default Timeout</c> を 1 秒にする（ロック待ちで終わる行が長く待たない）、フォルダーのリポジトリに行ごとの Save フックの口
-/// （<see cref="AfterFolderSave"/>）を持つ。
+/// （<see cref="BeforeFolderSave"/>・<see cref="AfterFolderSave"/>）を持つ。
 /// </para>
 /// <para>
 /// サーバー役は同期のモデルの SQLite の代役（<see cref="SyncModelServer"/>）。割り込みの点ごとの観測
@@ -73,6 +73,11 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
     /// <summary>フォルダーのグラフ保存の After フックで呼ぶ関数（null なら何もしない）</summary>
     public Func<ModelFolderEntity, CancellationToken, Task>? AfterFolderSave { get; set; }
 
+    /// <summary>
+    /// フォルダーのグラフ保存の Before フックで呼ぶ関数（null なら保存を続ける。false を返せばその行の保存を飛ばす）
+    /// </summary>
+    public Func<ModelFolderEntity, CancellationToken, Task<bool>>? BeforeFolderSave { get; set; }
+
     /// <summary>端末とサーバー役を作る</summary>
     public static async Task<SyncEngineFixedHarness> CreateAsync(CancellationToken ct)
     {
@@ -120,6 +125,24 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
     public TrackedSyncEngine CreateEngine() => CreateEngine(observe: null);
 
     /// <summary>
+    /// 同じ端末の DB を使い、フォルダーと品目の 2 表だけで組んだエンジンを作る（ラベルとイベントの表はトリガーで記録されるが、
+    /// このエンジンの表ではない）
+    /// </summary>
+    public TrackedSyncEngine CreateFolderAndItemEngine() =>
+        new([
+            new TrackedSyncTable<ModelFolderEntity, int>(
+                GeneratedSyncTables.ModelFolder,
+                Server.FolderSource,
+                Rows
+            ),
+            new TrackedSyncTable<ModelItemEntity, int>(
+                GeneratedSyncTables.ModelItem,
+                Server.ItemSource,
+                Rows
+            ),
+        ]);
+
+    /// <summary>
     /// 同じ端末の DB を使い、サーバーの差分ソースへの行とキーの取得を <paramref name="observe"/> が観測する（呼び出しの前と、行が
     /// 返った後に呼ぶ。投げれば取得の失敗になる）エンジンのインスタンスを作る
     /// </summary>
@@ -128,49 +151,65 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
     /// 取得の上限を答える関数（null なら差分ソースの答え＝代役は上限なし）。上限を実行の始めに固定するサーバーの形
     /// （<see cref="SyncModelServer.TakeVersion"/> の版を返すと、その後にサーバーで書かれた行はその実行の取得に入らない）を作る
     /// </param>
+    /// <param name="nonAdvancing">
+    /// 進まない差分ソースの指定（null なら使わない）。指定した表の差分ソースだけを
+    /// <see cref="NonAdvancingSyncServerSource{TEntity, TKey}"/> で包む
+    /// </param>
     public TrackedSyncEngine CreateEngine(
         Func<SyncEngineSourceCall, Task>? observe,
-        Func<Task<byte[]?>>? ceiling = null
+        Func<Task<byte[]?>>? ceiling = null,
+        NonAdvancingSource? nonAdvancing = null
     ) =>
         new([
             new TrackedSyncTable<ModelFolderEntity, int>(
                 GeneratedSyncTables.ModelFolder,
-                Observed(Server.FolderSource, ModelTables.Folders, observe, ceiling),
+                Observed(Server.FolderSource, ModelTables.Folders, observe, ceiling, nonAdvancing),
                 Rows
             ),
             new TrackedSyncTable<ModelLabelEntity, string>(
                 GeneratedSyncTables.ModelLabel,
-                Observed(Server.LabelSource, ModelTables.Labels, observe, ceiling),
+                Observed(Server.LabelSource, ModelTables.Labels, observe, ceiling, nonAdvancing),
                 Rows
             ),
             new TrackedSyncTable<ModelItemEntity, int>(
                 GeneratedSyncTables.ModelItem,
-                Observed(Server.ItemSource, ModelTables.Items, observe, ceiling),
+                Observed(Server.ItemSource, ModelTables.Items, observe, ceiling, nonAdvancing),
                 Rows
             ),
             new TrackedSyncTable<ModelEventEntity, DateTime>(
                 GeneratedSyncTables.ModelEvent,
-                Observed(Server.EventSource, ModelTables.Events, observe, ceiling),
+                Observed(Server.EventSource, ModelTables.Events, observe, ceiling, nonAdvancing),
                 Rows
             ),
         ]);
 
-    /// <summary>観測も上限の関数も無ければ差分ソースをそのまま、あれば観測の包みで返す</summary>
+    /// <summary>
+    /// 進まない差分ソースの指定がその表なら進まない包みで包み、観測も上限の関数も無ければそのまま、あれば観測の包みで返す
+    /// </summary>
     private static ISyncServerSource<TEntity, TKey> Observed<TEntity, TKey>(
         ISyncServerSource<TEntity, TKey> source,
         string table,
         Func<SyncEngineSourceCall, Task>? observe,
-        Func<Task<byte[]?>>? ceiling
+        Func<Task<byte[]?>>? ceiling,
+        NonAdvancingSource? nonAdvancing
     )
-        where TEntity : EntityBaseCore, new() =>
-        observe is null && ceiling is null
-            ? source
+        where TEntity : EntityBaseCore, new()
+    {
+        var inner =
+            nonAdvancing is not null
+            && string.Equals(nonAdvancing.Table, table, StringComparison.Ordinal)
+                ? new NonAdvancingSyncServerSource<TEntity, TKey>(source, nonAdvancing)
+                : source;
+
+        return observe is null && ceiling is null
+            ? inner
             : new ObservedSyncServerSource<TEntity, TKey>(
-                source,
+                inner,
                 table,
                 observe ?? (_ => Task.CompletedTask),
                 ceiling
             );
+    }
 
     /// <summary>同期を 1 回流す（同期中の端末の印を立てる。<paramref name="engine"/> が null なら端末のエンジン）</summary>
     public async Task<SyncResult> SyncAsync(
@@ -347,9 +386,20 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
         await Server.DisposeAsync();
     }
 
-    /// <summary>フォルダーの Save フック（After で <see cref="AfterFolderSave"/> を呼ぶ）</summary>
+    /// <summary>
+    /// フォルダーの Save フック（Before で <see cref="BeforeFolderSave"/>、After で <see cref="AfterFolderSave"/> を呼ぶ）
+    /// </summary>
     private sealed class FolderHook(SyncEngineFixedHarness harness) : ISaveHook<ModelFolderEntity>
     {
+        public Task<bool> BeforeSaveAsync(
+            ModelFolderEntity entity,
+            SaveOperation operation,
+            CancellationToken cancellationToken = default
+        ) =>
+            harness.BeforeFolderSave is { } before
+                ? before(entity, cancellationToken)
+                : Task.FromResult(true);
+
         public async Task AfterSaveAsync(
             ModelFolderEntity entity,
             SaveOperation operation,
@@ -447,6 +497,106 @@ internal sealed class ObservedSyncServerSource<TEntity, TKey>(
 
         return await inner.GetAllKeysAsync(cancellationToken);
     }
+
+    public IRemoteRepositoryCore<TEntity, TKey> Writer => inner.Writer;
+
+    public ISyncBinaryColumns<TKey>? BinaryColumns => inner.BinaryColumns;
+}
+
+/// <summary>
+/// 進まない差分ソースの指定：包む表の名前と、行の取得の回数（<see cref="NonAdvancingSyncServerSource{TEntity, TKey}"/> が数える）
+/// </summary>
+/// <param name="table">包む表の名前</param>
+/// <param name="limit">
+/// 行の取得の回数の上限。超えたら <see cref="NonAdvancingSourceLimitException"/> を投げる（エンジンの守りが無いと実行が
+/// 終わらないので、守りを外した壊し方でも行が止まらずに赤で終わるようにする）
+/// </param>
+internal sealed class NonAdvancingSource(string table, int limit = 20)
+{
+    private int _calls;
+
+    /// <summary>包む表の名前</summary>
+    public string Table { get; } = table;
+
+    /// <summary>行の取得の回数の上限</summary>
+    public int Limit { get; } = limit;
+
+    /// <summary>これまでの行の取得の回数</summary>
+    public int Calls => Volatile.Read(ref _calls);
+
+    /// <summary>行の取得を 1 回数え、上限を超えたらテスト側の例外を投げる</summary>
+    public void Count()
+    {
+        var calls = Interlocked.Increment(ref _calls);
+
+        if (calls > Limit)
+        {
+            throw new NonAdvancingSourceLimitException(Table, calls);
+        }
+    }
+}
+
+/// <summary>進まない差分ソースの行の取得が回数の上限を超えた（エンジンが進まない差分ソースで止まらなかった）</summary>
+internal sealed class NonAdvancingSourceLimitException(string table, int calls)
+    : Exception($"The non-advancing source of '{table}' was asked for rows {calls} times.");
+
+/// <summary>
+/// 進まない差分ソース：行の取得の最初の答え（版ありは <c>GetChangesAsync</c>、版なしは <c>GetFirstPageAsync</c>）を包む差分
+/// ソースから取って覚え、以後のどの行の取得にも同じ行を「まだ続きがある」（<c>HasMore</c> が真）で返す。行の取得は
+/// <see cref="NonAdvancingSource"/> で数える。ほかはそのまま転送する
+/// </summary>
+/// <param name="inner">包む差分ソース</param>
+/// <param name="spec">進まない差分ソースの指定</param>
+internal sealed class NonAdvancingSyncServerSource<TEntity, TKey>(
+    ISyncServerSource<TEntity, TKey> inner,
+    NonAdvancingSource spec
+) : ISyncServerSource<TEntity, TKey>
+    where TEntity : EntityBaseCore, new()
+{
+    private IReadOnlyList<TEntity>? _rows;
+
+    public Task<byte[]?> GetChangeCeilingAsync(CancellationToken cancellationToken = default) =>
+        inner.GetChangeCeilingAsync(cancellationToken);
+
+    public async Task<SyncChangeBatch<TEntity>> GetChangesAsync(
+        byte[]? anchor,
+        byte[]? ceiling,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        spec.Count();
+        _rows ??= (await inner.GetChangesAsync(anchor, ceiling, batchSize, cancellationToken)).Rows;
+
+        return new SyncChangeBatch<TEntity>(_rows, HasMore: true);
+    }
+
+    public async Task<SyncChangeBatch<TEntity>> GetFirstPageAsync(
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        spec.Count();
+        _rows ??= (await inner.GetFirstPageAsync(batchSize, cancellationToken)).Rows;
+
+        return new SyncChangeBatch<TEntity>(_rows, HasMore: true);
+    }
+
+    public async Task<SyncChangeBatch<TEntity>> GetPageAfterAsync(
+        TKey afterKey,
+        int batchSize,
+        CancellationToken cancellationToken = default
+    )
+    {
+        spec.Count();
+        _rows ??= (await inner.GetFirstPageAsync(batchSize, cancellationToken)).Rows;
+
+        return new SyncChangeBatch<TEntity>(_rows, HasMore: true);
+    }
+
+    public Task<IReadOnlyList<TKey>> GetAllKeysAsync(
+        CancellationToken cancellationToken = default
+    ) => inner.GetAllKeysAsync(cancellationToken);
 
     public IRemoteRepositoryCore<TEntity, TKey> Writer => inner.Writer;
 

@@ -334,6 +334,15 @@ public sealed class QuickER.Runtime.Sync.SyncPendingChangesException : System.In
     public System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncPendingChange> PendingChanges { get; }
     public int PendingCount { get; }
 
+public sealed class QuickER.Runtime.Sync.SyncPendingRow : System.IEquatable<QuickER.Runtime.Sync.SyncPendingRow>
+    public .ctor(string TableName, string KeyText, bool IsDelete, bool KnownToServer, bool IsDiscarded, long ChangeNumber)
+    public bool IsDelete { get; init; }
+    public bool IsDiscarded { get; init; }
+    public bool KnownToServer { get; init; }
+    public long ChangeNumber { get; init; }
+    public string KeyText { get; init; }
+    public string TableName { get; init; }
+
 public sealed class QuickER.Runtime.Sync.SyncRefreshOptions
     public .ctor()
     public QuickER.Runtime.Sync.SyncMode Mode { get; init; }
@@ -491,8 +500,12 @@ public struct QuickER.Runtime.Sync.SyncUploadOutcome : System.IEquatable<QuickER
 public sealed class QuickER.Runtime.Sync.TrackedSyncEngine
     public System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncRefreshResult> RefreshAsync(QuickER.Runtime.Sync.SyncRefreshOptions options = null, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<QuickER.Runtime.Sync.SyncResult> SyncAsync(QuickER.Runtime.Sync.SyncOptions options = null, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<QuickER.Runtime.Sync.SyncPendingRow>> GetPendingChangesAsync(System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<System.ValueTuple<int, int>> DownloadAsync(QuickER.Runtime.Sync.SyncOptions options, System.Threading.CancellationToken cancellationToken = default)
     public System.Threading.Tasks.Task<System.ValueTuple<int, int>> UploadAsync(QuickER.Runtime.Sync.SyncOptions options, System.Collections.Generic.ICollection<QuickER.Runtime.Sync.SyncConflict> conflicts, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> DiscardAllPendingChangesAsync(System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> DiscardPendingChangesAsync(System.Collections.Generic.IEnumerable<QuickER.Runtime.Sync.SyncPendingRow> rows, System.Threading.CancellationToken cancellationToken = default)
+    public System.Threading.Tasks.Task<int> DiscardPendingChangesAsync(System.Type entityType, System.Threading.CancellationToken cancellationToken = default)
 
 public sealed class QuickER.Runtime.Sync.TrackedSyncTable<TEntity, TKey>
     public .ctor(QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> descriptor, QuickER.Runtime.Sync.ISyncServerSource<TEntity, TKey> source, QuickER.Runtime.ILocalRowStore rows)

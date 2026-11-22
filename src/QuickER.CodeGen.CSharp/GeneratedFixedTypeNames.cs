@@ -211,6 +211,7 @@ public static class GeneratedFixedTypeNames
             "SyncParentResolver",
             "SyncPendingChange",
             "SyncPendingChangesException",
+            "SyncPendingRow",
             "SyncPendingSnapshot",
             "SyncPropagationOutcome",
             "SyncRecordingScope",
