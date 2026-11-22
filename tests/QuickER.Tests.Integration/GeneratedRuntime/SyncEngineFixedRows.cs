@@ -343,6 +343,7 @@ internal static class SyncEngineFixedRows
             ),
             .. NonAdvancingSourceRows(),
             .. PendingRows(),
+            .. RunConnectionRows(),
         ];
 
         return new ScenarioTable<SyncEngineFixedCase>(EngineIds.GeneratedRuntime, rows);
@@ -5055,6 +5056,478 @@ internal static class SyncEngineFixedRows
 
     /// <summary>DB の内容を比べられる文字列にする（4 表と blob）</summary>
     /// <summary>表の行だけ（blob を除く）を並べた文字列</summary>
+    /// <summary>実行の接続の行（1 回の実行が専用の接続を何本開くか・閉じるか・トランザクションの間にロックを持たないか）</summary>
+    private static IEnumerable<ScenarioRow<SyncEngineFixedCase>> RunConnectionRows() =>
+        [
+            Row(
+                "run-connection-is-opened-once-per-run",
+                "何も無い同期・更新と挿入と削除を混ぜた 5 行を送る同期・6 行を降ろす同期・blob を送って運んで降ろす同期・送信だけ・"
+                    + "受信だけ・blob を運ぶ洗い替え・blob を捨てる洗い替え・塊ごとに確定する同期（塊 4 つ）・Collect の競合のある"
+                    + "同期のどれも、1 回の実行が専用の接続をちょうど 1 本開き、実行の後にその接続が閉じている",
+                RunConnectionOpenedOncePerRunAsync
+            ),
+            Row(
+                "run-connection-is-closed-after-failed-run",
+                "取得の失敗で例外になった同期も、専用の接続を 1 本だけ開き、実行の後に閉じている",
+                RunConnectionClosedAfterFailedRunAsync
+            ),
+            Row(
+                "run-connection-list-opens-its-own-and-discard-opens-one",
+                "未送信の一覧は専用の接続を 1 本開いて閉じ（実行の外で読む）、全部を捨てる口も 1 本開いて閉じる",
+                RunConnectionListAndDiscardAsync
+            ),
+            Row(
+                "run-connection-does-not-block-other-writers-between-transactions",
+                "同期がサーバーへの書き込みの直前と、取得の後で適用の前に止まっている間、端末の別の接続（Repository・待ち 1 秒）"
+                    + "の書き込みは SQLITE_BUSY にならずに通り、次の同期でサーバーへ上がる",
+                RunConnectionDoesNotBlockWritersAsync
+            ),
+            Row(
+                "run-connection-temp-table-rotation-in-two-chunks",
+                "塊ごとに確定する同期で、2 つの塊のそれぞれが一意な値の入れ替え（回転）を降ろすと、どちらの塊でも入れ替えが"
+                    + "端末に入り、4 行の blob は回転の前のまま（同じ接続で回転の一時表と鍵の一時表を 2 回ずつ通る）",
+                RunConnectionTempTableRotationInTwoChunksAsync
+            ),
+        ];
+
+    /// <summary>
+    /// 数える口のエンジンで 1 回の実行を流し、専用の接続をちょうど 1 本開いて実行の後に閉じていることを表明する
+    /// </summary>
+    private static async Task<T> OnceAsync<T>(
+        CountingLocalRowStore counter,
+        string shape,
+        Func<Task<T>> run
+    )
+    {
+        counter.Reset();
+        var result = await run();
+        AssertOneClosed(counter, shape);
+
+        return result;
+    }
+
+    /// <summary>数えた接続がちょうど 1 本で、閉じていることを表明する（失敗の文に形の名前を入れる）</summary>
+    private static void AssertOneClosed(CountingLocalRowStore counter, string shape)
+    {
+        counter.Count.Should().Be(1, $"{shape}：1 回の実行が開く専用の接続は 1 本");
+        counter
+            .Created.Should()
+            .OnlyContain(
+                connection => connection.State == System.Data.ConnectionState.Closed,
+                $"{shape}：実行の後に専用の接続は閉じている"
+            );
+    }
+
+    /// <summary>実行の接続：形ごとに、1 回の実行が専用の接続を 1 本だけ開いて閉じる</summary>
+    private static async Task RunConnectionOpenedOncePerRunAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        var counter = new CountingLocalRowStore(h.Rows);
+        var engine = h.CreateCountedEngine(counter);
+
+        // 何も無い同期
+        var empty = await OnceAsync(counter, "何も無い同期", () => h.SyncAsync(null, ct, engine));
+        (empty.Uploaded, empty.Downloaded).Should().Be((0, 0));
+
+        // 準備：フォルダー 1 と品目 1〜4 を降ろす
+        await h.Server.Folders.InsertAsync(new ModelFolderEntity { FolderId = 1, Name = "f1" }, ct);
+
+        foreach (var key in new[] { 1, 2, 3, 4 })
+        {
+            await h.Server.Items.InsertAsync(
+                new ModelItemEntity
+                {
+                    ItemId = key,
+                    FolderId = 1,
+                    Code = $"c-{key}",
+                    Title = $"t{key}",
+                    Payload = [0x0A, (byte)key],
+                },
+                ct
+            );
+        }
+
+        await h.SyncAsync(WithBlobs, ct);
+
+        // 5 行を送る同期（更新 2・削除 1・挿入 2）
+        await SetLocalTitleAsync(h, 1, "u1", ct);
+        await SetLocalTitleAsync(h, 2, "u2", ct);
+        await h.ExecuteLocalAsync("DELETE FROM model_items WHERE item_id = 3", ct);
+        await h.Folders.InsertAsync(new ModelFolderEntity { FolderId = 20, Name = "n20" }, ct);
+        await h.Folders.InsertAsync(new ModelFolderEntity { FolderId = 21, Name = "n21" }, ct);
+        var sent = await OnceAsync(counter, "5 行を送る同期", () => h.SyncAsync(null, ct, engine));
+        sent.Uploaded.Should().Be(5, "5 行を送る同期：5 行が届く");
+        sent.Conflicts.Should().BeEmpty();
+
+        // 6 行を降ろす同期
+        await InsertServerFoldersAsync(
+            h,
+            ct,
+            (30, null, "s30"),
+            (31, null, "s31"),
+            (32, null, "s32"),
+            (33, null, "s33"),
+            (34, null, "s34"),
+            (35, null, "s35")
+        );
+        var received = await OnceAsync(
+            counter,
+            "6 行を降ろす同期",
+            () => h.SyncAsync(null, ct, engine)
+        );
+        received.Downloaded.Should().Be(6, "6 行を降ろす同期：6 行が降りる");
+
+        // blob を送り、blob を運んで降ろす同期（端末は品目 1 の blob を書き、サーバーは blob を持つ品目 5 を入れる）
+        byte[] written = [0xEE, 0x01, 0x02];
+
+        await using (var source = new MemoryStream(written))
+        {
+            (await h.Items.WritePayloadAsync(1, source, written.Length, ct)).Should().BeTrue();
+        }
+
+        await h.Server.Items.InsertAsync(
+            new ModelItemEntity
+            {
+                ItemId = 5,
+                FolderId = 1,
+                Code = "c-5",
+                Title = "t5",
+                Payload = [0x0B, 0x05, 0x00],
+            },
+            ct
+        );
+        await OnceAsync(
+            counter,
+            "blob を送って降ろす同期",
+            () => h.SyncAsync(WithBlobs, ct, engine)
+        );
+        var afterBlobs = await h.ReadServerAsync(ct);
+        afterBlobs
+            .Items[1]
+            .PayloadHex.Should()
+            .Be(
+                Convert.ToHexString(written),
+                "blob を送って降ろす同期：端末の blob がサーバーへ届く"
+            );
+        (await h.ReadLocalAsync(ct))
+            .Items[5]
+            .PayloadHex.Should()
+            .Be(
+                afterBlobs.Items[5].PayloadHex,
+                "blob を送って降ろす同期：サーバーの blob が端末へ降りる"
+            );
+
+        // 送信だけ
+        await SetLocalTitleAsync(h, 2, "upload-only", ct);
+        var uploaded = await OnceAsync(
+            counter,
+            "送信だけ",
+            () => engine.UploadAsync(new SyncOptions(), new List<SyncConflict>(), ct)
+        );
+        uploaded.Uploaded.Should().Be(1, "送信だけ：1 行が届く");
+
+        // 受信だけ
+        await RenameServerFolderAsync(h, 30, "s30-renamed", ct);
+        var downloaded = await OnceAsync(
+            counter,
+            "受信だけ",
+            () => engine.DownloadAsync(new SyncOptions(), ct)
+        );
+        downloaded.Downloaded.Should().Be(1, "受信だけ：1 行が降りる");
+
+        // blob を運ぶ洗い替え・blob を捨てる洗い替え
+        await OnceAsync(
+            counter,
+            "blob を運ぶ洗い替え",
+            () =>
+                h.RefreshAsync(new SyncRefreshOptions { IncludeUnboundedBinary = true }, ct, engine)
+        );
+        await OnceAsync(
+            counter,
+            "blob を捨てる洗い替え",
+            () =>
+                h.RefreshAsync(
+                    new SyncRefreshOptions { DiscardLocalUnboundedBinaries = true },
+                    ct,
+                    engine
+                )
+        );
+
+        // 塊ごとに確定する同期（閾値 2・塊の大きさ 2 で 7 行＝塊 4 つ）
+        var chunked = SmallChunks(h.CreateCountedEngine(counter));
+        var routes = new List<TrackedSyncDownloadRoute>();
+        chunked.DownloadRouteObserved = routes.Add;
+        await InsertServerFoldersAsync(
+            h,
+            ct,
+            (40, null, "s40"),
+            (41, null, "s41"),
+            (42, null, "s42"),
+            (43, null, "s43"),
+            (44, null, "s44"),
+            (45, null, "s45"),
+            (46, null, "s46")
+        );
+        var inChunks = await OnceAsync(
+            counter,
+            "塊ごとに確定する同期",
+            () => h.SyncAsync(null, ct, chunked)
+        );
+        routes
+            .Should()
+            .Equal(
+                [TrackedSyncDownloadRoute.Chunked],
+                "塊ごとに確定する同期：塊の道を通る（前提）"
+            );
+        inChunks.Downloaded.Should().Be(7, "塊ごとに確定する同期：7 行が降りる");
+
+        // Collect の競合のある同期
+        await RenameServerFolderAsync(h, 1, "server-edit", ct);
+        await h.ExecuteLocalAsync(
+            "UPDATE model_folders SET name = 'local-edit' WHERE folder_id = 1",
+            ct
+        );
+        var conflicted = await OnceAsync(
+            counter,
+            "Collect の競合のある同期",
+            () =>
+                h.SyncAsync(
+                    new SyncOptions { ConflictPolicy = SyncConflictPolicy.Collect },
+                    ct,
+                    engine
+                )
+        );
+        conflicted
+            .Conflicts.Select(conflict => conflict.Reason)
+            .Should()
+            .Equal(
+                [SyncConflictReason.ModifiedOnServer],
+                "Collect の競合のある同期：競合が 1 つ（前提）"
+            );
+    }
+
+    /// <summary>実行の接続：取得の失敗で例外になった同期も、開いた 1 本を閉じる</summary>
+    private static async Task RunConnectionClosedAfterFailedRunAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await h.Server.Folders.InsertAsync(new ModelFolderEntity { FolderId = 1, Name = "f1" }, ct);
+        var counter = new CountingLocalRowStore(h.Rows);
+        var engine = h.CreateCountedEngine(
+            counter,
+            call =>
+                call.Table == ModelTables.Folders && call.Call == SyncEngineSourceCall.RowsBefore
+                    ? throw new InvalidOperationException(InjectedFetchFailure)
+                    : Task.CompletedTask
+        );
+
+        var thrown = await Record.ExceptionAsync(() => h.SyncAsync(null, ct, engine));
+
+        thrown.Should().NotBeNull("取得の失敗で同期は例外になる（前提）");
+        Chain(thrown!)
+            .Select(exception => exception.Message)
+            .Should()
+            .Contain(InjectedFetchFailure, "注入した取得の失敗が届く（前提）");
+        AssertOneClosed(counter, "取得の失敗で終わった同期");
+    }
+
+    /// <summary>実行の接続：未送信の一覧は自分の接続を 1 本開いて閉じ、全部を捨てる口は 1 本開いて閉じる</summary>
+    private static async Task RunConnectionListAndDiscardAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await SeedPendingAsync(h, ct);
+        await SetLocalTitleAsync(h, 1, "local-edit", ct);
+        var counter = new CountingLocalRowStore(h.Rows);
+        var engine = h.CreateCountedEngine(counter);
+
+        var listed = await OnceAsync(
+            counter,
+            "未送信の一覧",
+            () => engine.GetPendingChangesAsync(ct)
+        );
+        listed
+            .Select(row => (row.TableName, row.KeyText))
+            .Should()
+            .Equal([(ModelTables.Items, "1")], "未送信の一覧：品目 1 が載る（前提）");
+
+        var discarded = await OnceAsync(
+            counter,
+            "全部を捨てる口",
+            () => engine.DiscardAllPendingChangesAsync(ct)
+        );
+        discarded.Should().Be(1, "全部を捨てる口：1 行に印を立てる");
+    }
+
+    /// <summary>
+    /// 実行の接続：同期がサーバー役の点で止まっている間、端末の別の接続の書き込みが待たずに通る（実行はトランザクションの
+    /// 外でローカルのロックを持たない）
+    /// </summary>
+    private static async Task RunConnectionDoesNotBlockWritersAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await h.Server.Folders.InsertAsync(new ModelFolderEntity { FolderId = 1, Name = "f1" }, ct);
+        await h.Server.Folders.InsertAsync(new ModelFolderEntity { FolderId = 2, Name = "f2" }, ct);
+        await h.SyncAsync(null, ct);
+
+        // 送る行 2 つと降ろす行 1 つ（取得の後の点は、送った 2 行の決着がコミットされた後に来る）
+        await h.ExecuteLocalAsync("UPDATE model_folders SET name = 'l1' WHERE folder_id = 1", ct);
+        await h.ExecuteLocalAsync("UPDATE model_folders SET name = 'l2' WHERE folder_id = 2", ct);
+        await h.Server.Folders.InsertAsync(new ModelFolderEntity { FolderId = 3, Name = "f3" }, ct);
+
+        var points = new[]
+        {
+            (Point: ModelInterruptPoint.BeforeServerWrite, Key: 60),
+            (Point: ModelInterruptPoint.AfterServerFetchBeforeApply, Key: 61),
+        };
+        var failures = new List<string>();
+        var fired = new List<ModelInterruptPoint>();
+
+        // 1 つ目の点の書き込みの中で 2 つ目の点を仕掛ける（同じ 1 回の同期で両方の点に止まる）
+        void Arm(int index)
+        {
+            var (point, key) = points[index];
+            h.Faults.ArmInterrupt(
+                ModelActor.Device1,
+                point,
+                ModelActor.Device1,
+                async () =>
+                {
+                    lock (fired)
+                    {
+                        fired.Add(point);
+                    }
+
+                    try
+                    {
+                        await h.Folders.InsertAsync(
+                            new ModelFolderEntity { FolderId = key, Name = $"w{key}" },
+                            CancellationToken.None
+                        );
+                    }
+                    catch (Exception exception)
+                    {
+                        lock (failures)
+                        {
+                            failures.Add(
+                                $"{point}: {exception.GetType().Name}: {exception.Message}"
+                            );
+                        }
+                    }
+
+                    if (index + 1 < points.Length)
+                    {
+                        Arm(index + 1);
+                    }
+                }
+            );
+        }
+
+        Arm(0);
+        SyncResult result;
+
+        try
+        {
+            result = await h.SyncAsync(null, ct);
+        }
+        finally
+        {
+            h.Faults.Syncing = null;
+        }
+
+        fired
+            .Should()
+            .Equal(points.Select(entry => entry.Point), "2 つの点の両方で止まった（前提）");
+        failures
+            .Should()
+            .BeEmpty(
+                "止まっている同期はトランザクションの外にあり、別の接続の書き込みを待たせない"
+            );
+        result.Uploaded.Should().Be(2);
+        result.Conflicts.Should().BeEmpty();
+
+        var next = await h.SyncAsync(null, ct);
+        next.Uploaded.Should().Be(2, "止まっている間に書いた 2 行は次の同期で上がる");
+        var server = await h.ReadServerAsync(ct);
+        server.Folders.Should().ContainKeys(60, 61);
+        Describe(await h.ReadLocalAsync(ct)).Should().Be(Describe(server));
+    }
+
+    /// <summary>
+    /// 実行の接続の一時表：塊ごとに確定する同期の 2 つの塊が、それぞれ一意な値の入れ替えを回転で降ろす（回転の一時表
+    /// <c>quicker_sync_rotate</c> と鍵の一時表 <c>quicker_sync_stored_keys</c> を、同じ接続で別々のトランザクションから 2 回通る）
+    /// </summary>
+    private static async Task RunConnectionTempTableRotationInTwoChunksAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await h.Server.Folders.InsertAsync(new ModelFolderEntity { FolderId = 1, Name = "f1" }, ct);
+
+        foreach (var key in new[] { 1, 2, 3, 4 })
+        {
+            await h.Server.Items.InsertAsync(
+                new ModelItemEntity
+                {
+                    ItemId = key,
+                    FolderId = 1,
+                    Code = $"c-{key}",
+                    Title = $"t{key}",
+                    Payload = [0x0A, 0x0B, 0x00, (byte)key],
+                },
+                ct
+            );
+        }
+
+        await h.SyncAsync(WithBlobs, ct);
+        var before = await h.ReadLocalAsync(ct);
+
+        // サーバーで 1・2 と 3・4 の code を入れ替える。取得の順（版の順）は 2・1・4・3 で、塊の大きさ 2 の塊は [2, 1] と [4, 3]
+        await SetServerCodeAsync(h, 1, "tmp-a", ct);
+        await SetServerCodeAsync(h, 2, "c-1", ct);
+        await SetServerCodeAsync(h, 1, "c-2", ct);
+        await SetServerCodeAsync(h, 3, "tmp-b", ct);
+        await SetServerCodeAsync(h, 4, "c-3", ct);
+        await SetServerCodeAsync(h, 3, "c-4", ct);
+
+        var engine = SmallChunks(h.CreateEngine());
+        var routes = new List<TrackedSyncDownloadRoute>();
+        engine.DownloadRouteObserved = routes.Add;
+
+        var result = await h.SyncAsync(WithoutBlobs, ct, engine);
+
+        routes.Should().Equal([TrackedSyncDownloadRoute.Chunked], "塊の道を通る（前提）");
+        result.Conflicts.Should().BeEmpty();
+        result.Truncations.Should().BeEmpty("どちらの塊の入れ替えも、その塊の回転で降りる");
+        var local = await h.ReadLocalAsync(ct);
+        (local.Items[1].Code, local.Items[2].Code, local.Items[3].Code, local.Items[4].Code)
+            .Should()
+            .Be(("c-2", "c-1", "c-4", "c-3"), "2 つの入れ替えが端末に入る");
+
+        foreach (var key in new[] { 1, 2, 3, 4 })
+        {
+            local
+                .Items[key]
+                .PayloadHex.Should()
+                .Be(before.Items[key].PayloadHex, $"品目 {key} の blob は回転の前のまま");
+        }
+
+        (
+            await h.ScalarAsync(
+                $"SELECT count(*) FROM {SyncLocalTracking.RowTableName} WHERE dirty = 1",
+                ct
+            )
+        )
+            .Should()
+            .Be("0");
+    }
+
     private static string DescribeRows(ModelDbState state) =>
         string.Join(
             "\n",

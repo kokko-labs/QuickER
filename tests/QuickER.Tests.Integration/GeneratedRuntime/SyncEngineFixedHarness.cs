@@ -155,33 +155,49 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
     /// 進まない差分ソースの指定（null なら使わない）。指定した表の差分ソースだけを
     /// <see cref="NonAdvancingSyncServerSource{TEntity, TKey}"/> で包む
     /// </param>
+    /// <param name="rows">エンジンの 4 表が共有するローカルの行の口（null なら <see cref="Rows"/>）</param>
     public TrackedSyncEngine CreateEngine(
         Func<SyncEngineSourceCall, Task>? observe,
         Func<Task<byte[]?>>? ceiling = null,
-        NonAdvancingSource? nonAdvancing = null
-    ) =>
-        new([
+        NonAdvancingSource? nonAdvancing = null,
+        ILocalRowStore? rows = null
+    )
+    {
+        var store = rows ?? Rows;
+
+        return new([
             new TrackedSyncTable<ModelFolderEntity, int>(
                 GeneratedSyncTables.ModelFolder,
                 Observed(Server.FolderSource, ModelTables.Folders, observe, ceiling, nonAdvancing),
-                Rows
+                store
             ),
             new TrackedSyncTable<ModelLabelEntity, string>(
                 GeneratedSyncTables.ModelLabel,
                 Observed(Server.LabelSource, ModelTables.Labels, observe, ceiling, nonAdvancing),
-                Rows
+                store
             ),
             new TrackedSyncTable<ModelItemEntity, int>(
                 GeneratedSyncTables.ModelItem,
                 Observed(Server.ItemSource, ModelTables.Items, observe, ceiling, nonAdvancing),
-                Rows
+                store
             ),
             new TrackedSyncTable<ModelEventEntity, DateTime>(
                 GeneratedSyncTables.ModelEvent,
                 Observed(Server.EventSource, ModelTables.Events, observe, ceiling, nonAdvancing),
-                Rows
+                store
             ),
         ]);
+    }
+
+    /// <summary>
+    /// 同じ端末の DB を使い、専用の接続を作る回数を数える口（<see cref="CountingLocalRowStore"/>）を 4 表で共有するエンジンを作る
+    /// </summary>
+    /// <param name="counter">数える口（<see cref="Rows"/> を包んだもの）</param>
+    /// <param name="observe">取得の観測（null なら観測しない）</param>
+    public TrackedSyncEngine CreateCountedEngine(
+        CountingLocalRowStore counter,
+        Func<SyncEngineSourceCall, Task>? observe = null
+    ) => CreateEngine(observe, rows: counter);
 
     /// <summary>
     /// 進まない差分ソースの指定がその表なら進まない包みで包み、観測も上限の関数も無ければそのまま、あれば観測の包みで返す
@@ -413,6 +429,148 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
             }
         }
     }
+}
+
+/// <summary>
+/// ローカルの行の口を包み、専用の接続を作る回数を数えて作った接続を覚える（ほかのメンバーは包む相手へそのまま渡す）。
+/// エンジンが 1 回の実行で開く接続の数と、実行の後に閉じているかを見る
+/// </summary>
+/// <param name="inner">包む口</param>
+internal sealed class CountingLocalRowStore(ILocalRowStore inner) : ILocalRowStore
+{
+    private readonly List<System.Data.Common.DbConnection> _created = [];
+
+    /// <summary>これまでに作った専用の接続（作った順）</summary>
+    public IReadOnlyList<System.Data.Common.DbConnection> Created
+    {
+        get
+        {
+            lock (_created)
+            {
+                return [.. _created];
+            }
+        }
+    }
+
+    /// <summary>これまでに作った専用の接続の数</summary>
+    public int Count => Created.Count;
+
+    /// <summary>作った接続の覚えを空にする（数え始めを、対象の 1 回の実行の前にそろえる）</summary>
+    public void Reset()
+    {
+        lock (_created)
+        {
+            _created.Clear();
+        }
+    }
+
+    public System.Data.Common.DbConnection CreateDedicatedConnection()
+    {
+        var connection = inner.CreateDedicatedConnection();
+
+        lock (_created)
+        {
+            _created.Add(connection);
+        }
+
+        return connection;
+    }
+
+    public bool IsUniqueViolation(System.Data.Common.DbException exception) =>
+        inner.IsUniqueViolation(exception);
+
+    public Task<TEntity?> FindAsync<TEntity>(
+        System.Data.Common.DbConnection connection,
+        object key,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new() =>
+        inner.FindAsync<TEntity>(connection, key, cancellationToken);
+
+    public Task<bool> ExistsAsync<TEntity>(
+        System.Data.Common.DbConnection connection,
+        object key,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new() =>
+        inner.ExistsAsync<TEntity>(connection, key, cancellationToken);
+
+    public Task InsertAsync<TEntity>(
+        System.Data.Common.DbConnection connection,
+        TEntity entity,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new() =>
+        inner.InsertAsync(connection, entity, cancellationToken);
+
+    public Task<bool> UpdateAsync<TEntity>(
+        System.Data.Common.DbConnection connection,
+        TEntity entity,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new() =>
+        inner.UpdateAsync(connection, entity, cancellationToken);
+
+    public Task<bool> DeleteAsync<TEntity>(
+        System.Data.Common.DbConnection connection,
+        object key,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new() =>
+        inner.DeleteAsync<TEntity>(connection, key, cancellationToken);
+
+    public Task<IReadOnlyList<object>> ListKeysAsync<TEntity>(
+        System.Data.Common.DbConnection connection,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new() =>
+        inner.ListKeysAsync<TEntity>(connection, cancellationToken);
+
+    public object ConvertKey<TEntity>(object rawKey)
+        where TEntity : EntityBaseCore, new() => inner.ConvertKey<TEntity>(rawKey);
+
+    public Task<long?> ReadBinaryLengthAsync<TEntity>(
+        System.Data.Common.DbConnection connection,
+        object key,
+        string propertyName,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new() =>
+        inner.ReadBinaryLengthAsync<TEntity>(connection, key, propertyName, cancellationToken);
+
+    public Task<bool> ReadBinaryAsync<TEntity>(
+        System.Data.Common.DbConnection connection,
+        object key,
+        string propertyName,
+        System.IO.Stream destination,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new() =>
+        inner.ReadBinaryAsync<TEntity>(
+            connection,
+            key,
+            propertyName,
+            destination,
+            cancellationToken
+        );
+
+    public Task<bool> WriteBinaryAsync<TEntity>(
+        System.Data.Common.DbConnection connection,
+        object key,
+        string propertyName,
+        System.IO.Stream? source,
+        long? length,
+        CancellationToken cancellationToken
+    )
+        where TEntity : EntityBaseCore, new() =>
+        inner.WriteBinaryAsync<TEntity>(
+            connection,
+            key,
+            propertyName,
+            source,
+            length,
+            cancellationToken
+        );
 }
 
 /// <summary>サーバーの差分ソースへの取得 1 回の観測</summary>

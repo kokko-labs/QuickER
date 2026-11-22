@@ -740,6 +740,28 @@ internal static partial class SourceRules
                 SourceScope.Files("src", SyncRuntimePackageSource),
                 GuardFinder.File(GuardReader.Text, FindSyncEnginePendingMarkers)
             ),
+            // 新しい同期のエンジン（TrackedSyncEngine）が専用の接続を開くのは、実行の入口（RunExclusiveAsync＝実行の本体はその接続を
+            // RunConnection で借りる）と未送信の一覧（GetPendingChangesAsync＝実行のロックの外で読む）の 2 か所だけで、接続を作るのは
+            // 開くメソッド（OpenDedicatedAsync）の中の 1 か所だけ。3 か所目を足すと、1 回の実行が開く接続がその分だけ増え、開くたびの
+            // 確認と PRAGMA が実行の中で繰り返される
+            SourceRule.Require(
+                "sync-dedicated-connection-openers",
+                "新しい同期のエンジンが専用の接続を開くのは実行の入口と未送信の一覧の 2 か所、作るのは開くメソッドの中の 1 か所だけ",
+                SourceScope.Files("src", SyncTemplateFile),
+                GuardFinder.File(GuardReader.Text, FindSyncDedicatedConnectionOpeners),
+                new GuardKnown(
+                    SyncTemplateFile,
+                    "OpenDedicatedAsync(",
+                    2,
+                    "実行の入口（RunExclusiveAsync）と未送信の一覧（GetPendingChangesAsync）"
+                ),
+                new GuardKnown(
+                    SyncTemplateFile,
+                    "CreateDedicatedConnection(",
+                    1,
+                    "専用の接続を開くメソッド（OpenDedicatedAsync）の中"
+                )
+            ),
             // 前置きの正本は QuickER.Dialects の SyncAuxiliaryNames 1 つで、QuickER.Provider* は文字列で写さず SyncAuxiliaryNames を通す
             // （写すと、前置きを変えたときに取込の判定だけが古い前置きのまま残る）。文字列リテラルと補間の文字の部分のうち、前置きを
             // 大文字小文字を無視して含むものを数える（コメント・XmlDoc は数えない。.g.cs は読まない）
@@ -879,6 +901,28 @@ internal static partial class SourceRules
         foreach (Match match in SyncEnginePendingMarker.Matches(file.Text))
         {
             yield return new GuardFinding(match.Value, file.LineAt(match.Index));
+        }
+    }
+
+    /// <summary>
+    /// 新しい同期のエンジンの専用の接続を開くメソッドの呼び出し（宣言の <c>OpenDedicatedAsync(CancellationToken …</c> は拾わない）と、
+    /// 専用の接続を作る呼び出し（XmlDoc の <c>cref</c> のように括弧の続かない綴りは拾わない）
+    /// </summary>
+    private static readonly Regex SyncDedicatedConnectionOpener = new(
+        @"\b(?:OpenDedicatedAsync\((?!CancellationToken\s)|CreateDedicatedConnection\()",
+        RegexOptions.CultureInvariant
+    );
+
+    /// <summary>専用の接続を開く・作る呼び出しの出現（何かは「メソッド名(」）</summary>
+    private static IEnumerable<GuardFinding> FindSyncDedicatedConnectionOpeners(GuardFile file)
+    {
+        foreach (Match match in SyncDedicatedConnectionOpener.Matches(file.Text))
+        {
+            var what = match.Value.StartsWith("Open", StringComparison.Ordinal)
+                ? "OpenDedicatedAsync("
+                : "CreateDedicatedConnection(";
+
+            yield return new GuardFinding(what, file.LineAt(match.Index));
         }
     }
 
