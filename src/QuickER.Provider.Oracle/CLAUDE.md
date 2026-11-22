@@ -3,6 +3,19 @@
 このファイルの範囲は、Oracle 方言だけの規則（取込のカタログの読み方・型表記と型マッパー・同期スクリプトと SQL*Plus）。
 方言横断の規則は `src/QuickER.Provider/CLAUDE.md` を読む。
 
+## 接続
+
+### 文のキャッシュを使わない
+
+- `OracleConnectionStringFactory.Build` は `Self Tuning=false` を入れ、ODP.NET の文のキャッシュを使わない（`Statement Cache Size` の既定は 0）。この接続文字列で開く接続（取込・接続テスト・同期の実行器 `OracleSchemaSyncExecutor`）の全部に効く。
+- 理由：取込・同期が流すのは 1 回きりの DDL とカタログの読み取りで、キャッシュが効く場面が無い。
+- 壊すと：ODP.NET の既定（`Self Tuning` が true）は、キャッシュした文 1 つにつきサーバーのカーソルを 1 つ開いたまま持ち、違う文を流したプールのセッションを上限（`OPEN_CURSORS`）の約 12 手前まで育てる。
+  - 実測：同期計画の総当たり（Oracle）で、実行器のセッションが 288/300 に育った（中身は同期のスクリプトの PL/SQL のブロックとセットアップの INSERT）。
+  - そのセッションで同時に開くカーソル（DDL の再帰の SQL・PL/SQL のブロック）が残りを食うと、同期のスクリプトが途中で ORA-01000 になる。DDL は暗黙にコミットするので、途中まで適用されたまま残る。
+  - キャッシュを満たした接続でリーダーを 8 本開いたまま DROP の PL/SQL を流すと決まって落ちる（6 本は通る）。`Statement Cache Purge=true` はプールへ戻すときにしか閉じず、同じ接続の中では溜まる。
+- 生成の EF Core 版の接続文字列は利用者のもので、QuickER は触らない（docs にも書かない。ODP.NET の既定の振る舞いで、普通のアプリはリーダーを同時に何本も開かない）。
+- ガード：`OracleConnectionStringFactoryIntegrationTests.Build_ConnectsToContainer`（接続文字列の `SelfTuning` と、違う文を 60 本流した後のセッションの開いたカーソルが 20 以下）・Oracle のコレクションのリセットの読み取り（実行器のセッションを含むユーザーの全セッションが上限の半分以下。`tests/QuickER.Tests/TestSupport/CLAUDE.md`「Oracle のコンテナの開いたカーソル」）。mutation 実証済み（`SelfTuning = false` を外すと、接続文字列の表明が赤、それを外しても振る舞いの表明が 62 > 20 で赤、同期計画の総当たりのリセットでガードが実行器のセッションを名指しして赤）。
+
 ## 取込
 
 ### 実在する制約と設計の表だけ

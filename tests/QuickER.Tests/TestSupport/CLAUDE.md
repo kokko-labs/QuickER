@@ -491,6 +491,20 @@ src のどこを、どのテストのエンジン・表・規則が守ってい�
 - **`PERSIST` にしない**：Windows ではジャーナルのファイルを開いたまま持ち、同じ DB を既定の接続が書き込むとコミットで消せずに `disk I/O error` になる。
 - ガード：`SqliteLightJournalTests`（設定・外部キーの既定・既定の接続との混在）。mutation 実証済み。
 
+## Oracle のコンテナの開いたカーソル
+
+- Oracle のフィクスチャ（`tests/QuickER.Tests.Integration/OracleContainerFixture.cs`）の接続文字列（`ConnectionString`・`SystemConnectionString`）は、ODP.NET の文のキャッシュを使わない（`SelfTuning = false`。`Statement Cache Size` の既定は 0）。
+  - ODP.NET の既定（`Self Tuning` が true）は、キャッシュの大きさを自動で決め、キャッシュした文 1 つにつきサーバーのカーソルを 1 つ開いたまま持つ。違う文を流したプールのセッションは、上限（`open_cursors`）の約 12 手前まで育って止まる（実測：上限 300 で 287〜288・120 で 108）。
+  - そのセッションで同時に開くカーソル（DDL の再帰の SQL・PL/SQL・開いたままのリーダー）が残りを食うと ORA-01000 になる。キャッシュを満たした接続でリーダーを 8 本開いたままリセットのブロックを流すと、決まって落ちる（6 本は通る）。
+  - 各テストはスキーマを作り直し、簡易 DSL の総当たり・TranslatorParity は違う文を流すので、キャッシュは消えた表の文のカーソルを持つだけ。`Statement Cache Purge=true` はプールへ戻すときにしか閉じず、同じ接続の中では溜まるので使わない。
+- `ResetSchemaAsync` は、スキーマを空にする前に、ユーザー ORACLE の全セッションの `opened cursors current` の最大を SYSTEM の接続で読み、上限の半分を超えていたら、そのセッションの SID と開いている文の上位を名指しして赤にする。
+  - 全セッションには、製品の接続文字列（`OracleConnectionStringFactory.Build`）で開く同期の実行器・取込のセッションも入る。製品の接続も文のキャッシュを使わない（`src/QuickER.Provider.Oracle/CLAUDE.md`「文のキャッシュを使わない」）ので、同じしきい値の下に収まる。
+  - リセットは Oracle のコレクションの全テストが呼ぶので、溜めたテストの次のテストで、ORA-01000 より手前に決まって見つかる。リセットの後でなく前に見るのは、リセットそのものが ORA-01000 で落ちると名指しが出ないため。
+  - しきい値の半分は、文のキャッシュを使わない接続の実測の最大（48）と、キャッシュが育ったセッション（287〜295）の間にある。読み取りは 1 回 1.4 ms 前後で、Oracle のコレクション全体の約 0.3%（600 回のリセットで合計 0.8 秒）。
+- ガード：Oracle のコレクションの全テスト（リセットの読み取り）。直した後の 16 クラスの実行で、全セッションの最大は 48（599 回のリセット）。mutation 実証済み：
+  - フィクスチャの文のキャッシュを戻すと、`NamedQueryDslConditionFuzzOracleRuntimeTests` の 2 単位目のリセットで赤（187/300・EF Core の SELECT を名指し）。
+  - 製品の接続文字列の文のキャッシュを戻すと、`OracleSyncPlanFuzzTests` のリセットで赤（153/300・同期のスクリプトの PL/SQL とセットアップの INSERT を名指し）。
+
 ## 簡易 DSL の総当たり
 
 - 簡易 DSL の条件の意味は、総当たりで docs の意味と照合する。`DslConditionFuzzTests`（QuickER 版 Repository・EF Core〔いずれも SQLite〕とインメモリ。MySQL の符号なし整数の図はインメモリだけ）と、Integration の `NamedQueryDslConditionFuzzSqlServerRuntimeTests`（実コンテナの QuickER 版 Repository・EF Core〔SQL Server〕・既定はシード 1 つ）と `NamedQueryDslConditionFuzz{PostgreSql,MySql,Oracle}RuntimeTests`（実コンテナの EF Core 版だけ・既定はシード 1 つ・夜間 16。`tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`「簡易 DSL の総当たりの EF Core だけの方言」）が流す。
