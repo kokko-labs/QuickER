@@ -43,7 +43,7 @@ internal static partial class ParityRows
             ),
             new(
                 "nightly-jobs",
-                "nightly.yml のジョブは、夜間に流すテストのプロジェクトごとの 2 つ（テストの側の NightlyJobs）だけ",
+                "nightly.yml のジョブは、テストの側の NightlyJobs の 3 つ（Integration の裏返しの絞り込みの 2 つと QuickER.Tests）だけ",
                 ParityCompare.Multiset,
                 () => [.. WorkflowGuardTests.NightlyJobs.Keys],
                 () => [.. NightlyWorkflowJobs().Keys]
@@ -51,12 +51,13 @@ internal static partial class ParityRows
             new(
                 "nightly-job-test-commands",
                 "nightly.yml の各ジョブの dotnet test の手順（ちょうど 1 つ）は、そのジョブのプロジェクトの NightlyEngine の目印の"
-                    + "テストだけを流す（絞り込みが消えるとエンジン以外の全テストが流れて時間の上限を超える）",
+                    + "テストだけを流す（絞り込みが消えるとエンジン以外の全テストが流れて時間の上限を超える）。Integration の 2 つのジョブの"
+                    + "絞り込みは同じ 1 つの項の肯定と否定（片方を変えると、テストが流れないか 2 回流れる）",
                 ParityCompare.Multiset,
                 () =>
                     [
                         .. WorkflowGuardTests.NightlyJobs.Select(job =>
-                            $"{job.Key}: dotnet test {job.Value} --filter \"{NightlyEngineTrait.Name}={NightlyEngineTrait.Selected}\""
+                            $"{job.Key}: dotnet test {job.Value.Project} --filter \"{job.Value.Filter}\""
                         ),
                     ],
                 () =>
@@ -307,7 +308,7 @@ internal static partial class ParityRows
                 $"Stryker のテストだけのソリューション（{StrykerSolution}）は src の全プロジェクトと QuickER.Tests・偽の app-server の"
                     + "ちょうど 1 回ずつを持つ（Stryker は変異させるプロジェクトをソリューションから探すので、src に足したプロジェクトを"
                     + "載せ忘れると、そのプロジェクトの夜間の変異テストが設定の誤りで止まる）。"
-                    + $"2 本目（{StrykerSolutionWithIntegration}・起動スクリプトの表が provider-sync-planner に使う）は、それに Integration を足したもの。"
+                    + $"2 本目（{StrykerSolutionWithIntegration}・起動スクリプトの表が同期の計画の 2 つの範囲に使う）は、それに Integration を足したもの。"
                     + "パスはどれも ../ で始める（起動スクリプトが先頭の ../ を外した写しをルートに作って Stryker へ渡す）",
                 ParityCompare.Multiset,
                 () =>

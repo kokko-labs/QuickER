@@ -281,16 +281,27 @@ public sealed class WorkflowGuardTests
             .Equal("contents: read");
     }
 
-    /// <summary>夜間の実 DB のジョブは厳格モードで流す</summary>
+    /// <summary>夜間の実 DB のジョブ（Integration を流す 2 つ）は厳格モードで流す</summary>
     [Fact(DisplayName = "nightly.yml の Ubuntu のジョブは QUICKER_REQUIRE_DOCKER=1 で流す")]
     public void Nightly_IntegrationJob_IsStrict()
     {
-        var step = NightlyTestStep(Jobs(ReadWorkflow("nightly.yml"))["integration-nightly"]);
+        var jobs = Jobs(ReadWorkflow("nightly.yml"));
+        var integrationJobs = NightlyJobs
+            .Where(job => job.Value.Project == IntegrationProject)
+            .Select(job => job.Key)
+            .ToList();
 
-        Regex
-            .IsMatch(step, @"(?m)^\s+QUICKER_REQUIRE_DOCKER: ""1""$")
+        integrationJobs
             .Should()
-            .BeTrue("コンテナ起動の失敗をスキップ緑にしない");
+            .HaveCount(2, "夜間の Integration は裏返しの絞り込みの 2 つのジョブで流す");
+
+        foreach (var job in integrationJobs)
+        {
+            Regex
+                .IsMatch(NightlyTestStep(jobs[job]), @"(?m)^\s+QUICKER_REQUIRE_DOCKER: ""1""$")
+                .Should()
+                .BeTrue($"{job} はコンテナ起動の失敗をスキップ緑にしない");
+        }
     }
 
     /// <summary>夜間の Windows のジョブも一時ファイルをランナーの一時領域へ置く</summary>
@@ -632,7 +643,7 @@ public sealed class WorkflowGuardTests
     /// 0 件と数えるのを避ける）を通らない。版を書いた <c>dotnet tool install</c> はマニフェストと別の版を入れ得る。
     /// 並列度を書かないと Stryker の既定（コアの半分＝4 vCPU で 2）になり、Model でも時間の上限に届く見込み。
     /// <c>--break-at</c>・<c>-b</c>・<c>--threshold-*</c> は設定の thresholds を上書きする。
-    /// ci.yml の build-and-test は、全件のテストの後に、起動スクリプトの <c>-TestsOnly</c> で provider-sync-planner の環境のテストを
+    /// ci.yml の build-and-test は、全件のテストの後に、起動スクリプトの <c>-TestsOnly</c> で同期の計画の範囲（provider-sync-selection）の環境のテストを
     /// 流す（Stryker の最初のテストの実行と同じ環境でだけ落ちるテストを、週 1 回の実行より前に PR で捕まえる）。
     /// 手順が無い・スイッチが無い・<c>continue-on-error</c> があると、その環境の失敗が週 1 回まで隠れる。
     /// </remarks>
@@ -717,7 +728,7 @@ public sealed class WorkflowGuardTests
         environmentStep
             .Should()
             .Contain(
-                $"{MutationScriptCall} -Target provider-sync-planner -TestsOnly -OutputDirectory \"${{{{ runner.temp }}}}/mutation-env\"",
+                $"{MutationScriptCall} -Target provider-sync-selection -TestsOnly -OutputDirectory \"${{{{ runner.temp }}}}/mutation-env\"",
                 "Stryker を呼ばず、同期の計画の範囲の表の環境で表のテストだけを流す"
             )
             .And.NotContain("continue-on-error", "その環境の失敗で CI を赤にする");
@@ -744,7 +755,7 @@ public sealed class WorkflowGuardTests
     /// Stryker 5 は ../ で始まるパスのソリューションではテストを 0 件と数えて止まる。写しが残るとルートで引数なしの
     /// dotnet build / dotnet test がソリューションが 2 つで止まる。GitHub Actions の pwsh はネイティブコマンドの非 0 で止まらない。
     /// 偽の dotnet は呼ばれるたびに作業フォルダ・引数・写しの中身・環境変数を記録し、その呼び出しの終了コードで終わる。
-    /// 呼び出し元は厳格モード（QUICKER_REQUIRE_DOCKER=1）と同期計画の種の数（7）を立てておき、provider-sync-planner の行では
+    /// 呼び出し元は厳格モード（QUICKER_REQUIRE_DOCKER=1）と同期計画の種の数（7）を立てておき、同期の計画の 2 つの範囲（provider-sync-selection・provider-sync-steps）の行では
     /// Stryker から厳格モードが見えず（QUICKER_SKIP_DOCKER と両立しない）、種の数が表の値で上書きされ、終わった後は元の値に戻ることを見る。
     /// 期待の値はスクリプトの表から読まずにここへ書く（表の値を写すと、表を壊しても緑のまま）。
     /// <c>-TestsOnly</c> の行は、Stryker の代わりに表のテストのプロジェクトを表の絞り込みで <c>dotnet test --no-build</c> で呼び、
@@ -764,18 +775,20 @@ public sealed class WorkflowGuardTests
     )]
     [InlineData("model", "0", false, 1, true, 0)]
     [InlineData("model", "1", false, 1, false, 0)]
-    [InlineData("provider-sync-planner", "0", false, 1, true, 0)]
-    [InlineData("provider-sync-planner", "1", false, 1, false, 0)]
-    [InlineData("provider-sync-planner", "0", true, 1, true, 0)]
-    [InlineData("provider-sync-planner", "1", true, 1, false, 0)]
+    [InlineData("provider-sync-selection", "0", false, 1, true, 0)]
+    [InlineData("provider-sync-selection", "1", false, 1, false, 0)]
+    [InlineData("provider-sync-selection", "0", true, 1, true, 0)]
+    [InlineData("provider-sync-selection", "1", true, 1, false, 0)]
+    [InlineData("provider-sync-steps", "0", false, 1, true, 0)]
+    [InlineData("provider-sync-steps", "0", true, 1, true, 0)]
     [InlineData("model", "zero:1 0", false, 2, true, 1)]
     [InlineData("model", "zero:1 zero:1", false, 2, false, 1)]
     [InlineData("model", "found:1", false, 1, false, 0)]
     [InlineData("model", "zero:0", false, 1, true, 0)]
     [InlineData("model", "stale 1", false, 1, false, 0)]
     [InlineData("model", "stale zero:1 0", false, 2, true, 1)]
-    [InlineData("provider-sync-planner", "zero:1 0", false, 2, true, 1)]
-    [InlineData("provider-sync-planner", "zero:1", true, 1, false, 0)]
+    [InlineData("provider-sync-selection", "zero:1 0", false, 2, true, 1)]
+    [InlineData("provider-sync-selection", "zero:1", true, 1, false, 0)]
     public void MutationScript_RunsStrykerOnRootCopyAndRemovesIt(
         string target,
         string calls,
@@ -787,7 +800,7 @@ public sealed class WorkflowGuardTests
     {
         var (solution, environmentAtStryker) = target switch
         {
-            "provider-sync-planner" => (
+            "provider-sync-selection" or "provider-sync-steps" => (
                 "QuickER.TestsWithIntegration.slnx",
                 "QUICKER_REQUIRE_DOCKER= QUICKER_SKIP_DOCKER=1 QUICKER_SYNC_FUZZ_SEEDS=100 QUICKER_SYNC_CAPNET_SEEDS=500"
             ),
@@ -920,7 +933,7 @@ public sealed class WorkflowGuardTests
             )
             .Should()
             .Be(
-                target == "provider-sync-planner"
+                SyncPlannerTargets.Contains(target)
                     ? "QUICKER_SKIP_DOCKER=1 QUICKER_SYNC_FUZZ_SEEDS=100 QUICKER_SYNC_CAPNET_SEEDS=500"
                     : "",
                 "実行の環境に立てた変数を書く"
@@ -930,7 +943,7 @@ public sealed class WorkflowGuardTests
             .Select(variable => variable.GetString())
             .Should()
             .Equal(
-                target == "provider-sync-planner" ? ["QUICKER_REQUIRE_DOCKER"] : [],
+                SyncPlannerTargets.Contains(target) ? ["QUICKER_REQUIRE_DOCKER"] : [],
                 "実行の環境に外した変数を書く"
             );
         root.GetProperty("zeroTestRetries")
@@ -1435,15 +1448,33 @@ public sealed class WorkflowGuardTests
         }
     }
 
-    /// <summary>夜間のワークフローのジョブと、それが流すテストのプロジェクト</summary>
-    internal static readonly IReadOnlyDictionary<string, string> NightlyJobs = new Dictionary<
+    /// <summary>
+    /// 夜間の Integration の 2 つのジョブを分ける項（integration-nightly-dsl は肯定・integration-nightly-rest は否定）。
+    /// 2 つの絞り込みを 1 つの項から組み立てるので、照合の行 <c>nightly-job-test-commands</c> が、ワークフローの 2 つの式を
+    /// 同じ項の肯定と否定に固定する（片方の項や演算子を変えると、どのテストもちょうど 1 回流れる形が崩れて赤になる）
+    /// </summary>
+    private const string NightlyIntegrationSplitTerm =
+        "FullyQualifiedName~NamedQueryDslConditionFuzz";
+
+    /// <summary>夜間に流すテストの目印の絞り込み（<c>NightlyEngine=true</c>）</summary>
+    private const string NightlyEngineFilter =
+        NightlyEngineTrait.Name + "=" + NightlyEngineTrait.Selected;
+
+    /// <summary>夜間のワークフローのジョブと、それが流すテストのプロジェクトと絞り込み</summary>
+    internal static readonly IReadOnlyDictionary<
         string,
-        string
-    >
+        (string Project, string Filter)
+    > NightlyJobs = new Dictionary<string, (string Project, string Filter)>
     {
-        ["integration-nightly"] =
-            "tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj",
-        ["unit-nightly"] = "tests/QuickER.Tests/QuickER.Tests.csproj",
+        ["integration-nightly-dsl"] = (
+            IntegrationProject,
+            $"{NightlyEngineFilter}&{NightlyIntegrationSplitTerm}"
+        ),
+        ["integration-nightly-rest"] = (
+            IntegrationProject,
+            $"{NightlyEngineFilter}&{NightlyIntegrationSplitTerm.Replace("~", "!~", StringComparison.Ordinal)}"
+        ),
+        ["unit-nightly"] = (UnitTestProject, NightlyEngineFilter),
     };
 
     /// <summary>夜間のジョブが TRX を書くフォルダ（テストの手順と保存の手順で同じ値）</summary>
@@ -1637,8 +1668,15 @@ public sealed class WorkflowGuardTests
         string? RunEnvironmentJson
     );
 
+    /// <summary>同期の計画の 2 つの範囲（起動スクリプトの表で同じ設定を指す。期待の値はここに書き、表から読まない）</summary>
+    private static readonly string[] SyncPlannerTargets =
+    [
+        "provider-sync-selection",
+        "provider-sync-steps",
+    ];
+
     /// <summary>
-    /// 一時フォルダに偽のリポジトリ（起動スクリプト・テストだけのソリューションの正本 2 本・範囲 model と provider-sync-planner の設定）を作り、
+    /// 一時フォルダに偽のリポジトリ（起動スクリプト・テストだけのソリューションの正本 2 本・範囲 model と同期の計画の 2 つの範囲の設定）を作り、
     /// その外の作業フォルダから相対パスの結果のフォルダと並列度 3 で起動スクリプトを動かす。
     /// 呼び出し元は <see cref="MutationScriptParentEnvironment"/> の環境を立てて呼び、スクリプトの後の環境を記録する（失敗しても）。
     /// 偽の dotnet は呼ばれるたびに作業フォルダ・引数（1 つずつ）・その時点の写し・表の変数を記録し、<paramref name="calls"/> の
@@ -1681,7 +1719,13 @@ public sealed class WorkflowGuardTests
         }
 
         File.WriteAllText(Path.Combine(repository, "stryker", "model.json"), "{}");
-        File.WriteAllText(Path.Combine(repository, "stryker", "provider-sync-planner.json"), "{}");
+        foreach (var syncPlannerTarget in SyncPlannerTargets)
+        {
+            File.WriteAllText(
+                Path.Combine(repository, "stryker", $"{syncPlannerTarget}.json"),
+                "{}"
+            );
+        }
 
         // 呼び出しごとの結果を、偽の dotnet が読むファイル（終了コード・ログへ足す行）にする
         var steps = calls.Split(' ').ToList();

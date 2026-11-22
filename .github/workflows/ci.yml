@@ -216,15 +216,16 @@ jobs:
         run: dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --no-build --output detailed --report-trx --results-directory "${{ runner.temp }}/test-results"
 
       - name: 変異テストの環境で同期の計画のテストを流す
-        # 週 1 回の変異テスト（provider-sync-planner）の最初のテストの実行と同じ環境（Docker を飛ばし、種を減らす）で、
-        # その環境が変えるテストだけを流す。環境の変数は起動スクリプトの表だけが持つ（ここには書かない）。
+        # 週 1 回の変異テストの同期の計画の範囲（provider-sync-selection・provider-sync-steps。2 つは同じ環境）の最初のテストの実行と
+        # 同じ環境（Docker を飛ばし、種を減らす）で、その環境が変えるテストだけを流す。
+        # 環境の変数は起動スクリプトの表だけが持つ（ここには書かない）。
         # 種を減らすと外れるはずの表明が外れていないと、週 1 回の実行まで気づかずに Stryker が止まるので、PR で捕まえる。
         # ビルドは上の「ビルド」を使い回す（スクリプトが Integration を --no-build で流す。全体のビルドに Integration が入っている）
         env:
           TEMP: ${{ runner.temp }}
           TMP: ${{ runner.temp }}
         shell: pwsh
-        run: ./scripts/run-mutation.ps1 -Target provider-sync-planner -TestsOnly -OutputDirectory "${{ runner.temp }}/mutation-env"
+        run: ./scripts/run-mutation.ps1 -Target provider-sync-selection -TestsOnly -OutputDirectory "${{ runner.temp }}/mutation-env"
 
       - name: テストの結果を保存
         # 失敗した実行にも残す（確かめたいのは失敗の結果）
