@@ -66,6 +66,19 @@ internal static class SyncModelScenarioParts
         return calls;
     }
 
+    /// <summary>
+    /// その転送の Theory の端末が新しいエンジンか（真の転送の Theory は、今のエンジンだけの印
+    /// <see cref="SyncModelScenario.CurrentEngineOnly"/> のある行を流さない）。どの転送の Theory も新しいエンジンの端末
+    /// （<see cref="SyncModelEngineDevice"/>）で流すので、いつも真。今のエンジンの端末で決定的なシナリオを流すのは控えの Fact
+    /// （<see cref="SyncSupportAdoSqliteCurrentEngineRuntimeTests"/>）だけ
+    /// </summary>
+    public static bool RunsNewEngine(SyncModelTransport transport) => true;
+
+    /// <summary>その転送の Theory がシナリオを流すか</summary>
+    public static bool Runs(SyncModelScenario scenario, SyncModelTransport transport) =>
+        scenario.RunsOn(transport)
+        && !(RunsNewEngine(transport) && scenario.CurrentEngineOnly is not null);
+
     /// <summary>転送で流すシナリオのうち、<paramref name="part"/> 番目（0 から）のクラスが受け持つものの名前</summary>
     public static TheoryData<string> Names(SyncModelTransport transport, int part)
     {
@@ -80,7 +93,7 @@ internal static class SyncModelScenarioParts
         };
         var data = new TheoryData<string>();
         var names = SyncModelScenarios
-            .All.Where(s => s.RunsOn(transport))
+            .All.Where(s => Runs(s, transport))
             .Select(s => s.Name)
             .Where((_, index) => index % parts == part);
 
@@ -164,7 +177,7 @@ public sealed class SyncModelHttpRuntimeTestsPart4
 /// <summary>実 SQL Server の決定的なシナリオの 2 つ目の分（<see cref="SyncModelScenarioParts"/>）</summary>
 /// <remarks>
 /// 本体の <see cref="SyncModelSqlServerRuntimeTests"/>（<see cref="SqlServerSecondContainerCollection"/>）と別のコンテナの
-/// コレクションに置き、2 つの分を並べて流す。名前は行列の名前の規則に従う（本体は既知の一覧に載っていて、双方向同期の作り直しでそろえる）。
+/// コレクションに置き、2 つの分を並べて流す。端末は本体と同じく新しいエンジンの端末。名前は行列の名前の規則に従う（本体は既知の一覧に載っていて、双方向同期の作り直しでそろえる）。
 /// </remarks>
 [Trait("Category", "Integration")]
 [Trait("RequiresDocker", "true")]

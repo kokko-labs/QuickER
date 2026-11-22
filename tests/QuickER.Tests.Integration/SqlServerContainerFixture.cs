@@ -180,7 +180,7 @@ public sealed class SqlServerContainerCollection : ICollectionFixture<SqlServerC
 /// <c>SyncModelSqlServerRuntimeTests</c> と、HTTP 越しの実 SQL Server の <c>SyncSupportRemoteAdoSqlServerRuntimeTests</c>）を
 /// 別々のコレクションに置く。普段に一番重い実 SQL Server の決定的なシナリオの Theory は 2 つのクラスに分け
 /// （<c>SyncModelScenarioParts</c>）、片方ずつを置く。このコレクションの中身：<c>SyncModelSqlServerRuntimeTests</c>・
-/// <c>SqlServerSyncPlanFuzzTests</c>・<c>SqlServerNameFuzzDdlRoundTripIntegrationTests</c>・<c>SyncSupportAdoSqlServerEngineRuntimeTests</c>・
+/// <c>SqlServerSyncPlanFuzzTests</c>・<c>SqlServerNameFuzzDdlRoundTripIntegrationTests</c>・
 /// <c>ConcurrencyVoRemoteAdoSqlServerRuntimeTests</c>・<c>SyncConfigMatrixRuntimeTests</c>。
 /// </para>
 /// <para>

@@ -191,16 +191,21 @@ public sealed class SyncHttpRuntimeTests : SyncRuntimeTestsBase
     /// </summary>
     /// <remarks>
     /// 接続そのものが張れない失敗は応答を持たないため <see cref="RemoteError"/> による分類の対象外で、
-    /// 生成クライアントは HttpClient の例外をそのまま通す（GetById 等と同じ挙動＝同期だけの特別扱いはない）。
+    /// 生成クライアントは HttpClient の例外をそのまま通す（GetById 等と同じ挙動＝同期だけの特別扱いはない）。端末は新しいエンジン
+    /// （<see cref="SyncFixtureEngineDevice"/>・HTTP の差分ソース）で、エンジンもその例外を包まずに伝える。
     /// </remarks>
     [Fact(
         DisplayName = "[Sync/HTTP] サーバー不在では HTTP 例外がそのまま伝わる（分類は既存と同じ）"
     )]
     public async Task ServerDown_SurfacesAsHttpRequestException()
     {
+        using var device = await SyncFixtureEngineDevice.CreateAsync(
+            SyncFixtureServerSources.Resolve(_clientProvider!),
+            Ct
+        );
         await _remoteServer!.StopAsync(Ct);
 
-        var act = async () => await Engine.SyncAsync(cancellationToken: Ct);
+        var act = async () => await device.Engine.SyncAsync(null, Ct);
 
         await act.Should().ThrowAsync<HttpRequestException>();
     }

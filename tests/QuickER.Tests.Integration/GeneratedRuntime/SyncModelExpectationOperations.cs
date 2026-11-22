@@ -21,6 +21,13 @@ internal static class ExpectFacets
     /// <summary>端末かサーバー役の表の行（<c>{キー} {ExpectLocalOp と同じ行}</c>）</summary>
     public const string Rows = "rows";
 
+    /// <summary>
+    /// 端末の未送信の行（端末の同期の状態の面 <see cref="IModelDeviceSyncState.ReadPendingAsync"/>。表・キーの順）。行は
+    /// <c>{表} key={キー} row={present|gone}</c>：<c>row</c> はその行がいま端末の表に在るか。どの端末のエンジンでも同じ言葉で
+    /// 答える（記録の数・記録の版・書いた blob の列・サーバーがその行を知っているかのような、エンジンごとに答えの違う印は載せない）
+    /// </summary>
+    public const string Pending = "pending";
+
     /// <summary>端末の未送信のジャーナル（id の順）</summary>
     public const string Journal = "journal";
 
@@ -208,6 +215,10 @@ internal static class Expect
     /// <summary>書き手（端末かサーバー役）の表の行</summary>
     public static ExpectFacetOp Rows(ModelActor actor, string table) =>
         new(actor, ExpectFacets.Rows, table, []);
+
+    /// <summary>端末の未送信の行（どの端末のエンジンでも読める）</summary>
+    public static ExpectFacetOp Pending(ModelActor device) =>
+        new(device, ExpectFacets.Pending, null, []);
 
     /// <summary>端末の未送信のジャーナル</summary>
     public static ExpectFacetOp Journal(ModelActor device) =>

@@ -36,6 +36,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Trait("Category", "Integration")]
 [MatrixAxisValue(SyncModelTransportAxis.Name, nameof(SyncModelTransport.Direct))]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlite)]
+[RuntimeCell(RuntimeFeatures.SyncRefresh, RuntimeTarget.AdoSqlite)]
 public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModelTransportTests
 {
     /// <summary>1 つの種の操作の数</summary>
@@ -46,7 +47,10 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
 
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
-    /// <summary>夜間の既定の種の数</summary>
+    /// <summary>
+    /// <see cref="Seeds"/> の夜間の既定の種の数。今の端末の直結の乱数（<see cref="DirectSuite"/>）は夜間も普段の数で流すので、この
+    /// 数で流すテストは無い（新しいエンジンの端末の組の夜間の数の基準）
+    /// </summary>
     public const int NightlySeedCount = 1200;
 
     /// <summary>
@@ -65,7 +69,9 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             singleVariable: SeedVariable
         );
 
-    /// <summary>夜間の広い世界の種の既定の数</summary>
+    /// <summary>
+    /// <see cref="WideSeeds"/> の夜間の既定の数（<see cref="NightlySeedCount"/> と同じく、この数で流すテストは無い）
+    /// </summary>
     public const int NightlyWideSeedCount = 240;
 
     /// <summary>
@@ -275,23 +281,29 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     [Fact(
         DisplayName = "[Sync/モデル] 乱数の操作の列で、止まらず・収束し・消えない（既知の失敗の署名は除く）"
     )]
-    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
+    // 夜間に流さない（今のエンジンは近く消すので、夜間の深さは新しいエンジンに使う。夜間のプロファイルでも普段の種の数で流れる）
+    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.NotSelected)]
     public Task RandomSeeds_ConvergeWithoutLoss() => RunRandomSeedsAsync(DirectSuite, output);
 
     /// <summary>直結・製品の同期エンジンの端末で乱数の種を流すときの組（<see cref="RunRandomSeedsAsync"/> へ渡す）</summary>
+    /// <remarks>
+    /// 種の決め方は <see cref="Seeds"/>・<see cref="WideSeeds"/> の夜間の数を普段の数にしたもの（夜間のプロファイルでも普段の種だけを
+    /// 流す。普段の種が同じなので種の指紋の記録は <see cref="Seeds"/>・<see cref="WideSeeds"/> と共有する）。夜間だけの空振りの守りは
+    /// 持たない（夜間の種の数で流さないので、その照合が起きる種に届かない）
+    /// </remarks>
     internal static SyncModelRandomSuite DirectSuite { get; } =
         new(
             "SyncModel",
             SyncModelWorldOptions.Direct,
-            Seeds,
-            WideSeeds,
+            SyncModelRandomSuite.WithNightlyCount(Seeds, Seeds.RegularCount),
+            SyncModelRandomSuite.WithNightlyCount(WideSeeds, WideSeeds.RegularCount),
             SyncModelKnownFailures.Set,
             SyncModelDimensions.Gaps,
             SyncModelOutcomeDimensions.Gaps,
             SyncModelDimensions.DirectScope,
             RefusalBasisKinds,
             GuardedRunChecks,
-            [SyncModelRun.CarryEditLostCheck]
+            []
         );
 
     /// <summary>
@@ -729,8 +741,15 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             var mine = parts
                 .Where(part => part.Calls.Count == 1 && part.Calls[0].Transport == transport)
                 .ToList();
+            // 新しいエンジンの端末で流す転送は、今のエンジンだけの行の一覧に載った行を流さない（一覧をここで直接読む）
             var expected = SyncModelScenarios
-                .All.Where(s => s.RunsOn(transport))
+                .All.Where(s =>
+                    s.RunsOn(transport)
+                    && !(
+                        SyncModelScenarioParts.RunsNewEngine(transport)
+                        && SyncModelCurrentEngineOnlyScenarios.All.ContainsKey(s.Name)
+                    )
+                )
                 .Select(s => s.Name)
                 .ToList();
             var rows = mine.SelectMany(part => part.Rows.Select(row => (string)row.Data)).ToList();
@@ -1003,11 +1022,16 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     [MemberData(nameof(ScenarioNames))]
     public Task Scenario_FailsExactlyAsListed(string name) => AssertFailsExactlyAsListed(name);
 
-    /// <summary>決定的なシナリオを直結で流し、既知の失敗の一覧に載った署名の組どおりに失敗することを表明する</summary>
+    /// <summary>
+    /// 決定的なシナリオを直結・新しいエンジンの端末（<see cref="SyncModelEngineDevice"/>）で流し、既知の失敗の一覧
+    /// （<see cref="SyncModelKnownFailures.EngineSet"/>）に載った署名の組どおりに失敗することを表明する。今のエンジンの端末の
+    /// 結果は控え（<see cref="SyncSupportAdoSqliteCurrentEngineRuntimeTests"/>）が受け持つ。流した結果は
+    /// <see cref="SyncModelDirectRuns"/> を通して転送の Theory と共有する（違反の無い結果だけ。違反のある行は必ずこの行が自分で流す）
+    /// </summary>
     internal static async Task AssertFailsExactlyAsListed(string name)
     {
         var scenario = SyncModelScenarios.Get(name);
-        var (failures, log) = await scenario.RunAsync(Ct);
+        var (failures, log) = await SyncModelDirectRuns.RunAsync(scenario, Ct);
 
         // 判定役の対照の行は、既知の失敗の一覧を通さず、出た署名の集合と宣言の集合の一致で判定する
         if (scenario.ExpectedJudgeSignatures is { } expected)
@@ -1034,7 +1058,7 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
 
         // 署名の組が一覧のそのシナリオの組と等しいこと（載っていない署名も、載っているのに出ない署名も赤）
         var problem = SyncModelKnownFailures
-            .Set.Classify(
+            .EngineSet.Classify(
                 failures
                     .GroupBy(f => f.Signature, StringComparer.Ordinal)
                     .Select(g => new EngineFailure(name, g.Key, FirstLine(g.First().Detail))),
@@ -1089,7 +1113,10 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             ]
         );
 
-        var (failures, _) = await scenario.RunAsync(Ct);
+        var (failures, _) = await scenario.RunAsync(
+            Ct,
+            SyncModelEngineDevice.On(SyncModelWorldOptions.Direct)
+        );
 
         failures.Select(f => f.Signature).Should().Contain("3/blob-empty:model_items");
     }
@@ -1154,7 +1181,10 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             ]
         );
 
-        var (failures, _) = await scenario.RunAsync(Ct);
+        var (failures, _) = await scenario.RunAsync(
+            Ct,
+            SyncModelEngineDevice.On(SyncModelWorldOptions.Direct)
+        );
 
         failures.Select(f => f.Signature).Should().Contain("3/blob-empty:model_items");
     }

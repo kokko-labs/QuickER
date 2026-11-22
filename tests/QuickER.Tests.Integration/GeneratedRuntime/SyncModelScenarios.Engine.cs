@@ -73,7 +73,7 @@ internal static partial class SyncModelScenarios
                         .Exact("1 parent=null name=alice", "2 parent=null name=bob", "999 *"),
                     Expect.Rows(D1, I).Exact("11 *", "12 *", "999 *"),
                     Expect.Mirror(D1, F).Contains("key=1 mirror=server"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             Moved(
@@ -232,7 +232,7 @@ internal static partial class SyncModelScenarios
             Moved(
                 "dl-downloaded-rows-are-not-journaled",
                 [],
-                [.. Seed(1, "alice", 11, "widget"), Plain(D1), Expect.Journal(D1).Empty()]
+                [.. Seed(1, "alice", 11, "widget"), Plain(D1), Expect.Pending(D1).Empty()]
             ),
             Moved(
                 "ul-local-update-is-uploaded",
@@ -240,11 +240,11 @@ internal static partial class SyncModelScenarios
                 [
                     new CaptureMirrorOp(D1, F, "1", "before"),
                     Rename(D1, 1, "alice-local"),
-                    Expect.Journal(D1).Count("*", 1),
+                    Expect.Pending(D1).Exact($"{F} key=1 row=present"),
                     Plain(D1),
                     Expect.Result(D1).Contains("uploaded=1").Absent("conflict *"),
                     Expect.Rows(SV, F).Contains("1 parent=null name=alice-local"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                     Expect.Mirror(D1, F).Contains("key=1 mirror=server before=changed"),
                 ]
             ),
@@ -331,11 +331,11 @@ internal static partial class SyncModelScenarios
                 [],
                 [
                     new RecordJournalOp(D1, F, "99", SyncJournalOperation.Upsert),
-                    Expect.Journal(D1).Count("*", 1),
+                    Expect.Pending(D1).Exact($"{F} key=99 row=gone"),
                     Plain(D1),
                     Expect.Result(D1).Contains("uploaded=0").Absent("conflict *"),
                     Expect.Rows(SV, F).Absent("99 *"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             // [Sync/再生]
@@ -349,7 +349,7 @@ internal static partial class SyncModelScenarios
                     Plain(D1),
                     Expect.Result(D1).Contains("uploaded=1"),
                     Expect.Rows(SV, F).Contains("1 parent=null name=alice-edited"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             Moved(
@@ -365,7 +365,7 @@ internal static partial class SyncModelScenarios
                     Expect.Result(D1).Contains("uploaded=1"),
                     Expect.Rows(SV, I).Absent("11 *"),
                     Expect.Rows(D1, I).Absent("11 *"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             Moved(
@@ -377,7 +377,7 @@ internal static partial class SyncModelScenarios
                     Plain(D1),
                     Expect.Result(D1).Contains("uploaded=0", "discarded=1").Absent("conflict *"),
                     Expect.Rows(SV, F).Absent("50 *"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             Moved(
@@ -388,7 +388,7 @@ internal static partial class SyncModelScenarios
                     new AddLabelOp(D1, Direct, "L5", 9999, "orphan") { ExpectFailure = true },
                     Plain(D1, mode: SyncMode.LastWriteWins),
                     Expect.Rows(SV, L).Absent("L5 *"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             // [Sync/ack]
@@ -400,7 +400,8 @@ internal static partial class SyncModelScenarios
                     Rename(SV, 1, "alice-server"),
                     Rename(D1, 3, "carol-1"),
                     Plain(D1),
-                    Expect.Result(D1).Contains("uploaded=1", $"truncation {F} pending=1 *"),
+                    // 未送信の行（フォルダー 1）はローカルの内容を保ち、保留に数えない
+                    Expect.Result(D1).Contains("uploaded=1").Absent("truncation *"),
                     Rename(D1, 3, "carol-2"),
                     Plain(D1),
                     Expect

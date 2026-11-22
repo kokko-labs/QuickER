@@ -21,7 +21,7 @@ internal static partial class SyncModelScenarios
                     Plain(D1, policy: SyncConflictPolicy.ServerWins, batch: 0),
                     Expect.Result(D1).Contains("exception ArgumentOutOfRangeException: *"),
                     Expect.Rows(D1, F).Contains("1 parent=null name=alice-local"),
-                    Expect.Journal(D1).Count("*", 1),
+                    Expect.Pending(D1).Exact($"{F} key=1 row=present"),
                 ]
             ),
             Moved(
@@ -34,7 +34,7 @@ internal static partial class SyncModelScenarios
                     Plain(D1, policy: SyncConflictPolicy.ServerWins),
                     Expect.Result(D1).Absent("conflict *"),
                     Expect.Rows(D1, I).Contains("11 folder=2 label=null code=c-11 title=widget"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             // フォルダーの表の取得の後・品目の表の取得の前に、サーバーの他者が新しいフォルダーとその下の品目を作る：品目の取得は
@@ -95,7 +95,7 @@ internal static partial class SyncModelScenarios
                     .. EditedItemWhoseFolderWasDeletedOnServer(),
                     Plain(D1, mode: SyncMode.LastWriteWins, policy: SyncConflictPolicy.ServerWins),
                     Expect.Result(D1).Contains("discarded=1").Absent("conflict *"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                     Expect.Rows(SV, F).Absent("1 *"),
                     Expect.Rows(D1, I).Absent("11 *"),
                     Expect.Rows(D1, F).Absent("1 *"),
@@ -110,7 +110,7 @@ internal static partial class SyncModelScenarios
                     Expect.Result(D1).Contains("discarded=1").Absent("conflict *", "truncation *"),
                     Expect.Rows(D1, F).Contains("1 *"),
                     Expect.Rows(D1, I).Contains("21 *"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             // 端末がラベル L1 を消し、L1 を参照する品目 11 を別のラベル M1 へ付け替える（どちらも未送信）。Versioned × ServerWins は
@@ -181,8 +181,7 @@ internal static partial class SyncModelScenarios
                         .Result(D1)
                         .Count("conflict *", 1)
                         .Single("conflict * reason=ParentMissingOnServer *")
-                        .Count($"truncation {L} *", 1)
-                        .Single($"truncation {L} pending=L101 missing-parent=- *"),
+                        .Absent("truncation *"),
                     Expect.Rows(D1, L).Contains("L102 folder=1 caption=b2"),
                 ]
             ),
@@ -240,7 +239,7 @@ internal static partial class SyncModelScenarios
                     Expect.Result(D1).Absent("conflict *", "truncation *"),
                     Expect.Rows(D1, F).Contains("1 *"),
                     Expect.Rows(D1, I).Contains("21 *"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             Moved(
@@ -309,7 +308,7 @@ internal static partial class SyncModelScenarios
                             "11 folder=1 label=null code=c-11 title=widget-server",
                             "12 folder=2 label=null code=c-12 title=gadget"
                         ),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             Moved(
@@ -341,7 +340,8 @@ internal static partial class SyncModelScenarios
                     ),
                     Plain(D1),
                     Expect.Rows(D1, F).Contains("1 parent=null name=alice-local"),
-                    Expect.Result(D1).Count("truncation * pending=1 *", 1),
+                    Expect.Result(D1).Absent("truncation *"),
+                    Expect.Pending(D1).Exact($"{F} key=1 row=present"),
                 ]
             ),
             Moved(
@@ -352,7 +352,7 @@ internal static partial class SyncModelScenarios
                     {
                         ExpectFailure = true,
                     },
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             Moved(
@@ -360,7 +360,7 @@ internal static partial class SyncModelScenarios
                 [.. Seed(1, "alice", 11, "widget")],
                 [
                     new WritePayloadOp(D1, 11, "0A0B0C") { ExpectFailure = true },
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             Moved(
@@ -372,7 +372,7 @@ internal static partial class SyncModelScenarios
                     {
                         ExpectFailure = true,
                     },
-                    Expect.Journal(D1).Exact($"{I} key=11 *"),
+                    Expect.Pending(D1).Exact($"{I} key=11 row=present"),
                     Plain(D1),
                     Expect.Result(D1).Absent("conflict *"),
                     Expect.Rows(SV, I).Contains("11 folder=1 label=null code=c-11 title=edited"),
@@ -431,7 +431,7 @@ internal static partial class SyncModelScenarios
                     .Count("conflict *", 1)
                     .Single($"conflict {I} key=11 op=Upsert reason=ParentMissingOnServer *"),
                 Expect.Rows(SV, F).Absent("1 *"),
-                Expect.Journal(D1).Count("*", 1),
+                Expect.Pending(D1).Exact($"{I} key=11 row=present"),
             ]
         );
 
@@ -462,7 +462,7 @@ internal static partial class SyncModelScenarios
                     .Contains($"truncation {I} pending=21 missing-parent={F} *"),
                 Expect.Rows(D1, I).Absent("21 *"),
                 Expect.Rows(SV, F).Contains("1 *"),
-                Expect.Journal(D1).Count("*", 1),
+                Expect.Pending(D1).Exact($"{F} key=1 row=gone"),
             ]
         );
 
@@ -502,7 +502,7 @@ internal static partial class SyncModelScenarios
                     Plain(D1),
                     Expect.Result(D1).Contains("uploaded=2").Absent("conflict *"),
                     Expect.Rows(SV, F).Contains("760 parent=null name=f760 pinned=761"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             // ダウンロード：フォルダーの表を先に降ろすとき、ピン留めの先の品目がまだローカルに無いので、親をそろえる解決役が
@@ -530,9 +530,21 @@ internal static partial class SyncModelScenarios
                     Rename(D1, 780, "local"),
                     PlainOnly(D1, ModelSyncKind.Upload, policy: SyncConflictPolicy.ServerWins),
                     Expect.Result(D1).Absent("conflict *"),
+                    // 戻せなかった行の決定を持ち越すエンジンは、端末に無い品目をピン留めするサーバーの行をその実行では戻さず、
+                    // フォルダーを端末の内容のまま未送信で残す。次の同期が品目と一緒に戻す
+                    new WhenEngineDeclaresOp(
+                        D1,
+                        EngineDeclaration.CarriesServerWinsDecision,
+                        [
+                            Expect.Rows(D1, F).Contains("780 parent=null name=local*"),
+                            Expect.Pending(D1).Exact($"{F} key=780 row=present"),
+                            Plain(D1, policy: SyncConflictPolicy.ServerWins),
+                        ],
+                        []
+                    ),
                     Expect.Rows(D1, F).Contains("780 parent=null name=f780 pinned=782"),
                     Expect.Rows(D1, I).Contains("782 *"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
         ];

@@ -8,7 +8,7 @@
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelCoverageRows.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelDeviceFacets.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelDimensions.cs",
-        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelEngineTransportRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelDirectRuns.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelExpectationOperations.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelFaults.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelGenerator.cs",
@@ -19,6 +19,7 @@
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelRun.Expect.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelRun.Ledger.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelScenarioLedger.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelScenarios.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelScenarios.Engine.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelScenarios.Engine.Blobs.cs",
@@ -30,7 +31,8 @@
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelServer.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelTransportRuntimeTests.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelTransports.cs",
-        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelWorld.cs"
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelWorld.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportAdoSqliteCurrentEngineRuntimeTests.cs"
       ],
       "covers": [
         "src/QuickER.Runtime.Sync",
@@ -434,6 +436,7 @@
       "sourceFiles": [
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncEngineFixedRows.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncEngineFixedHarness.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncEngineFixtureDevices.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportAdoSqliteEngineRuntimeTests.cs"
       ],
       "covers": [

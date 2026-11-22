@@ -72,6 +72,7 @@ internal static class TableRegistry
             [
                 Runtime + "SyncEngineFixedRows.cs",
                 Runtime + "SyncEngineFixedHarness.cs",
+                Runtime + "SyncEngineFixtureDevices.cs",
                 Runtime + "SyncSupportAdoSqliteEngineRuntimeTests.cs",
             ],
             [

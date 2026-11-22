@@ -37,14 +37,12 @@ internal static partial class SyncModelScenarios
     private const string ServerHolderReferrer = "folder=3782 label=null code=c-sv-1782 title=t1782";
 
     /// <summary>ServerWins の同期 1 回で決着したこと（持ち主が消え、待っていたフォルダーと品目のサーバーの写しが入る）</summary>
-    private static IEnumerable<ModelOp> ExpectHolderKeptByItemSettled() =>
+    /// <param name="referrerReason">持ち主を引き留めていた品目 1782 が、実行が変えた行の一覧に載る理由</param>
+    private static IEnumerable<ModelOp> ExpectHolderKeptByItemSettled(
+        SyncLocalRowChangeReason referrerReason
+    ) =>
         [
-            new ExpectLocalRowChangeOp(
-                D1,
-                ModelTables.Items,
-                "1782",
-                SyncLocalRowChangeReason.RemovedForUniqueValue
-            ),
+            new ExpectLocalRowChangeOp(D1, ModelTables.Items, "1782", referrerReason),
             new ExpectLocalOp(D1, ModelTables.Folders, "1781", null),
             new ExpectLocalOp(D1, ModelTables.Folders, "3781", "parent=null name=h1781"),
             new ExpectLocalOp(D1, ModelTables.Items, "1782", ServerHolderReferrer),
@@ -56,14 +54,15 @@ internal static partial class SyncModelScenarios
         // 消し、3781・3782 を入れてから品目 1782 をサーバーの写しで入れ直す
         yield return new("holder-referenced-by-other-table-settles", [], HolderKeptByItemOps());
 
-        // ServerWins の同期 1 回で、その同期の中で決着する（後勝ち＋ServerWins も同じ）
+        // ServerWins の同期 1 回で、その同期の中で決着する（後勝ち＋ServerWins も同じ）。品目 1782 の未送信の挿入は
+        // ServerWins が捨てた変更として載る
         yield return new(
             "holder-referenced-by-other-table-serverwins-settles-in-one-sync",
             [],
             [
                 .. HolderKeptByItemOps(),
                 Sync(D1, policy: SyncConflictPolicy.ServerWins),
-                .. ExpectHolderKeptByItemSettled(),
+                .. ExpectHolderKeptByItemSettled(SyncLocalRowChangeReason.DiscardedByServerWins),
             ]
         );
         yield return new(
@@ -72,7 +71,7 @@ internal static partial class SyncModelScenarios
             [
                 .. HolderKeptByItemOps(),
                 Sync(D1, SyncMode.LastWriteWins, SyncConflictPolicy.ServerWins),
-                .. ExpectHolderKeptByItemSettled(),
+                .. ExpectHolderKeptByItemSettled(SyncLocalRowChangeReason.DiscardedByServerWins),
             ]
         );
 
@@ -115,7 +114,7 @@ internal static partial class SyncModelScenarios
                 new ExpectLocalOp(D1, ModelTables.Items, "1782", LocalHolderReferrer),
                 new RefuseJournalRemovalOp(D1, ModelTables.Items, "1782", Refuse: false),
                 Sync(D1, policy: SyncConflictPolicy.ServerWins),
-                .. ExpectHolderKeptByItemSettled(),
+                .. ExpectHolderKeptByItemSettled(SyncLocalRowChangeReason.RemovedForUniqueValue),
             ]
         );
 
@@ -160,12 +159,6 @@ internal static partial class SyncModelScenarios
             [
                 .. StaleCopyOps(),
                 Sync(D1),
-                new ExpectLocalRowChangeOp(
-                    D1,
-                    ModelTables.Items,
-                    "811",
-                    SyncLocalRowChangeReason.RemovedForUniqueValue
-                ),
                 new ExpectLocalOp(D1, ModelTables.Folders, "810", null),
                 new ExpectLocalOp(D1, ModelTables.Folders, "813", "parent=null name=h810"),
                 new ExpectLocalOp(
@@ -230,15 +223,6 @@ internal static partial class SyncModelScenarios
     private static string CurrentChildJournalKey =>
         CurrentChildAt.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff", CultureInfo.InvariantCulture);
 
-    /// <summary>子のイベントをその同期が降ろし直す約束つきで消したこと</summary>
-    private static ExpectLocalRowChangeOp ExpectChildRemoved() =>
-        new(
-            D1,
-            ModelTables.Events,
-            CurrentChildJournalKey,
-            SyncLocalRowChangeReason.RemovedForUniqueValue
-        );
-
     /// <summary>端末の降ろし直す約束（quicker_sync_row_pending）の件数を確かめる</summary>
     private static ExpectLocalSqlOp ExpectOwedRows(int count) =>
         new(
@@ -292,7 +276,6 @@ internal static partial class SyncModelScenarios
                 "folder=813 label=null code=c-811 title=t811"
             ),
             new ExpectLocalOp(D1, ModelTables.Events, CurrentChildKey, "item=811 memo=child"),
-            ExpectOwedRows(0),
         ];
 
     /// <summary>
@@ -324,20 +307,20 @@ internal static partial class SyncModelScenarios
                 [
                     .. CurrentChildOps(),
                     Sync(D1, mode, SyncConflictPolicy.ServerWins),
-                    .. ExpectHolderKeptByItemSettled(),
-                    ExpectChildRemoved(),
+                    .. ExpectHolderKeptByItemSettled(
+                        SyncLocalRowChangeReason.DiscardedByServerWins
+                    ),
                     new ExpectLocalOp(
                         D1,
                         ModelTables.Events,
                         CurrentChildKey,
                         "item=1782 memo=server-child"
                     ),
-                    ExpectOwedRows(0),
                 ]
             );
         }
 
-        // Collect・LocalWins は、引き留める品目 1782 が送るもの（未送信の挿入）を持つので消さず、約束も作らない
+        // Collect・LocalWins は、引き留める品目 1782 が送るもの（未送信の挿入）を持つので消さない
         foreach (
             var (suffix, policy) in new[]
             {
@@ -359,7 +342,6 @@ internal static partial class SyncModelScenarios
                         CurrentChildKey,
                         "item=1782 memo=server-child"
                     ),
-                    ExpectOwedRows(0),
                 ]
             );
         }
@@ -380,12 +362,7 @@ internal static partial class SyncModelScenarios
             yield return new(
                 $"holder-referenced-by-other-table-stale-copy-with-current-child-settles-{suffix}",
                 StaleCopyWithChildSetup(),
-                [
-                    .. StaleCopyOps(),
-                    Sync(D1, mode, policy),
-                    ExpectChildRemoved(),
-                    .. ExpectStaleCopyWithChildSettled(),
-                ]
+                [.. StaleCopyOps(), Sync(D1, mode, policy), .. ExpectStaleCopyWithChildSettled()]
             );
         }
 

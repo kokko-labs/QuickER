@@ -77,12 +77,6 @@ public sealed class SyncSqlServerRuntimeTests(
     private ISyncOrderRepository ServerOrders() =>
         _provider.GetRequiredKeyedService<ISyncOrderRepository>(ServerKey);
 
-    /// <summary>同期エンジン</summary>
-    private SyncEngine Engine() => _provider.GetRequiredService<SyncEngine>();
-
-    /// <summary>ジャーナル</summary>
-    private SyncJournal Journal() => _provider.GetRequiredService<SyncJournal>();
-
     /// <summary>
     /// 実 SQL Server を相手にした洗い替えと全量ダウンロードの所要時間を 1 回ずつ測る（表明は同値性だけ）。
     /// </summary>
@@ -263,18 +257,16 @@ public sealed class SyncSqlServerRuntimeTests(
     private ISyncMarkerRepository ServerMarkers() =>
         _provider.GetRequiredKeyedService<ISyncMarkerRepository>(ServerKey);
 
-    /// <summary>ローカル側（SQLite）のマーカーリポジトリ＝ジャーナル記録デコレータが被さっている</summary>
-    private ISyncMarkerRepository LocalMarkers() =>
-        _provider.GetRequiredKeyedService<ISyncMarkerRepository>(LocalKey);
-
     /// <summary>
-    /// サーバーに NULL の値の行があるとき、ローカルで作った 2 行目の NULL の行は、Collect・LocalWins では
-    /// UniqueValueTakenOnServer として報告されて記録が残り、ServerWins では決着する（どのポリシー・モードでも止まらない）。
+    /// サーバーに NULL の値の行があるとき、端末で作った 2 行目の NULL の行は、Collect・LocalWins では
+    /// UniqueValueTakenOnServer として報告されて未送信が残り、ServerWins では決着する（どのポリシー・モードでも止まらない）。
     /// </summary>
     /// <remarks>
     /// SQL Server の UNIQUE 制約は NULL を値として比べ、同じ組の 2 行目の NULL を断る（エラー 2627）。サーバーの事前チェック
     /// （QuickER 版 Repository の <c>CheckUniquenessAsync</c>）が NULL を照合から外していると、エンジンは断られた書き込みの
     /// 理由を見つけられずに元の例外を投げ直し、同期が毎回止まる。単一列の制約と、NULL を含む複合の制約の両方で確かめる。
+    /// 端末は新しいエンジン（<see cref="SyncFixtureEngineDevice"/>・トリガーで記録する）で、サーバーの差分ソースは DI に登録した
+    /// 生成の直結の差分ソース。
     /// </remarks>
     [Theory(
         DisplayName = "[Sync/SqlServer] NULL の一意な値がサーバーで埋まっていると、どのポリシーとモードでも同期は止まらない"
@@ -293,18 +285,22 @@ public sealed class SyncSqlServerRuntimeTests(
         bool composite
     )
     {
+        using var device = await SyncFixtureEngineDevice.CreateAsync(
+            SyncFixtureServerSources.Resolve(_provider),
+            Ct
+        );
         await ServerMarkers().InsertAsync(NewMarker(1, composite), Ct);
         var options = new SyncOptions { ConflictPolicy = policy, Mode = mode };
-        await Engine().SyncAsync(options, Ct);
-        await LocalMarkers().InsertAsync(NewMarker(2, composite), Ct);
+        await device.Engine.SyncAsync(options, Ct);
+        await device.Markers.InsertAsync(NewMarker(2, composite), Ct);
 
-        var result = await Engine().SyncAsync(options, Ct);
+        var result = await device.Engine.SyncAsync(options, Ct);
 
         if (policy == SyncConflictPolicy.ServerWins)
         {
             result.Conflicts.Should().BeEmpty();
-            (await Journal().CountPendingAsync(Ct)).Should().Be(0);
-            (await LocalMarkers().GetAllAsync(Ct))
+            (await device.ReadUnsentAsync(Ct)).Should().BeEmpty();
+            (await device.Markers.GetAllAsync(Ct))
                 .Select(marker => marker.MarkerId)
                 .Should()
                 .Equal(1);
@@ -320,10 +316,10 @@ public sealed class SyncSqlServerRuntimeTests(
                     && conflict.KeyText == "2"
                     && conflict.Reason == SyncConflictReason.UniqueValueTakenOnServer
                 );
-            (await Journal().ReadAllAsync(Ct))
+            (await device.ReadUnsentAsync(Ct))
                 .Should()
-                .ContainSingle(entry => entry.KeyText == "2");
-            (await LocalMarkers().GetByIdAsync(2, Ct)).Should().NotBeNull();
+                .ContainSingle(row => row.Table == "sync_markers" && row.KeyText == "2");
+            (await device.Markers.GetByIdAsync(2, Ct)).Should().NotBeNull();
         }
 
         (await ServerMarkers().GetAllAsync(Ct)).Select(marker => marker.MarkerId).Should().Equal(1);

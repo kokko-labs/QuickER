@@ -4,12 +4,12 @@ using System.Collections.Generic;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// 小さい塊の端末（<see cref="SyncModelEngineDevice.OnSmallChunks"/>）で決定的なシナリオを流した結果が、新しいエンジンの端末の控え
-/// （<c>sync-engine-scenario-ledger.md</c>）の同じ行と違う行の理由の宣言（シナリオの名前 → 理由の 1 行）。
+/// 小さい塊の端末（<see cref="SyncModelEngineDevice.OnSmallChunks"/>）で決定的なシナリオを流した結果が、1 回で全部の道の端末
+/// （直結の Theory）と違う行の理由の宣言（シナリオの名前 → 理由の 1 行）。
 /// </summary>
 /// <remarks>
-/// 違う行の集合と 2 方向に照合する（宣言の無い違う行も、宣言があるのに控えと一致している行も赤。
-/// <see cref="SyncSupportAdoSqliteEngineRuntimeTests.SmallChunkScenarios_MatchLedger"/>）。理由は、塊の経路が 1 回で全部の経路と
+/// 違う行の集合と 2 方向に照合する（宣言の無い違う行も、宣言があるのに直結の実行と同じ結果の行も赤。
+/// <see cref="SyncSupportAdoSqliteEngineRuntimeTests.SmallChunkScenarios_MatchDirect"/>）。理由は、塊の経路が 1 回で全部の経路と
 /// 違う答えを出す具体的な仕組み（削除の段・キーを先に取る順・塊ごとの確定）を書く。
 /// </remarks>
 internal static class SyncModelSmallChunkScenarioDifferences

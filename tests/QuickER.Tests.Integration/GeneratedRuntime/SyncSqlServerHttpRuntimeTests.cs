@@ -27,7 +27,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <para>
 /// サーバープロセスの DI は実運用と同じ形＝リポジトリを素直に登録し、<c>AddGeneratedDirectSyncSources(null)</c> で
 /// 差分ソースを載せ、<c>MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous)</c> を張るだけ。クライアントは
-/// <c>AddGeneratedHttpSyncSources</c> ＋ ローカル SQLite の keyed 登録で組む。
+/// <c>AddGeneratedHttpSyncSources</c> ＋ 端末の SQLite で新しいエンジン（<see cref="SyncFixtureEngineDevice"/>・トリガーで記録する）を組む。
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
@@ -42,25 +42,20 @@ public sealed class SyncSqlServerHttpRuntimeTests(SqlServerContainerFixture fixt
     : IAsyncLifetime
 {
     private readonly SqlServerContainerFixture _fixture = fixture;
-    private readonly SqliteTempDatabase _sqlite = SqliteTempDatabase.Create();
 
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
-
-    /// <summary>ローカル側キー（SQLite）</summary>
-    private const string LocalKey = "local";
 
     private InProcessRemoteServer _server = null!;
     private ServiceProvider _serverSideProvider = null!;
     private ServiceProvider _clientProvider = null!;
 
-    /// <summary>サーバー側スキーマ（rowversion）とローカル側スキーマ（BLOB）を作り、Kestrel とクライアント DI を組む</summary>
+    /// <summary>サーバー側スキーマ（rowversion）を作り、Kestrel とクライアント DI（HTTP の差分ソース）を組む</summary>
     public async ValueTask InitializeAsync()
     {
         Assert.SkipUnless(_fixture.IsAvailable, _fixture.UnavailableReason);
 
         await _fixture.ResetSchemaAsync(Ct);
         await _fixture.ApplyDdlAsync(SyncFixtureDefinition.Build(), Ct);
-        await _sqlite.ApplyDdlAsync(SyncFixtureDefinition.BuildSqliteMirror(), Ct);
 
         _server = await InProcessRemoteServer.StartAsync(
             services =>
@@ -78,16 +73,11 @@ public sealed class SyncSqlServerHttpRuntimeTests(SqlServerContainerFixture fixt
         _serverSideProvider = serverSideServices.BuildServiceProvider();
 
         var clientServices = new ServiceCollection();
-        clientServices.AddGeneratedSqliteRepositories(
-            LocalKey,
-            _sqlite.ReadWriteCreateConnectionString
-        );
         clientServices.AddGeneratedHttpSyncSources(_server.BaseAddress(RemotePaths.DefaultPrefix));
-        clientServices.AddGeneratedSyncEngine(LocalKey);
         _clientProvider = clientServices.BuildServiceProvider();
     }
 
-    /// <summary>Kestrel・DI コンテナ・一時 DB を破棄する</summary>
+    /// <summary>Kestrel・DI コンテナを破棄する</summary>
     public async ValueTask DisposeAsync()
     {
         _clientProvider?.Dispose();
@@ -97,23 +87,15 @@ public sealed class SyncSqlServerHttpRuntimeTests(SqlServerContainerFixture fixt
         {
             await _server.DisposeAsync();
         }
-
-        _sqlite.Dispose();
     }
 
     /// <summary>サーバー側（SQL Server）の注文リポジトリ＝テストが直接叩く</summary>
     private ISyncOrderRepository ServerOrders =>
         _serverSideProvider.GetRequiredService<ISyncOrderRepository>();
 
-    /// <summary>ローカル側（SQLite）の注文リポジトリ＝ジャーナル記録デコレータが被さっている</summary>
-    private ISyncOrderRepository LocalOrders =>
-        _clientProvider.GetRequiredKeyedService<ISyncOrderRepository>(LocalKey);
-
-    /// <summary>同期エンジン</summary>
-    private SyncEngine Engine => _clientProvider.GetRequiredService<SyncEngine>();
-
-    /// <summary>ジャーナル</summary>
-    private SyncJournal Journal => _clientProvider.GetRequiredService<SyncJournal>();
+    /// <summary>HTTP の差分ソースで新しいエンジンの端末を作る</summary>
+    private Task<SyncFixtureEngineDevice> CreateDeviceAsync() =>
+        SyncFixtureEngineDevice.CreateAsync(SyncFixtureServerSources.Resolve(_clientProvider), Ct);
 
     /// <summary>HTTP 差分ソース（上限の取得を直接確かめるのに使う）</summary>
     private ISyncServerSource<SyncOrderEntity, int> OrderSource =>
@@ -144,30 +126,33 @@ public sealed class SyncSqlServerHttpRuntimeTests(SqlServerContainerFixture fixt
     )]
     public async Task Upload_WritesBackVersionAndCollectsConflictOverHttp()
     {
+        using var device = await CreateDeviceAsync();
         await ServerOrders.InsertAsync(
             new SyncOrderEntity { OrderId = 1, CustomerName = "alice" },
             Ct
         );
-        await Engine.SyncAsync(cancellationToken: Ct);
+        await device.Engine.SyncAsync(null, Ct);
 
-        var before = (await LocalOrders.GetByIdAsync(1, Ct))!.RowVer;
+        var before = (await device.Orders.GetByIdAsync(1, Ct))!.RowVer;
 
-        var edited = await LocalOrders.GetByIdAsync(1, Ct);
+        var edited = await device.Orders.GetByIdAsync(1, Ct);
         edited!.CustomerName = "alice-offline";
-        await LocalOrders.UpdateAsync(edited, cancellationToken: Ct);
+        await device.Orders.UpdateAsync(edited, cancellationToken: Ct);
 
-        var uploaded = await Engine.SyncAsync(cancellationToken: Ct);
+        var uploaded = await device.Engine.SyncAsync(null, Ct);
 
         uploaded.Uploaded.Should().Be(1);
         uploaded.Conflicts.Should().BeEmpty();
-        (await ServerOrders.GetByIdAsync(1, Ct))!.CustomerName.Should().Be("alice-offline");
-        var after = (await LocalOrders.GetByIdAsync(1, Ct))!.RowVer;
-        after!.SequenceEqual(before!).Should().BeFalse("サーバーが採番し直した版がミラーへ入る");
+        var stored = await ServerOrders.GetByIdAsync(1, Ct);
+        stored!.CustomerName.Should().Be("alice-offline");
+        var after = (await device.Orders.GetByIdAsync(1, Ct))!.RowVer;
+        after!.SequenceEqual(before!).Should().BeFalse("サーバーが採番し直した版が端末へ入る");
+        after.Should().Equal(stored.RowVer, "書き戻した版はサーバーの版そのもの");
 
-        // ここから競合: ローカルを編集し、サーバー側の版だけを Repository を経由せず進める
-        var conflicting = await LocalOrders.GetByIdAsync(1, Ct);
+        // ここから競合: 端末を編集し、サーバー側の版だけを Repository を経由せず進める
+        var conflicting = await device.Orders.GetByIdAsync(1, Ct);
         conflicting!.CustomerName = "offline-edit";
-        await LocalOrders.UpdateAsync(conflicting, cancellationToken: Ct);
+        await device.Orders.UpdateAsync(conflicting, cancellationToken: Ct);
 
         await ServerOrders.ExecuteSqlAsync(
             "UPDATE [sync_orders] SET [customer_name] = @n WHERE [order_id] = 1;",
@@ -175,14 +160,16 @@ public sealed class SyncSqlServerHttpRuntimeTests(SqlServerContainerFixture fixt
             Ct
         );
 
-        var result = await Engine.SyncAsync(cancellationToken: Ct);
+        var result = await device.Engine.SyncAsync(null, Ct);
 
         var conflict = result.Conflicts.Should().ContainSingle().Subject;
         conflict.Reason.Should().Be(SyncConflictReason.ModifiedOnServer);
         ((SyncOrderEntity)conflict.ServerEntity!).CustomerName.Should().Be("server-edit");
-        (await Journal.CountPendingAsync(Ct))
+        (await device.ReadUnsentAsync(Ct))
             .Should()
-            .Be(1, "解決していないエントリはジャーナルに残る");
+            .ContainSingle("解決していない変更は未送信のまま残る")
+            .Which.KeyText.Should()
+            .Be("1");
     }
 
     /// <summary>
@@ -194,20 +181,22 @@ public sealed class SyncSqlServerHttpRuntimeTests(SqlServerContainerFixture fixt
     )]
     public async Task NullUniqueValueTakenOnServer_IsReportedOverHttp()
     {
+        using var device = await CreateDeviceAsync();
         var serverMarkers = _serverSideProvider.GetRequiredService<ISyncMarkerRepository>();
-        var localMarkers = _clientProvider.GetRequiredKeyedService<ISyncMarkerRepository>(LocalKey);
         await serverMarkers.InsertAsync(new SyncMarkerEntity { MarkerId = 1, Code = null }, Ct);
-        await Engine.SyncAsync(cancellationToken: Ct);
-        await localMarkers.InsertAsync(new SyncMarkerEntity { MarkerId = 2, Code = null }, Ct);
+        await device.Engine.SyncAsync(null, Ct);
+        await device.Markers.InsertAsync(new SyncMarkerEntity { MarkerId = 2, Code = null }, Ct);
 
-        var result = await Engine.SyncAsync(cancellationToken: Ct);
+        var result = await device.Engine.SyncAsync(null, Ct);
 
         result
             .Conflicts.Should()
             .ContainSingle()
             .Which.Reason.Should()
             .Be(SyncConflictReason.UniqueValueTakenOnServer);
-        (await Journal.ReadAllAsync(Ct)).Should().ContainSingle(entry => entry.KeyText == "2");
+        (await device.ReadUnsentAsync(Ct))
+            .Should()
+            .ContainSingle(row => row.Table == "sync_markers" && row.KeyText == "2");
         (await serverMarkers.GetAllAsync(Ct)).Select(marker => marker.MarkerId).Should().Equal(1);
     }
 }

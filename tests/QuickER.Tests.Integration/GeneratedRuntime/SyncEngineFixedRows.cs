@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,7 +9,9 @@ using Microsoft.Data.Sqlite;
 using QuickER.Tests.GeneratedSyncModelFixture;
 using QuickER.Tests.TestSupport.Engines;
 using Xunit;
+using S = QuickER.Tests.GeneratedSyncFixture;
 using Sqlite = QuickER.Tests.GeneratedSyncModelFixture.Repositories.Sqlite;
+using V = QuickER.Tests.GeneratedSyncVoFixture;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -24,8 +27,11 @@ internal sealed record SyncEngineFixedCase(
 /// 中の同期・空にした表・引数）と、行の状態の表の印が決める blob の運び方（主キーを変えた行・一意な値の回転）。
 /// </summary>
 /// <remarks>
-/// 端末とサーバー役は <see cref="SyncEngineFixedHarness"/>。行は今のエンジンでは流さない（同じ形の今のエンジンの振る舞いは、
-/// 同期のモデルと <see cref="SyncRuntimeTestsBase"/> が持つ）。
+/// 端末とサーバー役は <see cref="SyncEngineFixedHarness"/>（同期のモデルの図）。同期のモデルの図に無い形（NULL 許容の計算列・
+/// NULL 許容の除外 blob・値オブジェクトのキーと版）の行は、行の中で SyncFixture・SyncVoFixture の端末
+/// （<see cref="SyncFixtureEngineDevice"/>・<see cref="SyncVoFixtureEngineDevice"/>）とサーバー役
+/// （<see cref="SyncFixtureTestServer"/>・<see cref="SyncVoFixtureTestServer"/>）を組む。行は今のエンジンでは流さない（同じ形の
+/// 今のエンジンの振る舞いは、同期のモデルと <see cref="SyncRuntimeTestsBase"/> が持つ）。
 /// </remarks>
 internal static class SyncEngineFixedRows
 {
@@ -264,6 +270,43 @@ internal static class SyncEngineFixedRows
                     + "ロックを持ったままプールへ戻る（別の接続の書き込みはロック待ちで失敗する）。同じプールの次の接続を開くと、"
                     + "開くたびの確認がそのトランザクションを巻き戻し、何も残らず、別の接続が書けて記録される",
                 UntrackedWriteClosedPooledConnectionAsync
+            ),
+            Row(
+                "refresh-unlisted-referring-table-refuses-while-present-locally",
+                "記述子の LocalReferences に載らない外部キーで範囲の表を参照する範囲の外の表は、その表の行が 1 つも無くても端末に"
+                    + "表が在るだけで洗い替えを断り（SyncRefreshScopeException・端末と行の状態の表は変わらない）、同じ参照が"
+                    + "LocalReferences に載っていれば行を見て通り、一覧に載らない名前の表が端末に無ければ通る",
+                RefreshUnlistedReferringTableAsync
+            ),
+            Row(
+                "sync-fixture-blob-cleared-on-server-is-cleared-locally",
+                "SyncFixture の端末で、blob を運ぶ同期が降ろした注文の blob を、サーバーで NULL にした（行の版も進む）後の blob を"
+                    + "運ぶ同期は、端末の blob も NULL にする（古い中身が残らない）",
+                SyncFixtureBlobClearedOnServerAsync
+            ),
+            Row(
+                "sync-fixture-nullable-computed-column-downloads-and-stays-null",
+                "SyncFixture の端末で、サーバーで値を持つ NULL 許容の計算列（sync_orders.summary）のある行を降ろせ（注文と明細の"
+                    + "2 行・競合なし）、端末の計算列は NULL のまま。続く同期は何も降ろさない",
+                SyncFixtureNullableComputedColumnAsync
+            ),
+            Row(
+                "sync-vo-new-row-with-excluded-not-null-blob-downloads",
+                "SyncVoFixture の端末で、NOT NULL の除外 blob（photo）を持つサーバーの新しい行を blob を運ばない同期が降ろし、"
+                    + "端末の blob は空の値で入る",
+                SyncVoNewRowWithExcludedNotNullBlobAsync
+            ),
+            Row(
+                "sync-vo-local-insert-without-version-uploads",
+                "SyncVoFixture の端末で、版の列が空の端末の新しい行（値オブジェクトのキーと版）が同期で上がり（競合なし）、"
+                    + "未送信が残らない",
+                SyncVoLocalInsertUploadsAsync
+            ),
+            Row(
+                "sync-vo-server-version-written-back-through-value-object",
+                "SyncVoFixture の端末で、上げた行にサーバーが採番した版が値オブジェクトの版の列へ書き戻り、版つきの更新も上がり、"
+                    + "その後の同期は何も送らず何も降ろさない（往復が定常になる）",
+                SyncVoServerVersionWrittenBackAsync
             ),
         ];
 
@@ -3264,6 +3307,325 @@ internal static class SyncEngineFixedRows
         var item = (await h.Server.Items.GetByIdAsync(key, ct))!;
         item.Code = code;
         (await h.Server.Items.UpdateAsync(item, cancellationToken: ct)).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 一覧に載らない参照：ラベルの記述子を写し、品目の表からの参照を <c>LocalReferences</c> から
+    /// <c>UnlistedReferencingTableNames</c> へ移したもので組んだエンジンの洗い替え（範囲はフォルダーとラベル）を、品目の行が
+    /// 無い端末で断る。対照として、元の記述子（参照が一覧に載る）のエンジンと、端末に無い表の名前を一覧に載せないエンジンは通る
+    /// </summary>
+    /// <remarks>
+    /// 同期のモデルの図にはそうした外部キーが無いので、記述子を写して作る（記述子の init のプロパティを反射で書き換える）
+    /// </remarks>
+    private static async Task RefreshUnlistedReferringTableAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await h.Server.Folders.InsertAsync(new ModelFolderEntity { FolderId = 1, Name = "f1" }, ct);
+        await h.Server.Labels.InsertAsync(
+            new ModelLabelEntity
+            {
+                LabelCode = "l1",
+                FolderId = 1,
+                Caption = "c1",
+            },
+            ct
+        );
+        await h.SyncAsync(null, ct);
+
+        TrackedSyncEngine EngineWithLabels(SyncTableDescriptor<ModelLabelEntity, string> labels) =>
+            new([
+                new TrackedSyncTable<ModelFolderEntity, int>(
+                    GeneratedSyncTables.ModelFolder,
+                    h.Server.FolderSource,
+                    h.Rows
+                ),
+                new TrackedSyncTable<ModelLabelEntity, string>(
+                    labels,
+                    h.Server.LabelSource,
+                    h.Rows
+                ),
+                new TrackedSyncTable<ModelItemEntity, int>(
+                    GeneratedSyncTables.ModelItem,
+                    h.Server.ItemSource,
+                    h.Rows
+                ),
+                new TrackedSyncTable<ModelEventEntity, DateTime>(
+                    GeneratedSyncTables.ModelEvent,
+                    h.Server.EventSource,
+                    h.Rows
+                ),
+            ]);
+
+        var outsideItems = new SyncRefreshOptions
+        {
+            ExcludedEntityTypes = [typeof(ModelItemEntity), typeof(ModelEventEntity)],
+        };
+
+        // 品目の行は無い（行を見れば通る）が、一覧に載らない参照は照会できないので表が在るだけで断る
+        (await h.ScalarAsync($"SELECT count(*) FROM {ModelTables.Items}", ct))
+            .Should()
+            .Be("0");
+        var localBefore = Describe(await h.ReadLocalAsync(ct));
+        var stateBefore = await h.ReadStateTablesAsync(ct);
+        var unlisted = EngineWithLabels(LabelsReferredOutsideTheList([ModelTables.Items]));
+        var thrown = await Record.ExceptionAsync(() => h.RefreshAsync(outsideItems, ct, unlisted));
+        thrown
+            .Should()
+            .BeOfType<SyncRefreshScopeException>()
+            .Which.References.Should()
+            .Equal(new SyncRefreshScopeReference(ModelTables.Items, ModelTables.Labels));
+        Describe(await h.ReadLocalAsync(ct))
+            .Should()
+            .Be(localBefore, "断った洗い替えは端末を変えない");
+        (await h.ReadStateTablesAsync(ct))
+            .Should()
+            .Equal(stateBefore, "断った洗い替えは行の状態の表を変えない");
+
+        // 参照が一覧に載る元の記述子なら、品目の行を照会して通る
+        (await h.RefreshAsync(outsideItems, ct))
+            .Tables.Select(table => table.TableName)
+            .Should()
+            .Equal(ModelTables.Folders, ModelTables.Labels);
+
+        // 一覧に載らない参照でも、その名前の表が端末に無ければ通る
+        var absent = EngineWithLabels(LabelsReferredOutsideTheList(["model_absent"]));
+        (await h.RefreshAsync(outsideItems, ct, absent))
+            .Tables.Select(table => table.TableName)
+            .Should()
+            .Equal(ModelTables.Folders, ModelTables.Labels);
+        (await h.ReadLocalAsync(ct)).Labels.Keys.Should().Equal("l1");
+    }
+
+    /// <summary>
+    /// ラベルの記述子の写しで、品目の表からの参照を <c>LocalReferences</c> から外し、<c>UnlistedReferencingTableNames</c> を
+    /// <paramref name="unlisted"/> にしたもの
+    /// </summary>
+    private static SyncTableDescriptor<ModelLabelEntity, string> LabelsReferredOutsideTheList(
+        IReadOnlyList<string> unlisted
+    )
+    {
+        var copy =
+            (SyncTableDescriptor<ModelLabelEntity, string>)
+                typeof(object)
+                    .GetMethod(
+                        "MemberwiseClone",
+                        System.Reflection.BindingFlags.NonPublic
+                            | System.Reflection.BindingFlags.Instance
+                    )!
+                    .Invoke(GeneratedSyncTables.ModelLabel, null)!;
+        var type = typeof(SyncTableDescriptor<ModelLabelEntity, string>);
+        type.GetProperty(nameof(copy.LocalReferences))!
+            .SetValue(
+                copy,
+                copy.LocalReferences.Where(reference => reference.TableName != ModelTables.Items)
+                    .ToList()
+            );
+        type.GetProperty(nameof(copy.UnlistedReferencingTableNames))!
+            .SetValue(copy, unlisted.ToList());
+
+        return copy;
+    }
+
+    /// <summary>SyncFixture の端末：サーバーで NULL にした blob は端末でも NULL になる</summary>
+    private static async Task SyncFixtureBlobClearedOnServerAsync(
+        SyncEngineFixedHarness _,
+        CancellationToken ct
+    )
+    {
+        using var server = await SyncFixtureTestServer.CreateAsync(ct);
+        using var device = await SyncFixtureEngineDevice.CreateAsync(server.Sources, ct);
+        var blobs = new S.SyncOptions { IncludeUnboundedBinary = true };
+        await server.Orders.InsertAsync(
+            new S.SyncOrderEntity { OrderId = 1, CustomerName = "alice" },
+            ct
+        );
+
+        using (var content = new MemoryStream([1, 2, 3]))
+        {
+            (await server.OrderBlobs.WriteUnboundedBinaryAsync("Attachment", 1, content, 3, ct))
+                .Should()
+                .BeTrue();
+        }
+
+        (await device.Engine.SyncAsync(blobs, ct)).Conflicts.Should().BeEmpty();
+        (await ReadOrderBlobAsync(device, 1, ct)).Should().Equal([1, 2, 3]);
+
+        // サーバーで列を NULL にする（行の版も進む）
+        (await server.OrderBlobs.WriteUnboundedBinaryAsync("Attachment", 1, null, null, ct))
+            .Should()
+            .BeTrue();
+
+        var cleared = await device.Engine.SyncAsync(blobs, ct);
+
+        cleared.Conflicts.Should().BeEmpty();
+        (await ReadOrderBlobAsync(device, 1, ct))
+            .Should()
+            .BeNull("blob のコピーは両側をそろえるので、サーバーに無い blob は端末でも消す");
+        (await device.ReadUnsentAsync(ct)).Should().BeEmpty();
+    }
+
+    /// <summary>SyncFixture の端末の注文の blob を読む（行なし・NULL は null）</summary>
+    private static async Task<byte[]?> ReadOrderBlobAsync(
+        SyncFixtureEngineDevice device,
+        int orderId,
+        CancellationToken ct
+    )
+    {
+        using var destination = new MemoryStream();
+
+        return await device.Orders.ReadAttachmentAsync(orderId, destination, ct)
+            ? destination.ToArray()
+            : null;
+    }
+
+    /// <summary>SyncFixture の端末：NULL 許容の計算列のある行を降ろせ、端末の計算列は NULL のまま</summary>
+    /// <remarks>
+    /// 計算列は差分の SELECT に載る（行として届く）が、ローカルの行の口（<c>SqliteLocalRowStore</c>）は計算列を書き込みから外すので、
+    /// 式を持たない端末の列は NULL のまま。NOT NULL なら書かない列の制約で降ろせない（NULL 許容だから成り立つ）
+    /// </remarks>
+    private static async Task SyncFixtureNullableComputedColumnAsync(
+        SyncEngineFixedHarness _,
+        CancellationToken ct
+    )
+    {
+        using var server = await SyncFixtureTestServer.CreateAsync(ct);
+        using var device = await SyncFixtureEngineDevice.CreateAsync(server.Sources, ct);
+        await server.Orders.InsertAsync(
+            new S.SyncOrderEntity { OrderId = 1, CustomerName = "alice" },
+            ct
+        );
+        await server.Lines.InsertAsync(
+            new S.SyncOrderLineEntity
+            {
+                LineId = 11,
+                OrderId = 1,
+                Product = "widget",
+            },
+            ct
+        );
+        await server.Sql.ExecuteSqlAsync(
+            "UPDATE sync_orders SET summary = 'server-side summary' WHERE order_id = 1",
+            null,
+            ct
+        );
+
+        var result = await device.Engine.SyncAsync(null, ct);
+
+        result.Conflicts.Should().BeEmpty();
+        result.Downloaded.Should().Be(2, "注文 1 行と明細 1 行が降りる");
+        var order = await device.Orders.GetByIdAsync(1, ct);
+        order.Should().NotBeNull();
+        order!.CustomerName.Should().Be("alice");
+        order.Summary.Should().BeNull("式を持たない端末へは計算列を書かない");
+        (
+            await server.Sql.ExecuteScalarSqlAsync<string>(
+                "SELECT summary FROM sync_orders WHERE order_id = 1",
+                null,
+                ct
+            )
+        )
+            .Should()
+            .Be("server-side summary", "サーバーには降ろす値があった");
+
+        var again = await device.Engine.SyncAsync(null, ct);
+
+        again.Downloaded.Should().Be(0);
+        again.Uploaded.Should().Be(0);
+        (await device.ReadUnsentAsync(ct)).Should().BeEmpty();
+    }
+
+    /// <summary>SyncVoFixture の注文を 1 行作る（NOT NULL の除外列 photo も埋める＝アプリが挿入するときの形）</summary>
+    private static V.SyncvoOrderEntity NewVoOrder(int id, string title) =>
+        new()
+        {
+            OrderId = V.OrderIdValue.Create(id),
+            Title = V.TitleValue.Create(title),
+            Photo = V.PhotoValue.Create([1, 2, 3]),
+        };
+
+    /// <summary>SyncVoFixture の端末：NOT NULL の除外 blob を持つ新しい行が降り、blob は空の値で入る</summary>
+    private static async Task SyncVoNewRowWithExcludedNotNullBlobAsync(
+        SyncEngineFixedHarness _,
+        CancellationToken ct
+    )
+    {
+        using var server = await SyncVoFixtureTestServer.CreateAsync(ct);
+        using var device = await SyncVoFixtureEngineDevice.CreateAsync(server.Orders, ct);
+        await server.Writer.InsertAsync(NewVoOrder(7, "from-server"), ct);
+
+        var result = await device.Engine.SyncAsync(null, ct);
+
+        result.Downloaded.Should().Be(1);
+        (await device.Orders.GetByIdAsync(V.OrderIdValue.Create(7), ct))!
+            .Title.Value.Should()
+            .Be("from-server");
+        using var photo = new MemoryStream();
+        (await device.Orders.ReadPhotoAsync(V.OrderIdValue.Create(7), photo, ct)).Should().BeTrue();
+        photo.Length.Should().Be(0, "blob を運ばない同期では、新しい行の除外列は空の値で入る");
+        (await device.ReadUnsentAsync(ct)).Should().BeEmpty();
+    }
+
+    /// <summary>SyncVoFixture の端末：版の列が空の端末の新しい行が上がる</summary>
+    private static async Task SyncVoLocalInsertUploadsAsync(
+        SyncEngineFixedHarness _,
+        CancellationToken ct
+    )
+    {
+        using var server = await SyncVoFixtureTestServer.CreateAsync(ct);
+        using var device = await SyncVoFixtureEngineDevice.CreateAsync(server.Orders, ct);
+        await device.Orders.InsertAsync(NewVoOrder(5, "dave"), ct);
+        (await device.Orders.GetByIdAsync(V.OrderIdValue.Create(5), ct))!
+            .RowVer.Should()
+            .BeNull("まだ一度も上げていない行に版は無い");
+
+        var result = await device.Engine.SyncAsync(null, ct);
+
+        result.Conflicts.Should().BeEmpty();
+        result.Uploaded.Should().Be(1);
+        (await server.OrdersRaw.GetByIdAsync(V.OrderIdValue.Create(5), ct))!
+            .Title.Value.Should()
+            .Be("dave");
+        (await device.ReadUnsentAsync(ct)).Should().BeEmpty();
+    }
+
+    /// <summary>SyncVoFixture の端末：サーバーが採番した版が値オブジェクトの版の列へ書き戻り、往復が定常になる</summary>
+    private static async Task SyncVoServerVersionWrittenBackAsync(
+        SyncEngineFixedHarness _,
+        CancellationToken ct
+    )
+    {
+        using var server = await SyncVoFixtureTestServer.CreateAsync(ct);
+        using var device = await SyncVoFixtureEngineDevice.CreateAsync(server.Orders, ct);
+        await device.Orders.InsertAsync(NewVoOrder(5, "dave"), ct);
+        await device.Engine.SyncAsync(null, ct);
+
+        var key = V.OrderIdValue.Create(5);
+        var mirrored = await device.Orders.GetByIdAsync(key, ct);
+        var stored = await server.OrdersRaw.GetByIdAsync(key, ct);
+        mirrored!.RowVer.Should().NotBeNull("サーバーが採番した版を端末の版の列へ書き戻す");
+        mirrored.RowVer.Value.Should().Equal(stored!.RowVer.Value);
+
+        // 版を持つ行の更新（版で守る送信）も値オブジェクトの型のまま往復する
+        mirrored.Title = V.TitleValue.Create("dave-updated");
+        await device.Orders.UpdateAsync(mirrored, cancellationToken: ct);
+
+        var second = await device.Engine.SyncAsync(null, ct);
+
+        second.Conflicts.Should().BeEmpty();
+        second.Uploaded.Should().Be(1);
+        (await server.OrdersRaw.GetByIdAsync(key, ct))!.Title.Value.Should().Be("dave-updated");
+        (await device.Orders.GetByIdAsync(key, ct))!
+            .RowVer!.Value.Should()
+            .Equal((await server.OrdersRaw.GetByIdAsync(key, ct))!.RowVer!.Value);
+
+        var third = await device.Engine.SyncAsync(null, ct);
+
+        third.Uploaded.Should().Be(0);
+        third.Downloaded.Should().Be(0, "自分の変更を取り戻さない");
+        third.DeletedLocally.Should().Be(0);
+        (await device.ReadUnsentAsync(ct)).Should().BeEmpty();
     }
 
     /// <summary>例外とその内側の例外の並び</summary>
