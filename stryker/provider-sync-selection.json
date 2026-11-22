@@ -1,0 +1,34 @@
+{
+  "stryker-config": {
+    "project": "QuickER.Provider.csproj",
+    "test-runner": "mtp",
+    "coverage-analysis": "perTest",
+    "additional-timeout": 300000,
+    "break-on-initial-test-failure": true,
+    "thresholds": {
+      "high": 80,
+      "low": 60,
+      "break": 0
+    },
+    "reporters": ["json", "html", "progress", "cleartext"],
+    "ignore-methods": ["*.ThrowIfNull", "*Exception.ctor"],
+    "mutate": [
+      "**/SyncPlanner.cs",
+      "**/SelectionContext.cs",
+      "**/SelectionRule.cs",
+      "**/SelectionWithdrawals.cs",
+      "**/Withdrawal.cs",
+      "**/SelectionState.cs",
+      "**/RemainingLiveConstraints.cs",
+      "**/SelectionRules.cs",
+      "**/SelectionRules.ChangesBreakingLiveDependents.cs",
+      "**/SelectionRules.DropsLeavingNoColumns.cs",
+      "**/SelectionRules.ForeignKeysWithPostSyncTypeMismatch.cs",
+      "**/SelectionRules.ItemsRequiringUnselected.cs",
+      "**/SelectionRules.RebuildsOfProtectedTables.cs",
+      "**/SelectionRules.SetNullForeignKeysOnNotNullColumns.cs",
+      "**/SelectionRules.TablesWithCollidingConstraintNames.cs",
+      "**/SelectionRules.TablesWithoutColumns.cs"
+    ]
+  }
+}

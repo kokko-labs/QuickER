@@ -448,7 +448,7 @@ public sealed class MutationSummaryTests
                     {
                         RunEnvironment = """
                         {
-                          "target": "provider-sync-planner",
+                          "target": "provider-sync-selection",
                           "solution": "stryker/QuickER.TestsWithIntegration.slnx",
                           "set": { "QUICKER_SKIP_DOCKER": "1", "QUICKER_SYNC_FUZZ_SEEDS": "100" },
                           "removed": [ "QUICKER_REQUIRE_DOCKER" ]

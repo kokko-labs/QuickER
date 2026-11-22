@@ -82,7 +82,12 @@ public class ClaudeMdReferenceTests
         ),
         (
             "tests/QuickER.Tests/TestSupport/CLAUDE.md",
-            "integration-nightly-trx",
+            "integration-nightly-dsl-trx",
+            "nightly.yml の成果物の名前（ワークフローの値で、テストのソースには無い）"
+        ),
+        (
+            "tests/QuickER.Tests/TestSupport/CLAUDE.md",
+            "integration-nightly-rest-trx",
             "nightly.yml の成果物の名前（ワークフローの値で、テストのソースには無い）"
         ),
         (

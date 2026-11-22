@@ -61,7 +61,7 @@ jobs:
           SCOPE: ${{ inputs.scope }}
         run: |
           nightly='"model-constraint-names","model-entity","model-rest"'
-          weekly='"provider-sync-planner","provider-diff-service","provider-diff-rest","provider-rebuild-detector","provider-rest-sql","provider-rest-main","provider-type-token","provider-sql-type-text"'
+          weekly='"provider-sync-selection","provider-sync-steps","provider-diff-service","provider-diff-rest","provider-rebuild-detector","provider-rest-sql","provider-rest-main","provider-type-token","provider-sql-type-text"'
           case "$SCHEDULE|$SCOPE" in
             "17 5 * * *|"|"|nightly") targets="[$nightly]" ;;
             "47 5 * * 6|"|"|weekly") targets="[$weekly]" ;;
@@ -75,7 +75,7 @@ jobs:
     runs-on: windows-latest
     # ホストのランナー（4 vCPU・並列度 4）で 1 本 2〜3 時間（static の変異の 3 本は 3.5〜4.5 時間）の見込み。6 時間の上限の手前で止める
     timeout-minutes: 330
-    # max-parallel は付けない：土曜は Model 3 本と Provider 8 本に普段の CI・夜間が重なって 15 本前後になるが、公開リポジトリの同時に
+    # max-parallel は付けない：土曜は Model 3 本と Provider 9 本に普段の CI・夜間が重なって 16 本前後になるが、公開リポジトリの同時に
     # 走るジョブの上限（20）に届かない。絞ると全体が延びて翌日の 04:16 UTC に近づく
     strategy:
       fail-fast: false

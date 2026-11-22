@@ -3,7 +3,9 @@
 # - 普段の CI（ci.yml）は変えない。ここで流すのは [Trait("NightlyEngine", "true")] を付けたテストだけで、
 #   QUICKER_ENGINE_PROFILE=nightly により各エンジンが夜間の既定の種の数（SeedSettings の NightlyCount）を流す。
 #   種を使うテストが目印を付け忘れると、SeedSource.Resolve が普段の CI で赤にする（選び漏れを防ぐ）
-# - integration-nightly（ubuntu-latest）: QuickER.Tests.Integration の夜間のエンジン（実 DB コンテナ・厳格モード）
+# - integration-nightly-dsl / integration-nightly-rest（ubuntu-latest）: QuickER.Tests.Integration の夜間のエンジン（実 DB コンテナ・
+#   厳格モード）。1 つのジョブでは目安の 50 分を超えるので、互いに裏返しの絞り込み（簡易 DSL の総当たりとそれ以外）の 2 つのジョブで
+#   並走させ、どのテストもちょうど 1 回流れる
 # - unit-nightly（windows-latest）: QuickER.Tests の夜間のエンジン（WPF 依存のため Windows）
 # - schedule はリポジトリの既定のブランチ（main）にあるこのファイルでだけ動く。リポジトリに 60 日間活動が無いと
 #   GitHub が schedule を止めるので、止まったら Actions の画面から有効に戻す（workflow_dispatch で手でも流せる）
@@ -33,8 +35,10 @@ env:
   TESTINGPLATFORM_TELEMETRY_OPTOUT: "1"
 
 jobs:
-  # 実 DB の夜間のエンジン（同期計画の総当たり・同期のモデル・実装先の一致・名前の DDL の往復・簡易 DSL の SQL Server）
-  integration-nightly:
+  # 実 DB の夜間のエンジンのうち、簡易 DSL の総当たり（4 方言のクラスが別々のコンテナのコレクションにあり、4 枠で同時に流れる）。
+  # 残り（同期計画の総当たり・同期のモデル・実装先の一致・名前の DDL の往復）は integration-nightly-rest が、この絞り込みの裏返しで流す。
+  # 式を変えるときは両方を同時に変える（照合の表の行 nightly-job-test-commands が、同じ項の肯定と否定であることを固定する）
+  integration-nightly-dsl:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -52,14 +56,44 @@ jobs:
         env:
           QUICKER_ENGINE_PROFILE: nightly
           QUICKER_REQUIRE_DOCKER: "1"
-        run: dotnet test tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj --filter "NightlyEngine=true" --output detailed --report-trx --report-trx-filename integration-nightly.trx --results-directory "${{ runner.temp }}/nightly-results"
+        run: dotnet test tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj --filter "NightlyEngine=true&FullyQualifiedName~NamedQueryDslConditionFuzz" --output detailed --report-trx --report-trx-filename integration-nightly-dsl.trx --results-directory "${{ runner.temp }}/nightly-results"
 
       - name: テストの結果を保存
         # 失敗した夜にも残す（確かめたいのは失敗の夜の結果）
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: integration-nightly-trx
+          name: integration-nightly-dsl-trx
+          path: ${{ runner.temp }}/nightly-results/*.trx
+          retention-days: 14
+
+  # 実 DB の夜間のエンジンの残り（integration-nightly-dsl の絞り込みの裏返し）
+  integration-nightly-rest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: リポジトリを取得
+        # アクションはほかのワークフロー（ci.yml か release.yml）と同じ commit SHA で固定する（更新は Dependabot がまとめて持ってくる）
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: .NET SDK をセットアップ
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+
+      - name: 夜間のエンジン（実 DB コンテナ・厳格モード）
+        # QUICKER_REQUIRE_DOCKER=1: コンテナ起動の失敗をスキップへ変換せず失敗させる（ci.yml と同じ）
+        env:
+          QUICKER_ENGINE_PROFILE: nightly
+          QUICKER_REQUIRE_DOCKER: "1"
+        run: dotnet test tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj --filter "NightlyEngine=true&FullyQualifiedName!~NamedQueryDslConditionFuzz" --output detailed --report-trx --report-trx-filename integration-nightly-rest.trx --results-directory "${{ runner.temp }}/nightly-results"
+
+      - name: テストの結果を保存
+        # 失敗した夜にも残す（確かめたいのは失敗の夜の結果）
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: integration-nightly-rest-trx
           path: ${{ runner.temp }}/nightly-results/*.trx
           retention-days: 14
 

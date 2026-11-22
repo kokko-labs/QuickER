@@ -51,7 +51,7 @@
     ./scripts/run-mutation.ps1 -Target model-rest -OutputDirectory ./artifacts/stryker/model-rest -Concurrency 8
 
 .EXAMPLE
-    ./scripts/run-mutation.ps1 -Target provider-sync-planner -TestsOnly -OutputDirectory ./artifacts/mutation-env
+    ./scripts/run-mutation.ps1 -Target provider-sync-selection -TestsOnly -OutputDirectory ./artifacts/mutation-env
 #>
 [CmdletBinding(DefaultParameterSetName = 'Stryker')]
 param(
@@ -88,22 +88,26 @@ function Get-ZeroTestLogLineCount {
 
 # 範囲ごとのソリューションと環境変数（表に無い範囲は、テストだけのソリューション・環境はそのまま）。
 # 変数の名前は Integration のテストの定数と同じ（ParityTests の行 mutation-script-variables-match-test-constants が照合する）。
-# - provider-sync-planner：SyncPlanner の変異を殺すテストの多くは Integration の Docker の要らないテスト（同期計画の総当たり・期待の行）にあるので、
-#   Integration を足したソリューションで流す。コンテナのフィクスチャは起動しない（QUICKER_SKIP_DOCKER。厳格モードの宣言 QUICKER_REQUIRE_DOCKER は
-#   両立しないので外す）。同期計画の総当たりの種を減らす（既定の数のままだと、総当たりがほぼ全部の変異を通り、変異 1 回の検査が約 100 秒かかる）。
-#   -TestsOnly では、表の変数が効く Integration の同期計画のテスト（総当たり・能力の組の網・期待の行）を流す
-$targetSettings = @{
-    'provider-sync-planner' = @{
-        Solution = 'stryker/QuickER.TestsWithIntegration.slnx'
-        TestProject = 'tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj'
-        TestFilter = 'FullyQualifiedName~QuickER.Tests.Integration.Dialects.SyncPlanFuzz'
-        Set = [ordered]@{
-            QUICKER_SKIP_DOCKER = '1'
-            QUICKER_SYNC_FUZZ_SEEDS = '100'
-            QUICKER_SYNC_CAPNET_SEEDS = '500'
-        }
-        Remove = @('QUICKER_REQUIRE_DOCKER')
+# - 同期の計画の 2 つの範囲（provider-sync-selection・provider-sync-steps。1 つの範囲では週 1 回のジョブの上限 330 分に収まらないので、
+#   ファイル単位で変異体のテストの時間が半々になるように分けた）：SyncPlanner の変異を殺すテストの多くは Integration の Docker の要らないテスト
+#   （同期計画の総当たり・期待の行）にあるので、Integration を足したソリューションで流す。コンテナのフィクスチャは起動しない（QUICKER_SKIP_DOCKER。
+#   厳格モードの宣言 QUICKER_REQUIRE_DOCKER は両立しないので外す）。同期計画の総当たりの種を減らす（既定の数のままだと、総当たりがほぼ全部の変異を通り、
+#   変異 1 回の検査が約 100 秒かかる）。-TestsOnly では、表の変数が効く Integration の同期計画のテスト（総当たり・能力の組の網・期待の行）を流す。
+#   2 つの範囲は同じ設定を指す（写しを作らない）
+$syncPlannerSettings = @{
+    Solution = 'stryker/QuickER.TestsWithIntegration.slnx'
+    TestProject = 'tests/QuickER.Tests.Integration/QuickER.Tests.Integration.csproj'
+    TestFilter = 'FullyQualifiedName~QuickER.Tests.Integration.Dialects.SyncPlanFuzz'
+    Set = [ordered]@{
+        QUICKER_SKIP_DOCKER = '1'
+        QUICKER_SYNC_FUZZ_SEEDS = '100'
+        QUICKER_SYNC_CAPNET_SEEDS = '500'
     }
+    Remove = @('QUICKER_REQUIRE_DOCKER')
+}
+$targetSettings = @{
+    'provider-sync-selection' = $syncPlannerSettings
+    'provider-sync-steps' = $syncPlannerSettings
 }
 
 # リポジトリのルート（このスクリプトの親フォルダ）を基準に動かす
