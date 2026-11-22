@@ -817,6 +817,22 @@ internal sealed partial class SyncModelRun
                     .ToList();
             }
 
+            case ExpectFacets.Pending:
+            {
+                // 端末の同期の状態の面（判定役が読むのと同じ口）と、端末の表のいまの行だけから作る
+                var state = await _world.ReadStateAsync(expect.Actor, _ct);
+
+                return (await _world.Device(expect.Actor).State.ReadPendingAsync(_ct))
+                    .Select(row => (row.Table, Key: CanonicalKey(row.Table, row.KeyText)))
+                    .OrderBy(row => row.Table, StringComparer.Ordinal)
+                    .ThenBy(row => row.Key, ModelKeyComparer.Instance)
+                    .Select(row =>
+                        $"{row.Table} key={row.Key} "
+                        + $"row={(state.Rows(row.Table).Any(p => p.Key == row.Key) ? "present" : "gone")}"
+                    )
+                    .ToList();
+            }
+
             case ExpectFacets.Journal:
             {
                 var old = _journalAtLastSync.GetValueOrDefault(expect.Actor) ?? [];

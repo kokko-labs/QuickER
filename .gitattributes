@@ -118,4 +118,4 @@ tests/**/engine-fingerprints.json text eol=lf
 tests/QuickER.Tests.Integration/protection-registry.json text eol=lf
 tests/QuickER.Tests/TestSupport/impact-map.md text eol=lf
 tests/QuickER.Tests.Integration/GeneratedRuntime/runtime-matrix.md text eol=lf
-tests/QuickER.Tests.Integration/GeneratedRuntime/sync-engine-scenario-ledger.md text eol=lf
+tests/QuickER.Tests.Integration/GeneratedRuntime/sync-current-engine-scenario-ledger.md text eol=lf

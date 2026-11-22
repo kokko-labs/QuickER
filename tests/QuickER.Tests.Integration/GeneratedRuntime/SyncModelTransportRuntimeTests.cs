@@ -59,22 +59,16 @@ internal static class SyncModelSignatures
     public static IReadOnlySet<string> Normalize(IEnumerable<ModelFailure> failures) =>
         failures.Select(f => Normalize(f.Signature)).ToHashSet(StringComparer.Ordinal);
 
-    /// <summary>既知の失敗の一覧（乱数の種の照合用＝署名を <see cref="Normalize(string)"/> で正規化して照合する）</summary>
-    /// <param name="extra">直結の一覧に足す決定的なシナリオの項目（SQL Server だけの既知の失敗）</param>
-    public static KnownFailureSet Known(IReadOnlyList<KnownEntry> extra) =>
-        SyncModelKnownFailures.Build(
-            "SyncModel.transport",
-            [.. SyncModelKnownFailures.Scenarios, .. extra],
-            Normalize
-        );
-
     /// <summary>
     /// 1 つの種だけを流す環境変数（普通の種も広い世界の種もこの 1 つで流せる。解決は <see cref="ResolvePlans"/>）
     /// </summary>
     public const string SeedVariable = "QUICKER_SYNC_MODEL_TRANSPORT_SEED";
 
-    /// <summary>夜間の既定の種の数</summary>
-    public const int NightlySeedCount = 200;
+    /// <summary>
+    /// 夜間の既定の種の数。新しいエンジンの端末は 1 種あたりの時間が今のエンジンの約 1.9 倍なので、夜間のジョブ（目安 50 分未満）に
+    /// 収まるよう半分にしている。実測で見直す
+    /// </summary>
+    public const int NightlySeedCount = 100;
 
     /// <summary>
     /// 派生（HTTP・実 SQL Server）で流す乱数の種（環境変数 QUICKER_SYNC_MODEL_TRANSPORT_SEEDS・既定 10・夜間は
@@ -89,8 +83,11 @@ internal static class SyncModelSignatures
             singleVariable: SeedVariable
         );
 
-    /// <summary>夜間の広い世界の種の既定の数</summary>
-    public const int NightlyWideSeedCount = 40;
+    /// <summary>
+    /// 夜間の広い世界の種の既定の数。新しいエンジンの端末は 1 種あたりの時間が今のエンジンの約 1.9 倍なので、夜間のジョブ（目安 50 分
+    /// 未満）に収まるよう半分にしている。実測で見直す
+    /// </summary>
+    public const int NightlyWideSeedCount = 20;
 
     /// <summary>
     /// 派生で流す広い世界の種（端末 3 台・環境変数 QUICKER_SYNC_MODEL_TRANSPORT_WIDE_SEEDS・既定 4・夜間は
@@ -251,24 +248,60 @@ internal static class SyncModelSignatures
 }
 
 /// <summary>
+/// 直結のほかの転送（HTTP・実 SQL Server・HTTP × 実 SQL Server）のテストが使う、新しいエンジンの端末
+/// （<see cref="SyncModelEngineDevice"/>）の既知の失敗の一覧
+/// </summary>
+internal static class SyncModelEngineTransports
+{
+    /// <summary>
+    /// 転送の乱数の種の既知の失敗の一覧（署名は <see cref="SyncModelSignatures.Normalize(string)"/> で正規化して照合する）。空で
+    /// 始める（載せる項目は、新しいエンジンの端末で出た失敗から理由つきで足す）
+    /// </summary>
+    public static KnownFailureSet Known { get; } =
+        SyncModelKnownFailures.Build(
+            "SyncModel.transport.engine",
+            [],
+            SyncModelSignatures.Normalize
+        );
+
+    /// <summary>
+    /// SQL Server でだけ起きる既知の失敗（<see cref="SyncModelKnownFailures.Entry"/> で作る＝指摘の番号・直す区切り・シナリオ・
+    /// 署名）。決定的なシナリオの比較では直結の違反に足して比べる。一覧は厳格で、載せたシナリオがそのとおりに失敗しなければ赤。
+    /// 空で始める
+    /// </summary>
+    public static IReadOnlyList<KnownEntry> SqlServerOnly { get; } = [];
+}
+
+/// <summary>
 /// 同期エンジンのモデルベーステストを HTTP 越し（in-process の Kestrel・生成された HTTP の差分ソースと同期専用の
-/// エンドポイント）で流す派生。決定的なシナリオは直結と同じ違反（正規化した署名）になること、乱数の種は既知の失敗にしか
-/// 当たらないことを確かめる。
+/// エンドポイント）で流す派生。端末は新しいエンジンの端末（<see cref="SyncModelEngineDevice"/>）。決定的なシナリオは直結の
+/// 新しいエンジンの端末と同じ違反（正規化した署名）になること、乱数の種は既知の失敗
+/// （<see cref="SyncModelEngineTransports.Known"/>）にしか当たらないことを確かめる。
 /// </summary>
 /// <remarks>
 /// 直結に無いもの（アンカーの Base64 の往復・409 の競合の写し・バイナリのエンドポイントを通る blob のコピー）が、操作の
-/// 列の組み合わせの中で直結と同じ結果になることを見る。サーバー側の失敗の注入は 500 として届く。
+/// 列の組み合わせの中で直結と同じ結果になることを見る。サーバー側の失敗の注入は 500 として届く。流す行は
+/// <see cref="SyncModelScenarioParts.Runs"/> が決める（今のエンジンだけの印のある行は流さない）。
 /// </remarks>
 [Trait("Category", "Integration")]
 [MatrixAxisValue(SyncModelTransportAxis.Name, nameof(SyncModelTransport.Http))]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
+[RuntimeCell(RuntimeFeatures.SyncRefresh, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
 public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncModelTransportTests
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
-    private static readonly SyncModelWorldOptions Http = new() { Http = true, Name = "http" };
+    /// <summary>転送とサーバー役の組み方（端末の作り方を含めない。転送の軸の名乗りの照合が読む）</summary>
+    private static readonly SyncModelWorldOptions HttpTransport = new()
+    {
+        Http = true,
+        Name = "http",
+    };
 
-    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => Http;
+    /// <summary>テストが流す世界の組み方（端末は新しいエンジンの端末）</summary>
+    private static readonly SyncModelWorldOptions Http = SyncModelEngineDevice.On(HttpTransport);
+
+    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => HttpTransport;
 
     /// <summary>
     /// HTTP で流す決定的なシナリオの名前のうち、このクラスが受け持つ分（残りは <see cref="SyncModelScenarioParts"/> の
@@ -283,11 +316,14 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncM
     [MemberData(nameof(ScenarioNames))]
     public Task Scenario_MatchesDirect(string name) => AssertMatchesDirect(name);
 
-    /// <summary>決定的なシナリオを直結と HTTP で流し、同じ違反（正規化した署名）になることを表明する</summary>
+    /// <summary>
+    /// 決定的なシナリオを直結と HTTP で、どちらも新しいエンジンの端末で流し、同じ違反（正規化した署名）になることを表明する。
+    /// 直結の側は <see cref="SyncModelDirectRuns"/> の結果（違反の無い結果はプロセスの中で 1 回だけ流す）
+    /// </summary>
     internal static async Task AssertMatchesDirect(string name)
     {
         var scenario = SyncModelScenarios.Get(name);
-        var (direct, _) = await scenario.RunAsync(Ct);
+        var (direct, _) = await SyncModelDirectRuns.RunAsync(scenario, Ct);
         var (http, log) = await scenario.RunAsync(Ct, Http);
 
         SyncModelSignatures
@@ -316,13 +352,13 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncM
         var report = await SyncModelSignatures.RunSeedsAsync(
             [(plan, plan.Seeds), (widePlan, widePlan.Seeds)],
             Http,
-            SyncModelSignatures.Known([]),
+            SyncModelEngineTransports.Known,
             Math.Clamp(Environment.ProcessorCount, 1, 4),
             Ct,
             coverage
         );
 
-        // 網羅は観測と要約だけ（種が少なく、網羅しない組は直結の乱数の種で照合する）
+        // 網羅は観測と要約だけ（種が少なく、網羅しない組は新しいエンジンの端末の直結の乱数の種で照合する）
         coverage.Report().WriteSummary(output);
         output.WriteLine(report);
         report.Should().BeEmpty();
@@ -331,18 +367,21 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncM
 
 /// <summary>
 /// 同期エンジンのモデルベーステストを、実 SQL Server のサーバー役（生成された SQL Server 方言のリポジトリと直結の差分
-/// ソース・本物の rowversion と <c>MIN_ACTIVE_ROWVERSION()</c>）で流す派生（Docker）。
+/// ソース・本物の rowversion と <c>MIN_ACTIVE_ROWVERSION()</c>）で流す派生（Docker）。端末は新しいエンジンの端末
+/// （<see cref="SyncModelEngineDevice"/>）。
 /// </summary>
 /// <remarks>
 /// <para>
 /// サーバー側の失敗の注入と割り込みの点は、生成物の外側の包み（<see cref="SyncModelFaultingRepository{TEntity, TKey}"/> ほか）が
-/// SQLite の代役と同じ点で起こす。乱数の種は、失敗の注入なしの組（余り 0・1）と注入の組（余り 2・3）を別の Fact で流す。
-/// 取得の上限は実行の始めに固定する（<see cref="ISyncModelServerRole.FixesFetchCeilingAtRunStart"/>）ので、実行の途中に
-/// サーバーへ書かれた行は次の実行で降りる（決まった形の行の期待は <see cref="WhenServerFixesCeilingOp"/> で書く）。
+/// SQLite の代役と同じ点で起こす。乱数の種は、失敗の注入なしの組（余り 0・1）と注入の組（余り 2・3）を別の Fact で流し、既知の失敗の
+/// 一覧は <see cref="SyncModelEngineTransports.Known"/>。取得の上限は実行の始めに固定する
+/// （<see cref="ISyncModelServerRole.FixesFetchCeilingAtRunStart"/>）ので、実行の途中にサーバーへ書かれた行は次の実行で降りる
+/// （決まった形の行の期待は <see cref="WhenServerFixesCeilingOp"/> で書く）。
 /// </para>
 /// <para>
-/// SQL Server でだけ起きる既知の失敗（<see cref="SqlServerOnly"/>）は、直結の違反に足して比べる。一覧は厳格で、載せた
-/// シナリオがそのとおりに失敗しなければ赤。
+/// 決定的なシナリオは直結の新しいエンジンの端末と比べ、SQL Server でだけ起きる既知の失敗
+/// （<see cref="SyncModelEngineTransports.SqlServerOnly"/>）を直結の違反に足す。流す行は <see cref="SyncModelScenarioParts.Runs"/>
+/// が決める（今のエンジンだけの印のある行は流さない）。
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
@@ -350,6 +389,7 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncM
 [Collection(SqlServerSecondContainerCollection.Name)]
 [MatrixAxisValue(SyncModelTransportAxis.Name, nameof(SyncModelTransport.SqlServer))]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlServer)]
+[RuntimeCell(RuntimeFeatures.SyncRefresh, RuntimeTarget.AdoSqlServer)]
 public sealed class SyncModelSqlServerRuntimeTests(
     SqlServerContainerFixture fixture,
     ITestOutputHelper output
@@ -357,13 +397,16 @@ public sealed class SyncModelSqlServerRuntimeTests(
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
-    /// <summary>SQL Server でだけ起きる既知の失敗（<see cref="SyncModelKnownFailures.Entry"/> で作る＝指摘の番号・直す区切り・シナリオ・署名）</summary>
-    internal static IReadOnlyList<KnownEntry> SqlServerOnly { get; } = [];
-
     private SyncModelWorldOptions Options => OptionsFor(fixture);
 
-    /// <summary>実 SQL Server のサーバー役で世界を組む設定（分けたシナリオのクラスと共有する）</summary>
+    /// <summary>
+    /// 実 SQL Server のサーバー役と新しいエンジンの端末で世界を組む設定（分けたシナリオのクラスと共有する）
+    /// </summary>
     internal static SyncModelWorldOptions OptionsFor(SqlServerContainerFixture fixture) =>
+        SyncModelEngineDevice.On(TransportFor(fixture));
+
+    /// <summary>転送とサーバー役の組み方（端末の作り方を含めない。転送の軸の名乗りの照合が読む）</summary>
+    private static SyncModelWorldOptions TransportFor(SqlServerContainerFixture fixture) =>
         new()
         {
             CreateServer = async (faults, ct) =>
@@ -371,8 +414,8 @@ public sealed class SyncModelSqlServerRuntimeTests(
             Name = "sqlserver",
         };
 
-    /// <summary>世界の組み方（コンテナにはサーバー役を作るときにだけ触れる）</summary>
-    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => Options;
+    /// <summary>転送とサーバー役の組み方（コンテナにはサーバー役を作るときにだけ触れる）</summary>
+    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => TransportFor(fixture);
 
     /// <summary>
     /// 実 SQL Server で流す決定的なシナリオの名前のうち、このクラスが受け持つ分（残りは <see cref="SyncModelScenarioParts"/> の
@@ -392,19 +435,22 @@ public sealed class SyncModelSqlServerRuntimeTests(
     }
 
     /// <summary>
-    /// 決定的なシナリオを直結と実 SQL Server のサーバー役（<paramref name="options"/>）で流し、直結と同じ違反（＋SQL Server
-    /// だけの既知の失敗）になることを表明する
+    /// 決定的なシナリオを直結と実 SQL Server のサーバー役（<paramref name="options"/>）で、どちらも新しいエンジンの端末で流し、
+    /// 直結と同じ違反（＋SQL Server だけの既知の失敗）になることを表明する。直結の側は <see cref="SyncModelDirectRuns"/> の結果
+    /// （違反の無い結果はプロセスの中で 1 回だけ流す）
     /// </summary>
+    /// <param name="name">シナリオの名前</param>
+    /// <param name="options">実 SQL Server のサーバー役の世界の組み方（端末は新しいエンジンの端末）</param>
     internal static async Task AssertMatchesDirect(string name, SyncModelWorldOptions options)
     {
         var scenario = SyncModelScenarios.Get(name);
-        var (direct, _) = await scenario.RunAsync(Ct);
+        var (direct, _) = await SyncModelDirectRuns.RunAsync(scenario, Ct);
         var (sqlServer, log) = await scenario.RunAsync(Ct, options);
         var expected = SyncModelSignatures
             .Normalize(direct)
             .Concat(
-                SqlServerOnly
-                    .Where(k => k.Scope == name)
+                SyncModelEngineTransports
+                    .SqlServerOnly.Where(k => k.Scope == name)
                     .Select(k => SyncModelSignatures.Normalize(k.Signature ?? ""))
             )
             .ToHashSet(StringComparer.Ordinal);
@@ -428,11 +474,11 @@ public sealed class SyncModelSqlServerRuntimeTests(
     public void SqlServerOnly_AreWellFormed()
     {
         // 指摘の番号・署名の有無・重複は、一覧（KnownFailureSet）が構築時に検査する
-        new KnownFailureSet("SyncModel.sqlserver-only", SqlServerOnly)
+        new KnownFailureSet("SyncModel.sqlserver-only", SyncModelEngineTransports.SqlServerOnly)
             .Entries.Should()
             .NotBeNull();
 
-        foreach (var known in SqlServerOnly)
+        foreach (var known in SyncModelEngineTransports.SqlServerOnly)
         {
             SyncModelScenarios.All.Should().Contain(s => s.Name == known.Scope);
             known.Match.Should().Be(KnownMatch.ExactSignature);
@@ -463,14 +509,14 @@ public sealed class SyncModelSqlServerRuntimeTests(
                 (widePlan, SyncModelSignatures.SqlServerSeeds(widePlan)),
             ],
             Options,
-            SyncModelSignatures.Known(SqlServerOnly),
+            SyncModelEngineTransports.Known,
             2,
             Ct,
             coverage,
             spellingTally
         );
 
-        // 網羅は観測と要約だけ（失敗の注入の組を流さず、網羅しない組は直結の乱数の種で照合する）
+        // 網羅は観測と要約だけ（失敗の注入の組を流さず、網羅しない組は新しいエンジンの端末の直結の乱数の種で照合する）
         coverage.Report().WriteSummary(output);
         output.WriteLine(report);
 
@@ -527,7 +573,7 @@ public sealed class SyncModelSqlServerRuntimeTests(
                 (widePlan, SyncModelSignatures.SqlServerFaultSeeds(widePlan)),
             ],
             options,
-            SyncModelSignatures.Known(SqlServerOnly),
+            SyncModelEngineTransports.Known,
             2,
             Ct,
             new CoverageCounter(SyncModelDimensions.Table)
@@ -546,7 +592,8 @@ public sealed class SyncModelSqlServerRuntimeTests(
 /// <remarks>
 /// 実 SQL Server の事実（本物の rowversion・<c>MIN_ACTIVE_ROWVERSION()</c>・照合順序・外部キーのエラー）が、HTTP の
 /// シリアライズ（版の Base64・400 / 409 / 500 の分類）と組み合わさった形を見る。サーバー側の失敗の注入は Kestrel の中で
-/// 起き、500 として届く。比べる相手と既知の失敗の一覧は <see cref="SyncModelSqlServerRuntimeTests"/> と同じ。
+/// 起き、500 として届く。端末は新しいエンジンの端末（<see cref="SyncModelEngineDevice"/>）で、比べる相手（直結の新しいエンジンの
+/// 端末）と既知の失敗の一覧（<see cref="SyncModelEngineTransports"/>）は <see cref="SyncModelSqlServerRuntimeTests"/> と同じ。
 /// </remarks>
 [Trait("Category", "Integration")]
 [Trait("RequiresDocker", "true")]
@@ -564,7 +611,11 @@ public sealed class SyncSupportRemoteAdoSqlServerRuntimeTests(
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
-    private SyncModelWorldOptions Options =>
+    /// <summary>テストが流す世界の組み方（端末は新しいエンジンの端末）</summary>
+    private SyncModelWorldOptions Options => SyncModelEngineDevice.On(Transport);
+
+    /// <summary>転送とサーバー役の組み方（端末の作り方を含めない。転送の軸の名乗りの照合が読む）</summary>
+    private SyncModelWorldOptions Transport =>
         new()
         {
             CreateServer = async (faults, ct) =>
@@ -573,14 +624,17 @@ public sealed class SyncSupportRemoteAdoSqlServerRuntimeTests(
             Name = "sqlserverhttp",
         };
 
-    /// <summary>世界の組み方（コンテナにはサーバー役を作るときにだけ触れる）</summary>
-    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => Options;
+    /// <summary>転送とサーバー役の組み方（コンテナにはサーバー役を作るときにだけ触れる）</summary>
+    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => Transport;
 
-    /// <summary>HTTP × 実 SQL Server で流す決定的なシナリオの名前</summary>
+    /// <summary>
+    /// HTTP × 実 SQL Server で流す決定的なシナリオの名前（<see cref="SyncModelScenarioParts.Runs"/> が決める＝今のエンジンだけの印の
+    /// ある行は流さない）
+    /// </summary>
     internal static IReadOnlyList<string> ScenarioNames() =>
         [
             .. SyncModelScenarios
-                .All.Where(s => s.RunsOn(SyncModelTransport.SqlServerHttp))
+                .All.Where(s => SyncModelScenarioParts.Runs(s, SyncModelTransport.SqlServerHttp))
                 .Select(s => s.Name),
         ];
 
@@ -660,7 +714,7 @@ public sealed class SyncSupportRemoteAdoSqlServerRuntimeTests(
                 (widePlan, SyncModelSignatures.SqlServerSeeds(widePlan)),
             ],
             Options,
-            SyncModelSignatures.Known(SyncModelSqlServerRuntimeTests.SqlServerOnly),
+            SyncModelEngineTransports.Known,
             2,
             Ct,
             new CoverageCounter(SyncModelDimensions.Table)

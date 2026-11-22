@@ -270,7 +270,7 @@ public sealed class SyncVoRuntimeTests : IAsyncLifetime
     /// なので、サーバー役もその面だけで足りる。版が VO 型でも扱いは変わらない＝生成側と同じく
     /// <c>?.Value</c> で読み、<c>Create</c> で書く。
     /// </remarks>
-    private sealed class SyncVoTestServerWriter(ISyncvoOrderRepository inner)
+    internal sealed class SyncVoTestServerWriter(ISyncvoOrderRepository inner)
         : IRemoteRepository<SyncvoOrderEntity, OrderIdValue>
     {
         private long _counter;
@@ -400,7 +400,7 @@ public sealed class SyncVoRuntimeTests : IAsyncLifetime
     /// サーバー役（2 つ目の SQLite DB）に対する差分ソース。生成される直結実装の SQL Server 版と同じ意味論を
     /// SQLite の語彙で表現する（キーが VO 型でも投影の扱いは生成側と同一）。
     /// </summary>
-    private sealed class SyncVoTestServerSource(
+    internal sealed class SyncVoTestServerSource(
         ISqlExecutor serverSqlExecutor,
         IRemoteRepository<SyncvoOrderEntity, OrderIdValue> writer
     ) : ISyncServerSource<SyncvoOrderEntity, OrderIdValue>

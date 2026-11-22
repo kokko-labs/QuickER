@@ -61,10 +61,23 @@ internal sealed record SyncModelScenario(
 
     /// <summary>
     /// 小さい塊の端末（<see cref="SyncModelEngineDevice.OnSmallChunks"/>）で流すと、塊の経路の持ち越し（最後の段で書く行）が
-    /// 1 行以上起きる形か。控えとの照合の Fact（<see cref="SyncSupportAdoSqliteEngineRuntimeTests.SmallChunkScenarios_MatchLedger"/>）が、
+    /// 1 行以上起きる形か。小さい塊の端末の Fact（<see cref="SyncSupportAdoSqliteEngineRuntimeTests.SmallChunkScenarios_MatchDirect"/>）が、
     /// 印のある行で持ち越しが起きたことを照らす（起きなければ形が塊をまたいでいない）
     /// </summary>
     public bool CarriesAcrossChunks { get; init; }
+
+    /// <summary>
+    /// 今のエンジン（記録のデコレータと <c>SyncEngine</c>）の仕組みそのものを確かめる行の印。null でなければ理由で、
+    /// 新しいエンジン（<c>TrackedSyncEngine</c>）に同じ仕組みが無い根拠（消える不変条件）。行には書かず、一覧
+    /// <see cref="SyncModelCurrentEngineOnlyScenarios"/> から <see cref="SyncModelScenarios.All"/> が付ける。
+    /// </summary>
+    /// <remarks>
+    /// 印のある行を、新しいエンジンの端末で流す転送の Theory は流さない（<see cref="SyncModelScenarioParts.Runs"/>）。印を
+    /// 付けてよいのは、新しいエンジンの端末で緑にならない行だけ（緑になる行に印を付けると、その行が黙って新しいエンジンの
+    /// 守りから外れる）。それと、理由が具体的なこと・印のある行が今のエンジンの端末で流れ続けることは、今のエンジンの控えの
+    /// Fact（<see cref="SyncSupportAdoSqliteCurrentEngineRuntimeTests.ScenarioLedgerDrift_MatchesRecord"/>）が照合する。
+    /// </remarks>
+    public string? CurrentEngineOnly { get; init; }
 
     /// <summary>この転送のテストで流すか</summary>
     public bool RunsOn(SyncModelTransport transport) =>
@@ -161,7 +174,40 @@ internal static partial class SyncModelScenarios
     ];
 
     /// <summary>すべてのシナリオ</summary>
-    public static IReadOnlyList<SyncModelScenario> All { get; } = Build();
+    public static IReadOnlyList<SyncModelScenario> All { get; } = MarkCurrentEngineOnly(Build());
+
+    /// <summary>
+    /// 今のエンジンだけの行の一覧（<see cref="SyncModelCurrentEngineOnlyScenarios"/>）に載っている行へ印を付ける。一覧にあるのに
+    /// シナリオに無い名前は、宣言の誤りとして断る（行を消した・名前を変えたのに一覧が残っている）
+    /// </summary>
+    private static IReadOnlyList<SyncModelScenario> MarkCurrentEngineOnly(
+        IReadOnlyList<SyncModelScenario> scenarios
+    )
+    {
+        var reasons = SyncModelCurrentEngineOnlyScenarios.All;
+        var names = scenarios.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
+        var missing = reasons.Keys.Where(name => !names.Contains(name)).ToList();
+
+        if (missing.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "SyncModelCurrentEngineOnlyScenarios names scenarios that do not exist: "
+                    + string.Join(", ", missing.Order(StringComparer.Ordinal))
+            );
+        }
+
+        return
+        [
+            .. scenarios.Select(s =>
+                reasons.TryGetValue(s.Name, out var reason)
+                    ? s with
+                    {
+                        CurrentEngineOnly = reason,
+                    }
+                    : s
+            ),
+        ];
+    }
 
     /// <summary>名前で引く</summary>
     public static SyncModelScenario Get(string name) => All.Single(s => s.Name == name);
@@ -347,7 +393,7 @@ internal static partial class SyncModelScenarios
                     new ExpectLocalOp(SV, ModelTables.Folders, "275", null),
                 ]
             ),
-            // N6: 外部キーで断られた書き込みはサーバーに何も残さない（blob の書き込みへ進まず、受理記録も付けない）。
+            // N6: 外部キーで断られた書き込みはサーバーに何も残さない（blob の書き込みへ進まず、端末の行は未送信のまま残る）。
             // 品目 277 の blob を書き換えてから、サーバーで消えたフォルダー 278 の下へ移す
             new(
                 "n6-refused-write-leaves-nothing",
@@ -364,7 +410,7 @@ internal static partial class SyncModelScenarios
                         "277",
                         "folder=276 label=null code=c-277 title=t277"
                     ),
-                    new ExpectNoAckOp(D1, ModelTables.Items, "277"),
+                    Expect.Pending(D1).Exact($"{ModelTables.Items} key=277 row=present"),
                 ]
             ),
             // N7（種 7 の形）: LocalWins がサーバーで消えた行を作り直そうとしたが、その間にサーバーの別の行が同じ code を
@@ -485,12 +531,6 @@ internal static partial class SyncModelScenarios
                     Item(SV, 422, folder: 420, code: "m1"),
                     new UpdateItemOp(SV, Direct, 421, 420, null, "m2", "later"),
                     Sync(D1),
-                    new ExpectLocalRowChangeOp(
-                        D1,
-                        ModelTables.Items,
-                        "421",
-                        SyncLocalRowChangeReason.ReloadedForUniqueValue
-                    ),
                     Sync(D1),
                     new ExpectLocalOp(
                         D1,
@@ -945,7 +985,7 @@ internal static partial class SyncModelScenarios
                         D1,
                         ModelTables.Items,
                         "142",
-                        SyncLocalRowChangeReason.RemovedBeforeDownload
+                        SyncLocalRowChangeReason.DiscardedByServerWins
                     ),
                     new ExpectLocalRowChangeOp(
                         D1,
@@ -2389,7 +2429,7 @@ internal static partial class SyncModelScenarios
                     D2,
                     ModelTables.Items,
                     "784",
-                    SyncLocalRowChangeReason.RemovedBeforeDownload
+                    SyncLocalRowChangeReason.DiscardedByServerWins
                 ),
                 Sync(
                     D2,
@@ -2462,7 +2502,7 @@ internal static partial class SyncModelScenarios
                     "797",
                     SyncLocalRowChangeReason.DiscardedByServerWins
                 ),
-                Expect.Journal(D1).Exact($"{ModelTables.Folders} key=799 op=Upsert *"),
+                Expect.Pending(D1).Exact($"{ModelTables.Folders} key=799 row=present"),
             ]
         );
 

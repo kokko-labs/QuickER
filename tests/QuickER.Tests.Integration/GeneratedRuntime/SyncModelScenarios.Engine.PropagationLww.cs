@@ -59,7 +59,7 @@ internal static partial class SyncModelScenarios
                         .Count("conflict *", 1)
                         .Single($"conflict {F} key=1 * reason=MissingOnServer *"),
                     Expect.Rows(D1, F).Contains("1 parent=null name=alice-local"),
-                    Expect.Journal(D1).Count("*", 1),
+                    Expect.Pending(D1).Exact($"{F} key=1 row=present"),
                     Expect.Rows(D1, I).Exact("999 *"),
                 ]
             ),
@@ -75,7 +75,7 @@ internal static partial class SyncModelScenarios
                     Plain(D1, policy: SyncConflictPolicy.ServerWins),
                     Expect.Result(D1).Contains("deleted-locally=1").Absent("conflict *"),
                     Expect.Rows(D1, F).Absent("1 *"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             Moved(
@@ -98,7 +98,9 @@ internal static partial class SyncModelScenarios
                         [new GraphItem(11, ModelRowState.Added, "widget")],
                         []
                     ),
-                    Expect.Journal(D1).Contains($"{F} key=1 *", $"{I} key=11 *"),
+                    Expect
+                        .Pending(D1)
+                        .Contains($"{F} key=1 row=present", $"{I} key=11 row=present"),
                     Plain(D1),
                     Expect
                         .Result(D1)
@@ -122,7 +124,7 @@ internal static partial class SyncModelScenarios
                         [new GraphItem(11, ModelRowState.Updated, "widget-v2")],
                         []
                     ),
-                    Expect.Journal(D1).Single($"{I} key=11 *").Absent($"{F} *"),
+                    Expect.Pending(D1).Single($"{I} key=11 row=present").Absent($"{F} *"),
                     Plain(D1),
                     Expect.Result(D1).Contains("uploaded=1"),
                     Expect.Rows(SV, I).Contains("11 folder=1 label=null code=c-11 title=widget-v2"),
@@ -139,14 +141,12 @@ internal static partial class SyncModelScenarios
                         []
                     ),
                     Expect.Rows(D1, I).Absent("11 *"),
-                    Expect
-                        .Journal(D1)
-                        .Unordered($"{I} key=11 op=Delete *", $"{F} key=1 op=Delete *"),
+                    Expect.Pending(D1).Unordered($"{I} key=11 row=gone", $"{F} key=1 row=gone"),
                     Plain(D1),
                     Expect.Result(D1).Contains("uploaded=2").Absent("conflict *"),
                     Expect.Rows(SV, F).Absent("1 *"),
                     Expect.Rows(SV, I).Absent("11 *"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             Moved(
@@ -163,7 +163,7 @@ internal static partial class SyncModelScenarios
                     Expect.Result(D1).Contains("uploaded=0"),
                     Expect.Rows(SV, L).Absent("L102 *"),
                     Expect.Rows(D1, L).Contains("L102 *"),
-                    Expect.Journal(D1).Count("*", 1),
+                    Expect.Pending(D1).Exact($"{L} key=L102 row=present"),
                 ]
             ),
             Moved(
@@ -205,7 +205,7 @@ internal static partial class SyncModelScenarios
                     Plain(D1, mode: SyncMode.LastWriteWins),
                     Expect.Result(D1).Contains("uploaded=1"),
                     Expect.Rows(SV, L).Absent("L101 *"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             Moved(
@@ -258,7 +258,7 @@ internal static partial class SyncModelScenarios
                     Expect.Result(D1).Contains("uploaded=0").Absent("conflict *"),
                     Expect.Rows(SV, F).Contains("1001 parent=null name=other"),
                     Expect.Rows(D1, F).Contains("1001 parent=null name=other"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             Moved(
@@ -287,7 +287,7 @@ internal static partial class SyncModelScenarios
                     Plain(D1, mode: SyncMode.LastWriteWins, excluded: [L]),
                     Expect.Result(D1).Contains("uploaded=0"),
                     Expect.Rows(SV, L).Contains("L101 folder=1 caption=server note"),
-                    Expect.Journal(D1).Count("*", 1),
+                    Expect.Pending(D1).Exact($"{L} key=L101 row=present"),
                     Plain(D1, mode: SyncMode.LastWriteWins),
                     Expect.Result(D1).Contains("uploaded=1"),
                     Expect.Rows(SV, L).Contains("L101 folder=1 caption=edited locally"),
@@ -344,7 +344,7 @@ internal static partial class SyncModelScenarios
                     new AddLabelOp(D1, Direct, "L102", 1, "pending"),
                     Plain(D1, policy: SyncConflictPolicy.ServerWins),
                     Expect.Result(D1).Contains("discarded=1"),
-                    Expect.Journal(D1).Count("*", 1),
+                    Expect.Pending(D1).Exact($"{L} key=L102 row=present"),
                 ]
             ),
         ];

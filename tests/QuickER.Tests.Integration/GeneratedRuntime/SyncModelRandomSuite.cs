@@ -38,4 +38,20 @@ internal sealed record SyncModelRandomSuite(
     IReadOnlyList<string> RefusalBasisKinds,
     IReadOnlyList<string> GuardedRunChecks,
     IReadOnlyList<string> NightlyGuardedRunChecks
-);
+)
+{
+    /// <summary>
+    /// 夜間の数だけを替えた決め方を作る（環境変数・普段の数・開始番号・単独の種の変数は元のまま。普段の種が同じなので、種の指紋の
+    /// 記録は元の決め方と共有できる）
+    /// </summary>
+    /// <param name="settings">元の決め方</param>
+    /// <param name="nightlyCount">夜間の既定の種の数</param>
+    public static SeedSettings WithNightlyCount(SeedSettings settings, int nightlyCount) =>
+        new(
+            settings.CountVariable,
+            settings.RegularCount,
+            nightlyCount,
+            settings.FirstSeed,
+            settings.SingleVariable
+        );
+}

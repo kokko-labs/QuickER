@@ -46,7 +46,7 @@ internal static partial class SyncModelScenarios
                     Expect
                         .Result(D1)
                         .Exact(
-                            "deleted=5",
+                            "deleted=1",
                             "inserted=7",
                             "discarded-changes=0",
                             "elapsed>0",
@@ -92,7 +92,7 @@ internal static partial class SyncModelScenarios
                         .Count("pending *", 2),
                     Expect.Rows(D1, F).Contains("1 parent=null name=offline-edit"),
                     Expect.Rows(D1, I).Exact("999 *"),
-                    Expect.Journal(D1).Count("*", 2),
+                    Expect.Pending(D1).Unordered($"{F} key=1 row=present", $"{I} key=11 row=gone"),
                 ]
             ),
             Moved(
@@ -102,7 +102,7 @@ internal static partial class SyncModelScenarios
                     Rename(D1, 1, "offline-edit"),
                     RefreshAll(D1, force: true),
                     Expect.Result(D1).Contains("discarded-changes=1", "inserted=5"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                     Expect.Rows(D1, F).Contains("1 parent=null name=alice"),
                     Expect.Rows(SV, F).Contains("1 parent=null name=alice"),
                 ]
@@ -114,7 +114,7 @@ internal static partial class SyncModelScenarios
                     .. Seed(1, "alice", 11, "widget"),
                     .. Seed(2, "bob", 12, "gadget"),
                     RefreshAll(D1),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                     Plain(D1),
                     Expect.Result(D1).Contains("uploaded=0"),
                 ]
@@ -141,9 +141,8 @@ internal static partial class SyncModelScenarios
                 [
                     Folder(D1, 2, name: "bob"),
                     PlainOnly(D1, ModelSyncKind.Upload),
-                    Expect.Acks(D1, F).Exact("key=2 ver=server"),
                     Rename(D1, 1, "edited"),
-                    Expect.Journal(D1).Exact($"{F} key=1 op=Upsert *"),
+                    Expect.Pending(D1).Exact($"{F} key=1 row=present"),
                     new ExpectThrowOp(D1),
                     RefreshAll(D1, mode: SyncMode.Versioned, force: true),
                     Expect
@@ -156,8 +155,12 @@ internal static partial class SyncModelScenarios
                         .Exact("1 parent=null name=edited", "2 parent=null name=bob", "999 *"),
                     Expect.Rows(D1, I).Exact("11 *", "999 *"),
                     Expect.Rows(D1, L).Exact("L101 *"),
-                    Expect.Journal(D1).Exact($"{F} key=1 op=Upsert *"),
-                    Expect.Acks(D1, F).Exact("key=2 ver=server"),
+                    Expect.Pending(D1).Exact($"{F} key=1 row=present"),
+                    // 断られた洗い替えは、上げ済みの行（フォルダー 2）の送信の基準を変えない：次の編集は偽の競合にならずに上がる
+                    Rename(D1, 2, "bob-edited"),
+                    Plain(D1),
+                    Expect.Result(D1).Contains("uploaded=2").Absent("conflict *"),
+                    Expect.Rows(SV, F).Contains("2 parent=null name=bob-edited"),
                 ]
             ),
             Moved(
@@ -176,9 +179,10 @@ internal static partial class SyncModelScenarios
                     Expect
                         .Rows(D1, I)
                         .Contains("11 folder=1 label=null code=c-11 title=edited-offline"),
-                    Expect.Journal(D1).Exact($"{I} key=11 *"),
+                    Expect.Pending(D1).Exact($"{I} key=11 row=present"),
                     Plain(D1),
-                    new LocalSqlOp(D1, $"DELETE FROM {I} WHERE item_id = 11") { Untracked = true },
+                    new DeleteItemOp(D1, Direct, 11),
+                    Plain(D1),
                     RefreshAll(D1, excluded: [I]),
                     Expect
                         .Result(D1)
@@ -238,7 +242,6 @@ internal static partial class SyncModelScenarios
                     RefreshAll(D1),
                     Expect.Result(D1).Contains("exception SqliteException: *wipe blocked*"),
                     new LocalSqlOp(D1, "DROP TRIGGER block_wipe"),
-                    Expect.Acks(D1, F).Contains("key=620 *"),
                     Rename(D1, 620, "c1"),
                     PlainOnly(D1, ModelSyncKind.Upload),
                     Expect.Result(D1).Absent("conflict *"),
@@ -272,7 +275,7 @@ internal static partial class SyncModelScenarios
                     Rename(D1, 710, "offline-edit"),
                     RefreshAll(D1, force: true),
                     Expect.Result(D1).Absent("exception *").Contains("discarded-changes=1"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                     Expect.Rows(D1, F).Contains("710 parent=null name=f710"),
                 ]
             ),
@@ -459,7 +462,6 @@ internal static partial class SyncModelScenarios
                     Expect.Rows(D1, F).Contains("700 parent=null name=f700 pinned=711", "620 *"),
                     Expect.Rows(D1, I).Exact("711 folder=710 *", "999 *"),
                     Expect.Rows(D1, ModelTables.Events).Count("*", 1),
-                    Expect.Acks(D1, F).Contains("key=620 *"),
                     new LocalSqlOp(D1, "DROP TRIGGER block_wipe"),
                     Rename(D1, 620, "c1"),
                     PlainOnly(D1, ModelSyncKind.Upload),
@@ -473,7 +475,7 @@ internal static partial class SyncModelScenarios
                 [
                     Expect.Rows(D1, I).Exact("11 *", "999 *"),
                     RefreshAll(D1),
-                    Expect.Result(D1).Contains("deleted=5", "inserted=5"),
+                    Expect.Result(D1).Contains("deleted=0", "inserted=5"),
                     Expect.Rows(D1, I).Contains("11 folder=1 *"),
                 ]
             ),

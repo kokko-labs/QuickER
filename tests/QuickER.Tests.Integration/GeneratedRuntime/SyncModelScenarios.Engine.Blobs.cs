@@ -28,13 +28,13 @@ internal static partial class SyncModelScenarios
                 "blob-only-edit-is-journaled-and-uploaded",
                 [.. Seed(1, "alice", 11, "widget")],
                 [
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                     new WritePayloadOp(D1, 11, "0402"),
-                    Expect.Journal(D1).Exact($"{I} key=11 op=Upsert * blobs=Payload *"),
+                    Expect.Pending(D1).Exact($"{I} key=11 row=present"),
                     Plain(D1),
                     Expect.Result(D1).Contains("uploaded=1").Absent("conflict *"),
                     new ExpectPayloadOp(SV, 11, "0402"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             Moved(
@@ -83,7 +83,7 @@ internal static partial class SyncModelScenarios
                     Plain(D1),
                     new ExpectPayloadOp(SV, 21, "0505"),
                     Expect.Rows(SV, I).Contains("21 folder=2 label=null code=c-21 title=gadget"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             Moved(
@@ -92,10 +92,10 @@ internal static partial class SyncModelScenarios
                 [
                     new ArmHookBlobWriteOp(D1, 21, "0404", KeyAsInt64: true),
                     new UpdateItemOp(D1, ModelWriteVia.Graph, 11, 1, null, "c-11", "bob"),
-                    Expect.Journal(D1).Contains($"{I} key=21 *"),
+                    Expect.Pending(D1).Contains($"{I} key=21 row=present"),
                     Plain(D1),
                     new ExpectPayloadOp(SV, 21, "0404"),
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                 ]
             ),
             Moved(
@@ -187,7 +187,7 @@ internal static partial class SyncModelScenarios
                     {
                         ExpectFailure = true,
                     },
-                    Expect.Journal(D1).Empty(),
+                    Expect.Pending(D1).Empty(),
                     new ExpectPayloadOp(D1, 11, "01"),
                     Plain(D1),
                     new ExpectPayloadOp(SV, 11, "01"),
@@ -200,7 +200,7 @@ internal static partial class SyncModelScenarios
                     new ArmHookBlobWriteOp(D1, 99, "0505"),
                     new UpdateItemOp(D1, ModelWriteVia.Graph, 11, 1, null, "c-11", "bob"),
                     Expect.Hook(D1).Exact("blob-write key=99 returned=false"),
-                    Expect.Journal(D1).Exact($"{I} key=11 op=Upsert *"),
+                    Expect.Pending(D1).Exact($"{I} key=11 row=present"),
                 ]
             ),
             Moved(
@@ -208,7 +208,7 @@ internal static partial class SyncModelScenarios
                 [],
                 [
                     new AddItemOp(D1, Direct, 6, 999, null, "c-6", "erin", "0606"),
-                    Expect.Journal(D1).Exact($"{I} key=6 op=Upsert * blobs=Payload *"),
+                    Expect.Pending(D1).Exact($"{I} key=6 row=present"),
                     Plain(D1),
                     new ExpectPayloadOp(SV, 6, "0606"),
                 ]
@@ -224,10 +224,8 @@ internal static partial class SyncModelScenarios
                     Plain(D1),
                     Expect.Result(D1).Contains("exception *"),
                     Expect.Rows(D1, I).Contains("11 *"),
-                    Expect.BlobPending(D1, I).Exact("key=11 col=Payload"),
                     Plain(D1),
                     new ExpectPayloadOp(D1, 11, "010203"),
-                    Expect.BlobPending(D1, I).Empty(),
                 ]
             ),
             Moved(

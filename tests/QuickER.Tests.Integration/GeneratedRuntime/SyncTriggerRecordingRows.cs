@@ -948,6 +948,105 @@ internal static class SyncTriggerRecordingRows
                 )
             ),
             Row(
+                "graph-save-removed-parent-with-new-children-records-only-deleted-rows",
+                "消す親の下に、キーの無い新しい子（Added・キーは 0）と、キーを持つ新しい版なしの子（Added）を足したグラフ保存は、"
+                    + "DB から消えた行（前からある子と親）だけを削除として記録し、書かれなかった新しい子は記録しない。新しい子だけを"
+                    + "消す印にしたグラフ保存は何も記録しない",
+                new(
+                    SyncTriggerFixture.Sync,
+                    async (h, ct) =>
+                    {
+                        await h.Sync.Orders.InsertAsync(Order(1, "alice"), ct);
+                        await h.Sync.Lines.InsertAsync(
+                            new S.SyncOrderLineEntity
+                            {
+                                LineId = 10,
+                                OrderId = 1,
+                                Product = "pen",
+                            },
+                            ct
+                        );
+                    },
+                    async (h, ct) =>
+                    {
+                        // 新しい子だけを消す印にした保存：保存の DELETE はどの行にも当たらず、親は残る
+                        var kept = (await h.Sync.Orders.GetByIdAsync(1, ct))!;
+                        var neverSaved = new S.SyncOrderLineEntity
+                        {
+                            OrderId = 1,
+                            Product = "ghost",
+                        };
+                        neverSaved.MarkRemoved();
+                        kept.SyncOrderLines.Add(neverSaved);
+                        await h.Sync.Orders.SaveAsync(kept, cancellationToken: ct);
+                        (await h.Sync.Orders.GetByIdAsync(1, ct)).Should().NotBeNull();
+
+                        // 親を消す保存：前からある子・キーの無い新しい子・キーを持つ新しい版なしの子を下に持つ
+                        var order = (await h.Sync.Orders.GetByIdAsync(1, ct))!;
+                        var existing = new S.SyncOrderLineEntity
+                        {
+                            LineId = 10,
+                            OrderId = 1,
+                            Product = "pen",
+                        };
+                        existing.MarkRemoved();
+                        var keyless = new S.SyncOrderLineEntity { OrderId = 1, Product = "new" };
+                        keyless.MarkAdded();
+                        var note = new S.SyncNoteEntity
+                        {
+                            NoteId = 20,
+                            OrderId = 1,
+                            Body = "memo",
+                        };
+                        note.MarkAdded();
+                        order.SyncOrderLines.Add(existing);
+                        order.SyncOrderLines.Add(keyless);
+                        order.SyncNotes.Add(note);
+                        order.MarkRemoved();
+                        await h.Sync.Orders.SaveAsync(order, cancellationToken: ct);
+                        (await h.Sync.Orders.GetByIdAsync(1, ct)).Should().BeNull();
+                        (await h.Sync.Notes.GetByIdAsync(20, ct)).Should().BeNull();
+                    },
+                    [Gone(Lines, 10), Gone(Orders, 1)]
+                )
+            ),
+            Row(
+                "graph-save-through-untracked-parent-records-only-tracked-child",
+                "トリガーを張らない親の表（同期から外した表）のリポジトリのグラフ保存は、同じ保存が書き換える親の行を記録せず、"
+                    + "足した同期する子の行だけを記録する（親の直接の挿入・更新も記録しない）",
+                new(
+                    SyncTriggerFixture.Sync,
+                    null,
+                    async (h, ct) =>
+                    {
+                        await h.Sync.Orders.InsertAsync(Order(1, "alice"), ct);
+                        var edited = (await h.Sync.Orders.GetByIdAsync(1, ct))!;
+                        edited.CustomerName = "alice-edited";
+                        (await h.Sync.Orders.UpdateAsync(edited, cancellationToken: ct))
+                            .Should()
+                            .BeTrue();
+
+                        var order = (await h.Sync.Orders.GetByIdAsync(1, ct))!;
+                        order.CustomerName = "graph";
+                        order.MarkUpdated();
+                        var line = new S.SyncOrderLineEntity
+                        {
+                            LineId = 10,
+                            OrderId = 1,
+                            Product = "pen",
+                        };
+                        line.MarkAdded();
+                        order.SyncOrderLines.Add(line);
+                        await h.Sync.Orders.SaveAsync(order, cancellationToken: ct);
+                        (await h.Sync.Orders.GetByIdAsync(1, ct))!
+                            .CustomerName.Should()
+                            .Be("graph");
+                    },
+                    [Live(Lines, 10)],
+                    TrackedTables: [Lines, Notes]
+                )
+            ),
+            Row(
                 "raw-sql-insert-update-delete",
                 "生 SQL の挿入・更新・削除を、実行した順に記録する（挿入は除外 blob の名前つき）",
                 new(

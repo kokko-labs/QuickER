@@ -65,7 +65,7 @@ internal static class SyncModelKnownFailures
         ),
         // 受け入れ：塊をまたぐ形の行（ChunkBoundaryScenarios）のうち、行どうしの循環（両方の行が新しい）と一意な値の入れ替えは、
         // 今のエンジンでは降ろせない（ダウンロードがその行で毎回打ち切る）。新しいエンジンは 1 回で全部の道でも塊の道でも、保留した
-        // 行をまとめて 1 つのトランザクションで書いて入れる（控え sync-engine-scenario-ledger.md と小さい塊の端末の照合が持つ）
+        // 行をまとめて 1 つのトランザクションで書いて入れる（直結の Theory と小さい塊の端末の照合が持つ）
         .. CurrentEngineCannotLoad(
             "chunk-cross-table-cycle-both-new",
             RowCycleReason,
@@ -120,18 +120,6 @@ internal static class SyncModelKnownFailures
         "1/throw:RefreshAsync~SyncTableBase.WriteRowsAndBlobsAsync>SqliteRepositoryCore.BulkInsertAsync:SQLite19:FOREIGN KEY constraint failed[apply:cross:in-scope]";
 
     /// <summary>
-    /// 乱数の種の項目の再現の扱い（正規形ごと。載っていない正規形は NotGuaranteed）。夜間の種で見つけた形は NightlySeeds
-    /// （P2-3 C'・夜間の 1,200 種）
-    /// </summary>
-    private static readonly Dictionary<string, KnownReproduction> RandomReproductions = new(
-        StringComparer.Ordinal
-    )
-    {
-        ["1/no-quiesce:pending-unique-cycle:model_folders"] = KnownReproduction.NightlySeeds,
-        ["1/no-quiesce:pending-unique-cycle:model_items"] = KnownReproduction.NightlySeeds,
-    };
-
-    /// <summary>
     /// 正規形が広すぎて、種を限らずに数えるとほかの不具合を隠す署名（決定的な項目の正規形から乱数の項目を作らず、種を名指しした
     /// 項目 <see cref="SeedNamedRandomEntries"/> だけで数える）
     /// </summary>
@@ -170,14 +158,18 @@ internal static class SyncModelKnownFailures
     private static readonly IReadOnlyList<KnownEntry> SeedNamedRandomEntries = [];
 
     /// <summary>一覧（決定的なシナリオの項目と、その正規形から作った乱数の項目）</summary>
+    /// <remarks>
+    /// 乱数の項目の再現の扱いはどれも NotGuaranteed（起きないことを確かめない）。この一覧で乱数の種を流すのは今の端末の直結の乱数
+    /// （<see cref="SyncModelRuntimeTests.DirectSuite"/>）だけで、夜間も普段の数で流すので、夜間の種でだけ起きる形（端末で回した一意な値の
+    /// 循環）に届かない
+    /// </remarks>
     public static KnownFailureSet Set { get; } =
         Build(
             "SyncModel",
             Scenarios,
             SyncModelRuntimeTests.Family,
-            RandomReproductions,
-            SeedOnlySignatures,
-            SeedNamedRandomEntries
+            seedOnlySignatures: SeedOnlySignatures,
+            seedNamed: SeedNamedRandomEntries
         );
 
     /// <summary>
