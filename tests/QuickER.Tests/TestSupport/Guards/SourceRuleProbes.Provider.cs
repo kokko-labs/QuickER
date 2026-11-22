@@ -1194,6 +1194,30 @@ internal static partial class SourceRuleProbes
                     ),
                 ]
             ),
+            // 専用の接続を開くメソッドの呼び出し（await つき・using の中・変数への代入）と、接続を作る呼び出しを拾い、開くメソッドの
+            // 宣言・XmlDoc の cref・名前の途中で切れた綴りは拾わない（3 か所目の呼び出しを足すと件数の照合が赤にする）
+            new SourceRuleProbe(
+                "sync-dedicated-connection-openers-forms",
+                "sync-dedicated-connection-openers",
+                [
+                    new ProbeFile(
+                        "Probe.scriban",
+                        """
+                        /// <see cref="ILocalRowStore.CreateDedicatedConnection"/> and <see cref="OpenDedicatedAsync"/>
+                        var connection = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false);
+                        await using var other = await OpenDedicatedAsync(cancellationToken).ConfigureAwait(false);
+                        await using (var third = await OpenDedicatedAsync(token))
+                        private async Task<DbConnection> OpenDedicatedAsync(CancellationToken cancellationToken)
+                        var created = _rows.CreateDedicatedConnection();
+                        var renamed = ReOpenDedicatedAsync(cancellationToken);
+                        """,
+                        "OpenDedicatedAsync(",
+                        "OpenDedicatedAsync(",
+                        "OpenDedicatedAsync(",
+                        "CreateDedicatedConnection("
+                    ),
+                ]
+            ),
             new SourceRuleProbe(
                 "sync-engine-pending-markers-in-runtime-forms",
                 "sync-engine-pending-markers-in-runtime",

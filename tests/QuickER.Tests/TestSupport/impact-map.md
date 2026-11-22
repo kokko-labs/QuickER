@@ -23,9 +23,9 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.AI.Mock` | 一部 | `Ai/MockAgents`・`Ai/MockBuildBoundary`・`Ai/MockDialog`・`Ai/MockFolder`・`Ai/MockOutputs`・`Ai/MockRunner`・`Ai/MockScaffold`・`OsBoundary/Containment`・`OsBoundary/FeatureModules`・`OsBoundary/PathEntrances`・`OsBoundary/Segments` |
 | `src/QuickER.AI.UI` | 一部 | `Ai/ApiKeyStore`・`Ai/Attachments`・`Ai/ConnectionSettings`・`Ai/MarkdownRender`・`OsBoundary/ProcessLaunch`・`table:Converters` |
 | `src/QuickER.Cli` | 一部 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`DiagramEdit/ToolArgument` |
-| `src/QuickER.CodeGen.CSharp` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`Name/Entrances`・`OsBoundary/Segments`・`SyncModel/Config`・`SyncModel/Random`・`rule:mutation-safe-mode-jump-guards`・`rule:sync-auxiliary-names-in-template`・`rule:sync-auxiliary-trigger-names-in-template`・`rule:sync-engine-pending-markers-in-templates`・`table:EditModelScenarios`・`table:PostgreSqlQueryParameters`・`table:SyncEngineFixed`・`table:SyncTriggerGuard`・`table:SyncTriggerRecording`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
+| `src/QuickER.CodeGen.CSharp` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`Name/Entrances`・`OsBoundary/Segments`・`SyncModel/Config`・`SyncModel/Random`・`rule:mutation-safe-mode-jump-guards`・`rule:sync-auxiliary-names-in-template`・`rule:sync-auxiliary-trigger-names-in-template`・`rule:sync-dedicated-connection-openers`・`rule:sync-engine-pending-markers-in-templates`・`table:EditModelScenarios`・`table:PostgreSqlQueryParameters`・`table:SyncEngineFixed`・`table:SyncTriggerGuard`・`table:SyncTriggerRecording`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.CodeGen.CSharp/Queries` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`Name/Entrances`・`rule:mutation-safe-mode-jump-guards` |
-| `src/QuickER.CodeGen.CSharp/Templates` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`Name/Entrances`・`SyncModel/Config`・`SyncModel/Random`・`rule:mutation-safe-mode-jump-guards`・`rule:sync-auxiliary-names-in-template`・`rule:sync-auxiliary-trigger-names-in-template`・`rule:sync-engine-pending-markers-in-templates`・`table:EditModelScenarios`・`table:PostgreSqlQueryParameters`・`table:SyncEngineFixed`・`table:SyncTriggerGuard`・`table:SyncTriggerRecording`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
+| `src/QuickER.CodeGen.CSharp/Templates` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`Name/Entrances`・`SyncModel/Config`・`SyncModel/Random`・`rule:mutation-safe-mode-jump-guards`・`rule:sync-auxiliary-names-in-template`・`rule:sync-auxiliary-trigger-names-in-template`・`rule:sync-dedicated-connection-openers`・`rule:sync-engine-pending-markers-in-templates`・`table:EditModelScenarios`・`table:PostgreSqlQueryParameters`・`table:SyncEngineFixed`・`table:SyncTriggerGuard`・`table:SyncTriggerRecording`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.CodeGen.UI` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Name/Entrances`・`OsBoundary/FeatureModules` |
 | `src/QuickER.CodeReverse.CSharp` | 全体 | `FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules` |
 | `src/QuickER.Db.UI` | 一部 | `Ai/DbConnectionDialog`・`Ai/DbImportSync`・`OsBoundary/FeatureModules`・`OsBoundary/ProfileStore` |
@@ -130,7 +130,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_04_RepositoryContractCore.scriban` | `table:SyncTriggerGuard` |
 | `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_05_QueryPipeline.scriban` | `table:TranslatorParityPredicates` |
 | `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_08_EfCore.scriban` | `table:PostgreSqlQueryParameters`・`table:TranslatorParityPredicates` |
-| `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban` | `SyncModel/Config`・`SyncModel/Random`・`rule:sync-auxiliary-names-in-template`・`rule:sync-auxiliary-trigger-names-in-template`・`table:SyncEngineFixed`・`table:SyncTriggerGuard`・`table:SyncTriggerRecording` |
+| `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban` | `SyncModel/Config`・`SyncModel/Random`・`rule:sync-auxiliary-names-in-template`・`rule:sync-auxiliary-trigger-names-in-template`・`rule:sync-dedicated-connection-openers`・`table:SyncEngineFixed`・`table:SyncTriggerGuard`・`table:SyncTriggerRecording` |
 | `src/QuickER.CodeGen.UI` | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Name/Entrances` |
 | `src/QuickER.CodeGen.UI/CodeGenerationFeatureModule.cs` | `OsBoundary/FeatureModules` |
 | `src/QuickER.CodeReverse.CSharp` | `FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules` |
@@ -821,6 +821,10 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 ### `rule:sync-engine-pending-markers-in-runtime`
 
 - 範囲：`src/QuickER.Runtime.Sync/Runtime.Sync.g.cs`
+
+### `rule:sync-dedicated-connection-openers`
+
+- 範囲：`src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban`
 
 ### `rule:sync-auxiliary-name-prefix-copies`
 
