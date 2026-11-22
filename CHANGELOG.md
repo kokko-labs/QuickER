@@ -46,6 +46,7 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **SQLite schema import and diff sync leave out the tables of bidirectional sync** — Selecting everything in a sync could drop the tables whose names start with `quicker_sync_`, losing the unsent changes recorded on the device. `quicker_sync_` is now a reserved prefix: your own tables whose names start with it are no longer imported either
 - **The sync confirmation for dropping a unique constraint that a foreign key relies on now matches its list** — The note said "the unique constraint(s) below" but listed foreign keys; it now introduces the list as foreign keys. A foreign key relying on two dropped unique constraints is listed once, not twice.
 - **On MySQL, a sync that rebuilds two or more unique constraints on columns a foreign key references now warns and re-adds foreign keys to match the plan after one rebuild is called off** — The sync confirmation kept warnings decided before the rebuild was called off, and foreign keys to re-add were placed after new foreign keys.
+- **Repeated syncs to Oracle in one process no longer hit the open cursor limit (ORA-01000) partway through a script** — Oracle import, connection tests, and sync no longer use the ODP.NET statement cache. The cache could hold cursors up to just under the limit, and a script stopped partway through its DDL stayed partly applied.
 
 #### Generated code
 

@@ -15,6 +15,13 @@ namespace QuickER.Provider.Oracle;
 /// 既定ポート（<see cref="DefaultPort"/>）を用いる。サービス名は <see cref="DbConnectionSettings.ServiceName"/> が
 /// 非空ならそれを、空なら <see cref="DbConnectionSettings.Database"/> を用いる。
 /// </para>
+/// <para>
+/// ODP.NET の文のキャッシュを使わない（<c>Self Tuning=false</c>。<c>Statement Cache Size</c> の既定は 0）。この接続文字列で開く接続
+/// （取込・接続テスト・同期の実行器）が流すのは 1 回きりの DDL とカタログの読み取りで、キャッシュが効く場面が無い。既定のキャッシュは、
+/// 違う文を流したプールのセッションに、上限（<c>OPEN_CURSORS</c>）の手前まで開いたままのカーソルを持つ。そのセッションで同時に開く
+/// カーソル（DDL の再帰の SQL・PL/SQL のブロック）が残りを食うと、同期のスクリプトが途中で ORA-01000 になり、Oracle の DDL は暗黙に
+/// コミットするので、途中まで適用されたまま残る。
+/// </para>
 /// </remarks>
 public static class OracleConnectionStringFactory
 {
@@ -39,6 +46,7 @@ public static class OracleConnectionStringFactory
             UserID = settings.UserId,
             Password = settings.Password,
             ConnectionTimeout = settings.ConnectTimeoutSeconds,
+            SelfTuning = false,
         };
 
         return b.ConnectionString;

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,6 +30,11 @@ namespace QuickER.Tests.Integration;
 /// ODP.NET（Oracle.ManagedDataAccess.Core）は 1 コマンドで複数文を実行できないため、
 /// <see cref="ExecuteAsync"/> は <see cref="OracleSchemaSyncExecutor.SplitStatements"/>（SQL*Plus と同じ分割）で
 /// 文単位に分け、1 文ずつ順次実行する。
+/// </para>
+/// <para>
+/// フィクスチャの接続は ODP.NET の文のキャッシュを使わない（<see cref="BuildAdoConnectionString"/>）。
+/// <see cref="ResetSchemaAsync"/> は、スキーマを空にする前に、ユーザーの各セッションの開いたカーソルが上限の半分を超えていないことを確かめる
+/// （<see cref="AssertOpenCursorsWithinLimitAsync"/>）。
 /// </para>
 /// </remarks>
 public sealed class OracleContainerFixture : IAsyncLifetime
@@ -114,9 +120,15 @@ public sealed class OracleContainerFixture : IAsyncLifetime
     }
 
     /// <summary>接続ユーザーの自スキーマの全テーブルを削除し、各テストをクリーンな状態から始める</summary>
-    /// <remarks>データベースは使い回し、スキーマ（自ユーザーの全オブジェクト）のみ初期化する方式でテスト間の独立性を確保する</remarks>
+    /// <remarks>
+    /// データベースは使い回し、スキーマ（自ユーザーの全オブジェクト）のみ初期化する方式でテスト間の独立性を確保する。
+    /// 消す前に、開いたカーソルの溜まりを確かめる（<see cref="AssertOpenCursorsWithinLimitAsync"/>）。リセットそのものが ORA-01000 で落ちると
+    /// 溜めたセッションと文が分からないので、消した後でなく前に見る
+    /// </remarks>
     public async Task ResetSchemaAsync(CancellationToken ct = default)
     {
+        await AssertOpenCursorsWithinLimitAsync(ct).ConfigureAwait(false);
+
         // ごみ箱の BIN$ テーブル（dropped = 'YES'）は DROP できないため除外し、最後にごみ箱を空にする
         const string ResetBlock = """
             BEGIN
@@ -133,6 +145,111 @@ public sealed class OracleContainerFixture : IAsyncLifetime
         cmd.CommandText = ResetBlock;
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// ユーザーのどのセッションも、開いたカーソル（<c>opened cursors current</c>）が上限（<c>open_cursors</c>）の半分以下であることを確かめ、
+    /// 超えていればそのセッションと開いている文の上位を名指しして赤にする
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ODP.NET の文のキャッシュ（既定の <c>Self Tuning</c>）は、違う文を流したプールのセッションに、上限の約 12 手前までカーソルを開いたまま持つ。
+    /// そのセッションで同時に開くカーソル（DDL の再帰の SQL など）が残りを食うと、リセットの PL/SQL が ORA-01000 で落ちる。
+    /// 失敗が溜めたテストでなく後のテストのリセットに出て、しかもまれにしか出ないので、溜まった時点で名指しする。
+    /// </para>
+    /// <para>
+    /// しきい値の半分は、フィクスチャの接続が文のキャッシュを使わないときの実測の最大（48）より十分上で、キャッシュが上限近くまで育ったセッション（287〜295）より
+    /// 十分下にある。読み取りは SYSTEM の接続で、全テストのリセットで足しても 1 回 1.4 ms 前後（Oracle のコレクション全体の約 0.3%）。
+    /// </para>
+    /// </remarks>
+    private async Task AssertOpenCursorsWithinLimitAsync(CancellationToken ct)
+    {
+        await using var sys = new OracleConnection(SystemConnectionString);
+        await sys.OpenAsync(ct).ConfigureAwait(false);
+        _openCursorsLimit ??= await ReadOpenCursorsLimitAsync(sys, ct).ConfigureAwait(false);
+        var threshold = _openCursorsLimit.Value / 2;
+        (string Sid, long Count)? worst = null;
+
+        await using (var cmd = sys.CreateCommand())
+        {
+            cmd.CommandText = """
+                SELECT s.sid, st.value
+                FROM v$session s
+                JOIN v$sesstat st ON st.sid = s.sid
+                JOIN v$statname nm ON nm.statistic# = st.statistic#
+                WHERE nm.name = 'opened cursors current' AND s.username = :username
+                ORDER BY st.value DESC
+                FETCH FIRST 1 ROWS ONLY
+                """;
+            cmd.Parameters.Add(new OracleParameter("username", Username.ToUpperInvariant()));
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+            if (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                worst = (
+                    Convert.ToString(reader.GetValue(0), CultureInfo.InvariantCulture)!,
+                    Convert.ToInt64(reader.GetValue(1), CultureInfo.InvariantCulture)
+                );
+            }
+        }
+
+        if (worst is not { } session || session.Count <= threshold)
+        {
+            return;
+        }
+
+        var statements = new List<string>();
+
+        await using (var cmd = sys.CreateCommand())
+        {
+            cmd.CommandText = """
+                SELECT COUNT(*), cursor_type, SUBSTR(sql_text, 1, 60)
+                FROM v$open_cursor
+                WHERE sid = :sid
+                GROUP BY cursor_type, SUBSTR(sql_text, 1, 60)
+                ORDER BY 1 DESC
+                FETCH FIRST 5 ROWS ONLY
+                """;
+            cmd.Parameters.Add(new OracleParameter("sid", session.Sid));
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                statements.Add(
+                    string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"{reader.GetValue(0)} x {reader.GetValue(1)}: {reader.GetValue(2)}"
+                    )
+                );
+            }
+        }
+
+        throw new Xunit.Sdk.XunitException(
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"Oracle のセッション sid={session.Sid} の開いたカーソルが {session.Count} で、上限 {_openCursorsLimit} の半分を超えた。"
+            )
+                + "前に流れたテストが、文のキャッシュを使う接続（フィクスチャの接続文字列でない接続）で違う文を流したか、カーソルを閉じ忘れている"
+                + "（tests/QuickER.Tests/TestSupport/CLAUDE.md「Oracle のコンテナの開いたカーソル」）。開いている文の上位：\n  "
+                + string.Join("\n  ", statements)
+        );
+    }
+
+    /// <summary>データベースの <c>open_cursors</c> を読む</summary>
+    private static async Task<int> ReadOpenCursorsLimitAsync(
+        OracleConnection sys,
+        CancellationToken ct
+    )
+    {
+        await using var cmd = sys.CreateCommand();
+        cmd.CommandText = "SELECT value FROM v$parameter WHERE name = 'open_cursors'";
+        return Convert.ToInt32(
+            await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false),
+            CultureInfo.InvariantCulture
+        );
+    }
+
+    /// <summary>開いたカーソルのしきい値の元の <c>open_cursors</c>（最初のリセットで読む）</summary>
+    private int? _openCursorsLimit;
 
     /// <summary>コンテナに対して開いた新しい接続を返す（呼び出し側で破棄する）</summary>
     public async Task<OracleConnection> OpenConnectionAsync(CancellationToken ct = default)
@@ -234,6 +351,11 @@ public sealed class OracleContainerFixture : IAsyncLifetime
     }
 
     /// <summary>コンテナのホスト・ポートから ODP.NET 用の EZConnect 接続文字列を組み立てる</summary>
+    /// <remarks>
+    /// 文のキャッシュを使わない（<c>Self Tuning=false</c>。<c>Statement Cache Size</c> の既定は 0）。各テストはスキーマを作り直すので、
+    /// キャッシュは消えた表の文のカーソルを持つだけで、簡易 DSL の総当たりのように違う文を流すと、プールのセッションに上限の約 12 手前まで
+    /// カーソルが開いたまま溜まる。<c>Statement Cache Purge=true</c> はプールへ戻すときにしか閉じず、同じ接続の中では溜まるので使わない
+    /// </remarks>
     private string BuildAdoConnectionString(string? userId = null)
     {
         var container = _container!;
@@ -243,6 +365,7 @@ public sealed class OracleContainerFixture : IAsyncLifetime
                 $"{container.Hostname}:{container.GetMappedPublicPort(1521)}/{ServiceName}",
             UserID = userId ?? Username,
             Password = Password,
+            SelfTuning = false,
         };
         return b.ConnectionString;
     }
