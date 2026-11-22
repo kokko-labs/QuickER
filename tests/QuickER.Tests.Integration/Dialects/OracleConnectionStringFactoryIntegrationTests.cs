@@ -25,7 +25,7 @@ public sealed class OracleConnectionStringFactoryIntegrationTests(OracleContaine
     /// </summary>
     /// <remarks>
     /// あわせて、ファクトリの接続が ODP.NET の文のキャッシュを使わないことを、接続文字列（<c>Self Tuning=false</c>）と振る舞い
-    /// （違う文を流した後もセッションの開いたカーソルが溜まらない）の両方で確かめる（src/QuickER.Provider.Oracle/CLAUDE.md「文のキャッシュを使わない」）
+    /// （違う文を流す前と後で、セッションの開いたカーソルが増えない）の両方で確かめる（src/QuickER.Provider.Oracle/CLAUDE.md「文のキャッシュを使わない」）
     /// </remarks>
     [Fact(DisplayName = "[Integration] D: 接続文字列ファクトリの出力でコンテナへ実接続できる")]
     public async Task Build_ConnectsToContainer()
@@ -45,22 +45,15 @@ public sealed class OracleConnectionStringFactoryIntegrationTests(OracleContaine
         System.Convert.ToInt32(scalar).Should().Be(1);
         conn.State.Should().Be(System.Data.ConnectionState.Open);
 
-        // 文のキャッシュを使わない：接続文字列の設定と、違う文を流した後のセッションの開いたカーソルの数
+        // 文のキャッシュを使わない：接続文字列の設定と、違う文を流す前と後のセッションの開いたカーソルの増え方
         new OracleConnectionStringBuilder(connectionString)
             .SelfTuning.Should()
             .BeFalse(
                 "取込・同期の接続は 1 回きりの文しか流さず、キャッシュは上限の手前までカーソルを溜めるだけ"
             );
 
-        for (var i = 0; i < DistinctStatements; i++)
-        {
-            await using var distinct = new OracleCommand(
-                string.Create(CultureInfo.InvariantCulture, $"SELECT {i} FROM DUAL"),
-                conn
-            );
-            await distinct.ExecuteScalarAsync(Ct);
-        }
-
+        // 接続はプールのセッションなので、前のテストが開いたまま残したカーソルを最初から持ちうる。
+        // 絶対の数でなく、同じセッションで違う文を流す前と後の増え方を見る（読み取りは SYSTEM の接続で行い、数を増やさない）
         string sid;
 
         await using (
@@ -78,6 +71,30 @@ public sealed class OracleConnectionStringFactoryIntegrationTests(OracleContaine
 
         await using var sys = new OracleConnection(fixture.SystemConnectionString);
         await sys.OpenAsync(Ct);
+        var before = await OpenCursorsAsync(sys, sid);
+
+        for (var i = 0; i < DistinctStatements; i++)
+        {
+            await using var distinct = new OracleCommand(
+                string.Create(CultureInfo.InvariantCulture, $"SELECT {i} FROM DUAL"),
+                conn
+            );
+            await distinct.ExecuteScalarAsync(Ct);
+        }
+
+        var after = await OpenCursorsAsync(sys, sid);
+
+        (after - before)
+            .Should()
+            .BeLessThanOrEqualTo(
+                MaxOpenCursorGrowthWithoutCache,
+                $"違う文を {DistinctStatements} 本流しても、文のキャッシュを使わないセッションのカーソルは増えない（キャッシュが効くと本数の分だけ増える。前 {before}・後 {after}）"
+            );
+    }
+
+    /// <summary>セッションの開いたカーソルの数（<c>opened cursors current</c>）を SYSTEM の接続で読む</summary>
+    private static async Task<long> OpenCursorsAsync(OracleConnection sys, string sid)
+    {
         await using var cursors = new OracleCommand(
             """
             SELECT st.value
@@ -88,21 +105,17 @@ public sealed class OracleConnectionStringFactoryIntegrationTests(OracleContaine
             sys
         );
         cursors.Parameters.Add(new OracleParameter("sid", sid));
-        var open = System.Convert.ToInt64(
+        return System.Convert.ToInt64(
             await cursors.ExecuteScalarAsync(Ct),
             CultureInfo.InvariantCulture
         );
-
-        open.Should()
-            .BeLessThanOrEqualTo(
-                MaxOpenCursorsWithoutCache,
-                $"違う文を {DistinctStatements} 本流した後も、文のキャッシュを使わないセッションはカーソルを溜めない（キャッシュが効くと本数の分だけ開いたまま残る）"
-            );
     }
 
     /// <summary>流す違う文の数</summary>
     private const int DistinctStatements = 60;
 
-    /// <summary>キャッシュを使わないセッションの開いたカーソルの上限（実測は 10 前後の内側。キャッシュが効くと <see cref="DistinctStatements"/> を超える）</summary>
-    private const int MaxOpenCursorsWithoutCache = 20;
+    /// <summary>
+    /// キャッシュを使わないセッションの開いたカーソルの増え方の上限（キャッシュが効くと増え方は <see cref="DistinctStatements"/> 前後になる）
+    /// </summary>
+    private const int MaxOpenCursorGrowthWithoutCache = 5;
 }

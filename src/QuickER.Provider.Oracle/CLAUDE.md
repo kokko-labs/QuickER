@@ -14,7 +14,7 @@
   - そのセッションで同時に開くカーソル（DDL の再帰の SQL・PL/SQL のブロック）が残りを食うと、同期のスクリプトが途中で ORA-01000 になる。DDL は暗黙にコミットするので、途中まで適用されたまま残る。
   - キャッシュを満たした接続でリーダーを 8 本開いたまま DROP の PL/SQL を流すと決まって落ちる（6 本は通る）。`Statement Cache Purge=true` はプールへ戻すときにしか閉じず、同じ接続の中では溜まる。
 - 生成の EF Core 版の接続文字列は利用者のもので、QuickER は触らない（docs にも書かない。ODP.NET の既定の振る舞いで、普通のアプリはリーダーを同時に何本も開かない）。
-- ガード：`OracleConnectionStringFactoryIntegrationTests.Build_ConnectsToContainer`（接続文字列の `SelfTuning` と、違う文を 60 本流した後のセッションの開いたカーソルが 20 以下）・Oracle のコレクションのリセットの読み取り（実行器のセッションを含むユーザーの全セッションが上限の半分以下。`tests/QuickER.Tests/TestSupport/CLAUDE.md`「Oracle のコンテナの開いたカーソル」）。mutation 実証済み（`SelfTuning = false` を外すと、接続文字列の表明が赤、それを外しても振る舞いの表明が 62 > 20 で赤、同期計画の総当たりのリセットでガードが実行器のセッションを名指しして赤）。
+- ガード：`OracleConnectionStringFactoryIntegrationTests.Build_ConnectsToContainer`（接続文字列の `SelfTuning` と、同じセッションで違う文を 60 本流す前と後の開いたカーソルの増え方が 5 以下。プールのセッションは前のテストが残したカーソルを持ちうるので絶対の数は見ない＝XMLTYPE の列を作る DDL を流したセッションは、文のキャッシュと関係なく Oracle の内部のカーソルを 40 本前後開いたまま持つ）・Oracle のコレクションのリセットの読み取り（実行器のセッションを含むユーザーの全セッションが上限の半分以下。`tests/QuickER.Tests/TestSupport/CLAUDE.md`「Oracle のコンテナの開いたカーソル」）。mutation 実証済み（`SelfTuning = false` を外すと、接続文字列の表明が赤、それを外しても振る舞いの表明が増え方 59 > 5 で赤＝新しいセッションでも内部のカーソルを溜めたセッションでも、同期計画の総当たりのリセットでガードが実行器のセッションを名指しして赤）。
 
 ## 取込
 
