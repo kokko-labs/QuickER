@@ -99,84 +99,6 @@ internal static partial class SyncModelScenarios
                 ]
             ),
             Moved(
-                "hook-download-skip-stops-table-and-retries",
-                [],
-                [
-                    Folder(SV, 1, name: "alice"),
-                    Folder(SV, 2, name: "bob"),
-                    Folder(SV, 3, name: "carol"),
-                    new ArmApplySkipOp(D1, F, "2"),
-                    Plain(D1),
-                    Expect
-                        .Result(D1)
-                        .Single($"truncation {F} *")
-                        .Contains($"truncation {F} pending=2 missing-parent=- skipped-by-hook=1 *"),
-                    Expect.Rows(D1, F).Contains("1 *").Absent("2 *", "3 *"),
-                    Plain(D1),
-                    Expect.Result(D1).Absent("truncation *"),
-                    Expect
-                        .Rows(D1, F)
-                        .Contains("2 parent=null name=bob", "3 parent=null name=carol"),
-                ]
-            ),
-            Moved(
-                "hook-parent-read-back-skip-stops-child-table",
-                [],
-                [
-                    .. Seed(2, "bob", 12, "gadget"),
-                    new ArmFaultOp(D1, ModelFaultKind.ApplySkip),
-                    new ArmApplySkipOp(D1, F, "2"),
-                    Plain(D1),
-                    Expect
-                        .Result(D1)
-                        .Single($"truncation {F} *", $"truncation {I} *")
-                        .Contains(
-                            $"truncation {F} * skipped-by-hook=1 *",
-                            $"truncation {I} pending=12 missing-parent={F} *"
-                        ),
-                    Expect.Rows(D1, I).Absent("12 *"),
-                    Plain(D1),
-                    Expect.Result(D1).Absent("truncation *"),
-                    Expect.Rows(D1, I).Contains("12 *"),
-                ]
-            ),
-            Moved(
-                "hook-serverwins-read-back-skip-keeps-entry",
-                [Folder(SV, 1, name: "alice")],
-                [
-                    Rename(D1, 1, "local"),
-                    Rename(SV, 1, "server"),
-                    new ArmFaultOp(D1, ModelFaultKind.ApplySkip),
-                    new ArmApplySkipOp(D1, F, "1"),
-                    Plain(D1, policy: SyncConflictPolicy.ServerWins),
-                    Expect.Journal(D1).Count("*", 1),
-                    Expect.Rows(D1, F).Contains("1 parent=null name=local"),
-                    Plain(D1, policy: SyncConflictPolicy.ServerWins),
-                    Expect.Journal(D1).Empty(),
-                    Expect.Rows(D1, F).Contains("1 parent=null name=server"),
-                ]
-            ),
-            Moved(
-                "hook-versionless-download-skip-stops-table",
-                [],
-                [
-                    Folder(SV, 1, name: "alice"),
-                    new AddLabelOp(SV, Direct, "L1", 1, "first"),
-                    new AddLabelOp(SV, Direct, "L2", 1, "second"),
-                    new AddLabelOp(SV, Direct, "L3", 1, "third"),
-                    new ArmApplySkipOp(D1, L, "L2"),
-                    Plain(D1, SyncMode.LastWriteWins, batch: 1),
-                    Expect
-                        .Result(D1)
-                        .Single($"truncation {L} *")
-                        .Contains($"truncation {L} pending=L2 * skipped-by-hook=1 *"),
-                    Expect.Rows(D1, L).Contains("L1 *").Absent("L2 *", "L3 *"),
-                    Plain(D1, SyncMode.LastWriteWins, batch: 1),
-                    Expect.Result(D1).Absent("truncation *"),
-                    Expect.Rows(D1, L).Contains("L3 folder=1 caption=third"),
-                ]
-            ),
-            Moved(
                 "blob-after-hook-write-rolled-back-with-failed-save",
                 [.. Seed(1, "alice", 11, "widget")],
                 [
@@ -393,35 +315,6 @@ internal static partial class SyncModelScenarios
                     ),
                 ]
             ),
-            // 持ち越しを宣言しないエンジンでは、例外で終わった実行の解決役が持ち込んだ行の削除が、サーバーに一度も届いていない行の
-            // 削除として黙って捨てられ、後の同期がサーバーの行を端末へ戻す（照合 3 の数えるだけの種類）。持ち越しを宣言するエンジン
-            // （適用が全部か無しか）では違反になる形なので、そのエンジンの受け入れでこの行の期待を書き直す。
-            // 品目の表のダウンロードは、Versioned が触れない版なしの表（ラベル）を参照する品目 21 で打ち切られ、イベントの
-            // ダウンロードの親の解決役が品目 22 をサーバーから読み直して書く。その blob のコピーで例外になると、品目 22 はミラー版
-            // も受理記録も無い行として残る
-            Moved(
-                "thrown-resolver-row-delete-is-dropped-and-row-comes-back",
-                [.. Seed(1, "alice", 11, "widget")],
-                [
-                    new AddLabelOp(SV, Direct, "L9", 1, "server-only"),
-                    new AddItemOp(SV, Direct, 21, 1, "L9", "c-21", "labelled", "0A0B0015"),
-                    Line(SV, 22, 1, "resolved"),
-                    new AddEventOp(SV, Direct, ResolverEventAt, 22, "needs-22"),
-                    new ArmFaultOp(D1, ModelFaultKind.BlobDownload),
-                    new ExpectThrowOp(D1),
-                    Plain(D1),
-                    Expect.Result(D1).Contains("exception *"),
-                    Expect.Rows(D1, I).Contains("22 folder=1 label=null code=c-22 title=resolved"),
-                    Expect.Rows(D1, I).Absent("21 *"),
-                    Expect.Mirror(D1, I).Contains("key=22 mirror=null"),
-                    Expect.Acks(D1, I).Absent("key=22 *"),
-                    new DeleteItemOp(D1, Direct, 22),
-                    Plain(D1),
-                    Expect.Result(D1).Absent("conflict *", "local-change *"),
-                    Expect.Rows(D1, I).Contains("22 folder=1 label=null code=c-22 title=resolved"),
-                    Expect.Rows(SV, I).Contains("22 folder=1 label=null code=c-22 title=resolved"),
-                ]
-            ),
             // 端末が作った品目（サーバーは知らない）の記録を、削除伝搬なしの Versioned × ServerWins が捨てたと報告し、行は端末に
             // 残る。その後に blob だけを書くと、次の同期は行を blob と一緒にサーバーへ上げる（後の書き込みが blob だけでも、
             // 捨てた決定の後の端末の編集として送る）
@@ -636,7 +529,4 @@ internal static partial class SyncModelScenarios
                 ]
             ),
         ];
-
-    /// <summary>解決役が親の品目を読み直すイベントの時刻（thrown-resolver-row-delete-is-dropped-and-row-comes-back）</summary>
-    private static DateTime ResolverEventAt => new(2026, 6, 2, 9, 0, 0, DateTimeKind.Unspecified);
 }

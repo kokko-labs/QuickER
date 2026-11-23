@@ -32,8 +32,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 internal static class SyncModelDirectRuns
 {
     /// <summary>直結・SQLite のサーバー役・新しいエンジンの端末の世界の組み方</summary>
-    public static SyncModelWorldOptions Options { get; } =
-        SyncModelEngineDevice.On(SyncModelWorldOptions.Direct);
+    public static SyncModelWorldOptions Options { get; } = SyncModelWorldOptions.Direct;
 
     /// <summary>流している途中か、違反なく終わった実行（鍵は <see cref="KeyOf"/>）</summary>
     private static readonly ConcurrentDictionary<string, Lazy<Task<Outcome>>> Shared = new(

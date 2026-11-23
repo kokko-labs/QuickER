@@ -53,10 +53,12 @@ internal static class TableRegistry
         ),
         new(
             "SyncTriggerGuard",
-            "同期のトリガーの確認の表（包んだ接続ファクトリで開いて使う DB に外から何かが起きた後、次に開いた接続で確認のガードが何をするか）",
+            "同期のトリガーの確認の表（包んだ接続ファクトリで開いて使う DB に外から何かが起きた後、次に開いた接続で確認のガードが何をするかと、生成された DI の登録 AddGeneratedSyncEngine が接続ファクトリを確認つきで包んで新しいエンジンを組むこと）",
             [
                 Runtime + "SyncTriggerGuardRows.cs",
+                Runtime + "SyncTriggerGuardDiRows.cs",
                 Runtime + "SyncTriggerHarness.cs",
+                Runtime + "SyncEngineFixtureDevices.cs",
                 Runtime + "SyncSupportAdoSqliteTriggerRuntimeTests.cs",
             ],
             [

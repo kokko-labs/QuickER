@@ -14,7 +14,7 @@ using Xunit;
 namespace QuickER.Tests.CodeGen.CSharp;
 
 /// <summary>
-/// 生成ランタイムが数値から組み立てて DB・ジャーナルへ書く文字列（同期のキーのテキストの decimal、SQLite の
+/// 生成ランタイムが数値から組み立てて DB へ書く文字列（同期のキーのテキストの decimal、SQLite の
 /// <c>PRAGMA busy_timeout</c>）が、書式のカルチャ（<see cref="CultureScope.Cultures"/>）に依らないことを確かめる
 /// </summary>
 /// <remarks>
@@ -37,7 +37,7 @@ public sealed class CultureInvariantRuntimeTextTests
     ];
 
     [Fact(
-        DisplayName = "同期のキーのテキストの decimal の書き出し・読み取り・書き直しは、書式のカルチャに依らずインバリアントと同じ"
+        DisplayName = "同期のキーのテキストの decimal の書き出し・読み取りは、書式のカルチャに依らずインバリアントと同じ"
     )]
     public void SyncKeyTextDecimal_IsCultureInvariant()
     {
@@ -57,17 +57,17 @@ public sealed class CultureInvariantRuntimeTextTests
                         );
                 }
 
-                // 以前の版が書いた指数表記の読み取りと書き直し
-                foreach (var legacy in new[] { "1E-06", "-1E-06", "1.5E+3" })
+                // 指数表記の読み取り
+                foreach (var exponent in new[] { "1E-06", "-1E-06", "1.5E+3" })
                 {
                     builder
-                        .Append(legacy)
+                        .Append(exponent)
                         .Append(" => ")
-                        .Append(
-                            SyncKeyText.ParseDecimal(legacy).ToString(CultureInfo.InvariantCulture)
-                        )
-                        .Append(" / ")
-                        .AppendLine(SyncKeyText.WithoutDecimalExponent(legacy));
+                        .AppendLine(
+                            SyncKeyText
+                                .ParseDecimal(exponent)
+                                .ToString(CultureInfo.InvariantCulture)
+                        );
                 }
 
                 return builder.ToString();

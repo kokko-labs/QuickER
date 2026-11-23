@@ -255,6 +255,25 @@ internal abstract record CodeRule
     ) => new CallOrderRule(type, member, targets, ns);
 
     /// <summary>
+    /// 型 <paramref name="type"/> のメンバー <paramref name="member"/> の本体（ラムダの本体を含む）で、<paramref name="createdTypes"/> に挙げた型を
+    /// 作る式（<c>new</c>）を出てくる順に並べると <paramref name="createdTypes"/> の順と完全一致する（挙げていない型の <c>new</c> は数えない）
+    /// </summary>
+    /// <remarks>
+    /// 呼び出しの順（<see cref="CallOrder"/>）に数えられないコンストラクタの呼び出しの順を見るための問い合わせ。作る型の書き方は
+    /// <see cref="Creates"/> と同じ。
+    /// </remarks>
+    /// <param name="type">型の単純名</param>
+    /// <param name="member">メンバー名</param>
+    /// <param name="createdTypes">作る型（<see cref="Creates"/> と同じ書き方。同じ型を何度挙げてもよい）</param>
+    /// <param name="ns">型の名前空間</param>
+    public static CodeRule CreationOrder(
+        string type,
+        string member,
+        IReadOnlyList<string> createdTypes,
+        string? ns = null
+    ) => new CreationOrderRule(type, member, createdTypes, ns);
+
+    /// <summary>
     /// 型 <paramref name="type"/> のメンバー <paramref name="member"/> の本体で、<paramref name="target"/> を呼ぶ式のうち、引数が
     /// <paramref name="arguments"/> と完全一致するものがちょうど <paramref name="count"/> 個ある
     /// </summary>
@@ -1081,6 +1100,70 @@ internal abstract record CodeRule
                 yield return $"コード: {TypeName}.{MemberName} の呼び出しの順が [{string.Join(", ", actual)}]（期待 [{string.Join(", ", Targets)}]）";
             }
         }
+    }
+
+    private sealed record CreationOrderRule(
+        string TypeName,
+        string MemberName,
+        IReadOnlyList<string> CreatedTypes,
+        string? Ns
+    ) : CodeRule
+    {
+        public override IEnumerable<string> Check(CodeRuleContext context)
+        {
+            if (!context.TryGetType(TypeName, Ns, out var type, out var problem))
+            {
+                yield return problem;
+                yield break;
+            }
+
+            var declarations = type.GetMembers(MemberName)
+                .Where(item => !item.IsImplicitlyDeclared)
+                .SelectMany(item => item.DeclaringSyntaxReferences)
+                .ToList();
+
+            if (declarations.Count == 0)
+            {
+                yield return $"コード: {TypeName}.{MemberName} が無い";
+                yield break;
+            }
+
+            var distinct = CreatedTypes.Distinct(StringComparer.Ordinal).ToList();
+            var actual = new List<string>();
+
+            foreach (var reference in declarations)
+            {
+                var model = context.Compilation.GetSemanticModel(reference.SyntaxTree);
+
+                foreach (
+                    var creation in reference
+                        .GetSyntax()
+                        .DescendantNodes()
+                        .OfType<BaseObjectCreationExpressionSyntax>()
+                )
+                {
+                    if (model.GetTypeInfo(creation).Type is not INamedTypeSymbol created)
+                    {
+                        continue;
+                    }
+
+                    if (distinct.FirstOrDefault(name => Matches(created, name)) is { } hit)
+                    {
+                        actual.Add(hit);
+                    }
+                }
+            }
+
+            if (!actual.SequenceEqual(CreatedTypes, StringComparer.Ordinal))
+            {
+                yield return $"コード: {TypeName}.{MemberName} の new の順が [{string.Join(", ", actual)}]（期待 [{string.Join(", ", CreatedTypes)}]）";
+            }
+        }
+
+        private static bool Matches(INamedTypeSymbol created, string name) =>
+            name.Contains('<', StringComparison.Ordinal)
+                ? created.ToDisplayString(Format) == name
+                : created.Name == name;
     }
 
     private sealed record CallArgumentsRule(

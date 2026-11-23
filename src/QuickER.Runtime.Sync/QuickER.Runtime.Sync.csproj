@@ -35,8 +35,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- 同期エンジンは中立契約（IRepository / ISqlExecutor / ConcurrencyMode）だけを使い、ADO にも EF Core にも
-         DI にも触れない（BCL のみ）。DI 登録拡張（AddGeneratedSyncSupport）と per-entity の記述子・デコレータ・
+    <!-- 同期エンジンは中立契約（ILocalRowStore / ISqlExecutor / IRemoteRepositoryCore / ConcurrencyMode）と System.Data.Common だけを使い、
+         ADO のドライバにも EF Core にも DI にも触れない（BCL のみ）。DI 登録拡張（AddGeneratedSyncSupport）と per-entity の記述子・
          直結差分ソースはスキーマ依存物として生成側に出力されるため、本パッケージは
          Microsoft.Extensions.DependencyInjection 系にも依存しない（依存排他ガードテストで検証） -->
   </ItemGroup>

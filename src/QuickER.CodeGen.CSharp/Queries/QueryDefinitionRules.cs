@@ -127,7 +127,7 @@ public static class QueryDefinitionRules
     /// <para>
     /// 予約するのは、生成したコードがコンパイルできなくなる名前だけ（<c>ReservedName_IsActuallyUncompilable</c> が、
     /// 予約から外すとコンパイルできないことを名前ごとに確かめる）。生成本体が呼ぶメンバー（<c>Query()</c>・
-    /// <c>QueryBySqlAsync</c>・同期のデコレータの <c>_inner</c>・リモートのクライアントの <c>InvokeAsync</c> など）は
+    /// <c>QueryBySqlAsync</c>・リモートのクライアントの <c>InvokeAsync</c> など）は
     /// <c>this.</c> で修飾して呼ぶので、同名のパラメータがあっても隠されない＝予約しない。
     /// </para>
     /// <para>

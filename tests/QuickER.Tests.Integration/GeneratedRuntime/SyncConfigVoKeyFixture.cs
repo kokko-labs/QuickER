@@ -10,6 +10,7 @@ using QuickER.Tests.GeneratedSyncVoFixture;
 using QuickER.Tests.GeneratedSyncVoFixture.Repositories.Sqlite;
 using QuickER.Tests.GeneratedSyncVoFixture.Repositories.SqlServer;
 using LocalSqlite = QuickER.Tests.GeneratedSyncVoFixture.Repositories.Sqlite;
+using ServerSqlServer = QuickER.Tests.GeneratedSyncVoFixture.Repositories.SqlServer;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -30,7 +31,7 @@ internal sealed class SyncConfigVoKeyFixture : ISyncConfigFixture
         IServiceCollection services,
         object? key,
         string connectionString,
-        bool asInstances = false
+        bool factoryAsInstance = false
     )
     {
         if (key is null)
@@ -42,18 +43,11 @@ internal sealed class SyncConfigVoKeyFixture : ISyncConfigFixture
             services.AddGeneratedSqliteRepositories(key, connectionString);
         }
 
-        if (asInstances)
+        if (factoryAsInstance)
         {
-            var factory = new LocalSqlite.SqlConnectionFactory(connectionString);
-            SyncConfigFixtures.ReplaceWithInstance<ISyncvoOrderRepository>(
-                services,
-                key,
-                new LocalSqlite.SyncvoOrderRepository(factory)
-            );
-            SyncConfigFixtures.ReplaceWithInstance<ISyncvoLineRepository>(
-                services,
-                key,
-                new LocalSqlite.SyncvoLineRepository(factory)
+            // 生成の登録の後に足したインスタンスの登録が最後の登録になり、同期の登録はこれを内側にして包む
+            services.AddSingleton<LocalSqlite.ISqlConnectionFactory>(
+                new LocalSqlite.SqlConnectionFactory(connectionString)
             );
         }
     }
@@ -82,6 +76,8 @@ internal sealed class SyncConfigVoKeyFixture : ISyncConfigFixture
     public string ChildTableName => "syncvo_lines";
 
     public bool HasVersionlessChild => false;
+
+    public IReadOnlyList<string> SyncTableNames { get; } = ["syncvo_orders", "syncvo_lines"];
 
     public void AddSyncSupport(
         IServiceCollection services,
@@ -317,23 +313,24 @@ internal sealed class SyncConfigVoKeyFixture : ISyncConfigFixture
         }
     }
 
-    public async Task<SyncConfigJournal> JournalAsync(
+    public async Task<IReadOnlyList<SyncConfigPendingRow>> PendingAsync(
         IServiceProvider provider,
-        object? localKey,
         CancellationToken ct
     )
     {
         await using var scope = provider.CreateAsyncScope();
-        var entries = await scope
-            .ServiceProvider.GetRequiredService<SyncJournal>()
-            .ReadAllAsync(ct);
-        var all = await Resolve<ISqlExecutor>(scope.ServiceProvider, localKey)
-            .ExecuteScalarSqlAsync<long>("SELECT COUNT(*) FROM quicker_sync_journal", null, ct);
+        var rows = await scope
+            .ServiceProvider.GetRequiredService<SyncEngine>()
+            .GetPendingChangesAsync(ct);
 
-        return new SyncConfigJournal(
-            [.. entries.Select(entry => entry.TableName)],
-            (int)all - entries.Count
-        );
+        return
+        [
+            .. rows.Select(row => new SyncConfigPendingRow(
+                row.TableName,
+                row.KeyText,
+                row.IsDelete
+            )),
+        ];
     }
 
     public async Task<(string? Problem, int Downloaded)> SyncAsync(
@@ -369,15 +366,27 @@ internal sealed class SyncConfigVoKeyFixture : ISyncConfigFixture
         object? serverKey,
         bool overHttp,
         bool parentExcluded
-    ) =>
-        SyncConfigFixtures.RegistrationProblems(
+    )
+    {
+        var localFactory = Resolve<LocalSqlite.ISqlConnectionFactory>(provider, localKey);
+        var direct = !overHttp && !Equals(serverKey, localKey);
+
+        return SyncConfigFixtures.RegistrationProblems(
+            localFactory,
             Repository(provider, localKey),
             Resolve<ISyncvoLineRepository>(provider, localKey),
             provider.GetRequiredService<ISyncServerSource<SyncvoOrderEntity, OrderIdValue>>(),
-            overHttp || Equals(serverKey, localKey) ? null : Repository(provider, serverKey),
+            direct ? Repository(provider, serverKey) : null,
+            direct ? Resolve<ServerSqlServer.ISqlConnectionFactory>(provider, serverKey) : null,
+            SyncConfigFixtures.TriggerTables(localFactory.CreateConnection()),
+            [.. SyncTableNames.Where(table => !parentExcluded || table != ParentTableName)],
             overHttp,
-            parentExcluded
+            parentExcluded,
+            typeof(LocalSqlite.SyncvoOrderRepository),
+            typeof(LocalSqlite.SyncvoLineRepository),
+            typeof(ServerSqlServer.SyncvoOrderRepository)
         );
+    }
 
     private static ISyncvoOrderRepository Repository(IServiceProvider provider, object? key) =>
         Resolve<ISyncvoOrderRepository>(provider, key);

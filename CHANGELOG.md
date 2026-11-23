@@ -12,6 +12,16 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 - **Remote save, insert and update responses now carry row versions only in the column values** — The fields that carried versions alone (such as `RemoteSaveResult.RowVersions`) are gone, and a response without the values, or with a number of values that does not match the rows sent, is refused with an `InvalidOperationException`. Regenerate the remote server and client with the same version of QuickER
 
+#### Bidirectional sync
+
+- **The bidirectional sync engine is rebuilt, and local changes and sync state are kept differently** — Triggers on the synced tables record the changes, and the state lives in `quicker_sync_state`, `quicker_sync_row` and `quicker_sync_table`. The auxiliary tables of 0.4.0 (`quicker_sync_journal` and the others) are not read, so send every unsent change before you upgrade and rebuild the device with a refresh afterwards
+- **The public sync types are trimmed** — `SyncJournal`, `JournalingRepository`, `SyncSession`, `ISyncTable`, `SyncTableBase`, `SaveHookContextWrites` and others are gone, along with the descriptor members for local SQL (`LocalKeysSql` and others), and `SyncJournalOperation` is now `SyncOperation`. The registration calls such as `AddGeneratedSyncEngine` are unchanged
+- **A download no longer runs the local save hooks** — The server's rows are written to the device without going through the repository, so no hook runs for a row the sync brings down. Do what those rows need after the sync
+- **A table with a schema-qualified name is left out of the sync** — A table whose name contains `.` is a table of another database in SQLite, and the triggers that record changes cannot be put on it. Generation names it in a warning, and fails when no table is left to sync
+- **Registering the local connection factory again after `AddGeneratedSyncEngine` now throws when the engine is built** — The registration replaces the local `ISqlConnectionFactory` with a wrapper that checks the triggers each time a connection opens. Register the connection factory before `AddGeneratedSyncEngine`
+- **A save from an entity that carries no version is no longer reported as a conflict** — An entity created on the device and kept, or built from its key alone, that is saved after a sync brought down another writer's content uploads without a conflict and overwrites that content (0.4.0 reported `DuplicateOnServer`). Read your entities again after a sync before you edit them
+- **A sync is refused with `SyncLocalTableEmptiedException` when a table was emptied outside the sync** — The resume point is no longer derived from the device's rows; it is recorded per table. Rebuild an emptied table with a refresh
+
 #### DB sync & DDL
 
 - **On PostgreSQL, a foreign key created with the full default name is no longer treated as the same foreign key as the one in the diagram** — In a database created with the DDL of 0.2.0 or earlier, the differences show the foreign key with the name cut at 63 bytes dropped and the one with the shortened name added. Select both and sync once
@@ -24,7 +34,26 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 - **An auto-save record without the diagram's hash (written by 0.2.0 or earlier) is no longer trusted** — On the first start after the update, the diagram you had open may be restored as untitled and unsaved. Save it to its file again
 
+### Added
+
+#### Bidirectional sync
+
+- **Unsent changes can be listed and discarded row by row** — `SyncEngine.GetPendingChangesAsync` returns the unsent rows, and a row discarded with `DiscardPendingChangesAsync` or `DiscardAllPendingChangesAsync` is put back from the server's row by the next sync or refresh
+- **`DownloadRowLimit` caps the rows one run brings down** — The default is 300,000 rows; a run that goes over it while unsent changes exist applies nothing and is refused with `SyncDownloadTooLargeException`. A large download with no unsent change is committed a chunk at a time
+- **`SyncLocalTracking.WriteUntrackedAsync` runs writes that are not sent by the sync** — Rows written inside its single transaction on the connection you pass are not recorded as unsent
+
 ### Changed
+
+#### Bidirectional sync
+
+- **A download no longer stops a table at an unsent row** — An unsent row keeps the device's content while the rows after it come down, and `SyncResult.Truncations` now lists only the rows that could not be placed because of a foreign key or a unique value
+- **Rows whose unique values were swapped or rotated now come down in one sync** — They used to need a refresh, or a sync with a temporary value in between
+- **A refresh now replaces the rows of a table instead of emptying it first** — It removes only the rows the server no longer holds, and a refresh whose fetch fails leaves the device as it was (a large refresh is committed a chunk at a time). `SyncRefreshResult.DiscardedChanges` is the number of rows whose change was actually discarded
+- **A row saved from an entity read before another writer's content came down is reported as `ModifiedOnServer` even after a change from a newer entity was sent** — 0.4.0 uploaded such a row without a conflict
+
+#### Generated code
+
+- **The keyed `AddGenerated{Dialect}Repositories` now resolves the connection factory from DI** — An `ISqlConnectionFactory` registered again later under the same key takes effect for the repositories and `SqlExecutor`
 
 #### DB sync & DDL
 

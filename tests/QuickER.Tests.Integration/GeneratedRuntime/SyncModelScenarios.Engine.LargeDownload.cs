@@ -5,9 +5,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
 /// 降ろす行の上限（<c>SyncOptions.DownloadRowLimit</c>）のシナリオ。サーバーの他者がフォルダー 2 つと品目 2 つ（4 行）を作り、
-/// 端末はサーバーが知らないフォルダー 50 を未送信のまま持つ（受信だけと Force の洗い替え）。上限を読むエンジン（宣言
-/// <see cref="EngineDeclaration.RefusesDownloadOverRowLimit"/> が真）だけが上限を超えた受信を断るので、エンジンで違う所だけ
-/// <see cref="WhenEngineDeclaresOp"/> で枝を分ける（偽の枝は、上限を見ずに降ろすことを値で表明する）。転送はすべて
+/// 端末はサーバーが知らないフォルダー 50 を未送信のまま持つ（受信だけと Force の洗い替え）。転送はすべて
 /// （<see cref="Moved"/>）。
 /// </summary>
 internal static partial class SyncModelScenarios
@@ -33,35 +31,25 @@ internal static partial class SyncModelScenarios
     private static IEnumerable<SyncModelScenario> EngineLargeDownloadScenarios() =>
         [
             // 上限を超え、範囲の表に未送信がある受信は、何も適用せずに断る（端末の行も未送信もそのまま）。上限を上げた同じ
-            // 受信が 4 行を全部降ろすことで、断った実行が再開点を進めていないことを見る。上限を読まないエンジンは、
-            // 上限が小さくても 4 行を降ろす
+            // 受信が 4 行を全部降ろすことで、断った実行が再開点を進めていないことを見る
             Moved(
                 "dl-row-limit-exceeded-with-unsent-change-refuses-and-applies-nothing",
                 [],
                 [
                     .. FourServerRowsAndUnsentFolder(),
-                    new WhenEngineDeclaresOp(
-                        D1,
-                        EngineDeclaration.RefusesDownloadOverRowLimit,
-                        [
-                            new ExpectThrowOp(D1),
-                            RowLimited(D1, 3),
-                            Expect
-                                .Result(D1)
-                                .Contains(
-                                    "exception SyncDownloadTooLargeException: *",
-                                    "row-limit fetched=4 limit=3 pending-count=1",
-                                    $"pending {F} count=1"
-                                ),
-                            Expect
-                                .Rows(D1, F)
-                                .Exact($"{UnsentFolder} parent=null name=unsent", "999 *"),
-                            Expect.Rows(D1, I).Exact("999 *"),
-                            RowLimited(D1, 100),
-                            Expect.Result(D1).Contains("downloaded=4"),
-                        ],
-                        [RowLimited(D1, 3), Expect.Result(D1).Contains("downloaded=4")]
-                    ),
+                    new ExpectThrowOp(D1),
+                    RowLimited(D1, 3),
+                    Expect
+                        .Result(D1)
+                        .Contains(
+                            "exception SyncDownloadTooLargeException: *",
+                            "row-limit fetched=4 limit=3 pending-count=1",
+                            $"pending {F} count=1"
+                        ),
+                    Expect.Rows(D1, F).Exact($"{UnsentFolder} parent=null name=unsent", "999 *"),
+                    Expect.Rows(D1, I).Exact("999 *"),
+                    RowLimited(D1, 100),
+                    Expect.Result(D1).Contains("downloaded=4"),
                     Expect
                         .Rows(D1, F)
                         .Exact(

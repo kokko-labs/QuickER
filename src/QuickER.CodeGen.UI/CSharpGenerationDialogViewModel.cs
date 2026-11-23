@@ -640,7 +640,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     // インメモリ実装の切替は Repository バケット（契約＋インメモリ実装）の有無を変えるため、表示制御・プレビューを追従させる
     partial void OnGenerateInMemoryRepositoriesChanged(bool value) => RaiseDerivedChanged();
 
-    // 同期支援の切替は Sync バケット（同期記述子・デコレータ・DI）の有無を変えるため、プレビューを追従させる
+    // 同期支援の切替は Sync バケット（同期記述子・差分ソース・DI）の有無を変えるため、プレビューを追従させる
     partial void OnGenerateSyncSupportChanged(bool value) => RaiseDerivedChanged();
 
     /// <summary>

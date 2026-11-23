@@ -153,39 +153,12 @@ public class SyncSupportGenerationTests
         content.Should().Contain("\"SELECT [order_id] FROM [sync_orders]\"");
         content.Should().Contain("\"SELECT MIN_ACTIVE_ROWVERSION()\"");
 
-        // ローカル側（SQLite）: ミラー列の MAX からアンカーを導出する
-        content.Should().Contain("\"SELECT MAX(\\\"row_ver\\\") FROM \\\"sync_orders\\\"\"");
-        content.Should().Contain("\"SELECT \\\"order_id\\\" FROM \\\"sync_orders\\\"\"");
+        // ローカル側（SQLite）: この表を参照する子の行のキーを引く SQL（削除伝搬が参照されている行を残す）
         content
             .Should()
             .Contain(
-                "\"SELECT \\\"order_id\\\" FROM \\\"sync_orders\\\" WHERE \\\"order_id\\\" IN (@keys)\""
+                "\"SELECT DISTINCT \\\"order_id\\\" FROM \\\"sync_order_lines\\\" WHERE \\\"order_id\\\" IN (@keys)\""
             );
-    }
-
-    /// <summary>
-    /// ドット付きテーブル名の同期 SQL が最初のドットだけで分割クォートされることを検証する
-    /// （DDL・生成 CRUD の <c>EntitySaveMetadata.QuoteTableName</c> と同じ規則）。
-    /// </summary>
-    /// <remarks>
-    /// 全ドット分割にすると <c>dbo.sync.orders</c> のような名前で <c>[dbo].[sync].[orders]</c> という
-    /// 存在しないオブジェクトを指し、DDL・CRUD が読み書きするテーブルと同期 SQL が食い違う。
-    /// </remarks>
-    // 残す理由（P3-4b）：SQL Server の SQL の断片（[dbo].[sync.orders] の分割クォート）。SQLite 側の SQL は行 exec-sync-dotted-table-name-local-sql-quotes-at-first-dot（別 DB を dbo として付けた SQLite で実行）へ移した
-    [Fact(DisplayName = "ドット付きテーブル名の同期 SQL は最初のドットだけで分割クォートされる")]
-    public void SyncSql_DottedTableName_QuotesAtFirstDotOnly()
-    {
-        var diagram = Diagram();
-        diagram.Entities.First(e => e.TableName == "sync_orders").TableName = "dbo.sync.orders";
-
-        var (files, diagnostics) = Generate(diagram, SyncOptions());
-
-        diagnostics.Should().NotContain(d => d.Severity == GenerationDiagnosticSeverity.Error);
-
-        var content = string.Concat(files.Values);
-
-        content.Should().Contain("FROM [dbo].[sync.orders]");
-        content.Should().NotContain("[dbo].[sync].[orders]");
     }
 
     /// <summary>
@@ -195,7 +168,7 @@ public class SyncSupportGenerationTests
     /// <remarks>
     /// <c>TimeSpan</c> は書式を取る <c>ToString(IFormatProvider)</c> を持たず、既定の形ではコンパイルできなかった。<c>TimeOnly</c> の
     /// 既定の形は秒を落として往復しなかった。どちらも不変の往復書式（"c" / "O"）で書く。<c>DateOnly</c> は既定の形
-    /// （"MM/dd/yyyy"）で往復するので変えない（変えると、更新前に記録した未送信のジャーナルのキーが読めなくなる）。
+    /// （"MM/dd/yyyy"）で往復するので変えない。
     /// 5 方言の型マッパーは <c>TimeOnly</c> / <c>DateOnly</c> を出さないので、列の型はこのテストで直接与える。
     /// <c>TimeSpan</c> は time の列で作れるので、<c>CodegenCaseTests</c> の行 <c>probe-sync-key-text-timespan-key</c>
     /// （探針 SyncKeyText）へ移した。
@@ -289,45 +262,8 @@ public class SyncSupportGenerationTests
         {
             ((string)format.DynamicInvoke(new DateOnly(2026, 10, 7))!)
                 .Should()
-                .Be(
-                    "10/07/2026",
-                    "DateOnly の文字列化は従来の形のまま（未送信のジャーナルを読めるように）"
-                );
+                .Be("10/07/2026", "DateOnly の文字列化は既定の形のまま往復する");
         }
-    }
-
-    /// <summary>
-    /// ジャーナル記録デコレータが全書き込み入口（Insert / Update / Delete / BulkInsert / Save×2）を覆う。
-    /// </summary>
-    /// <remarks>
-    /// 保存フック（<c>ISaveHook</c>）はグラフ保存でしか発火せず直接 CRUD を素通しするため、
-    /// デコレータ方式を採った理由そのものがこの網羅性にある。1 つでも抜けるとオフライン編集が黙って失われる。
-    /// </remarks>
-    // 残す理由（P3-4b）：SyncGraphRecorder の RowState の比較の向き（== Removed と != Unchanged＝式本体）。構造の表明（全書き込み入口の記録・読み取りの素通し・削除前の読み・per-type の委譲・走査）は行 code-sync-journaling-decorator-covers-every-write-entry-point へ移した
-    [Fact(DisplayName = "デコレータは全書き込み入口でジャーナルへ記録する（対の経路監査）")]
-    public void JournalingDecorator_CoversEveryWriteEntryPoint()
-    {
-        var (files, _) = Generate(Diagram(), SyncOptions());
-
-        // RowState の分岐は SyncGraphRecorder 側にある（保存側の決定手順のミラー）
-        var recorder = ExtractClass(
-            string.Concat(files.Values),
-            "public sealed class SyncGraphRecorder"
-        );
-        recorder.Should().Contain("if (entity.RowState == RowState.Removed)");
-        recorder.Should().Contain("if (entity.RowState != RowState.Unchanged");
-    }
-
-    /// <summary>ループ防止の抑制フラグを、エンジンの書き込み経路とジャーナル記録の双方が参照する。</summary>
-    // 残す理由（P3-4b）：抑制の文の形（`if (SyncSession.IsSuppressed)` の判定と `using (SyncSession.Suppress())` の範囲＝式本体）。構造の表明（SyncSession の宣言・エンジンとジャーナル記録の双方の参照）は行 code-sync-session-suppresses-journaling-for-engine-writes へ移した
-    [Fact(DisplayName = "同期エンジンの書き込みは SyncSession でジャーナル記録を抑制する")]
-    public void SyncEngine_SuppressesJournalingForItsOwnWrites()
-    {
-        var (files, _) = Generate(Diagram(), SyncOptions());
-        var content = string.Concat(files.Values);
-
-        content.Should().Contain("if (SyncSession.IsSuppressed)");
-        content.Should().Contain("using (SyncSession.Suppress())");
     }
 
     // 同期対象テーブルの Info 診断（FK 順）・方言構成が 2 方言でないときのエラー・Repository 実装を前提とするエラー・
@@ -340,12 +276,12 @@ public class SyncSupportGenerationTests
     /// 混在図（版あり 2＋版なし 1）の版なしテーブルは、後勝ち専用の生成形になる。
     /// </summary>
     /// <remarks>
-    /// 名指しする形＝①記述子は <c>VersionlessSyncTable</c> 派生（版・アンカー系メンバーなし）②直結ソースは
+    /// 名指しする形＝①記述子はキー順ページングの SQL を運ぶ ②直結ソースは
     /// キー順ページング（<c>GetFirstPageAsync</c>／<c>GetPageAfterAsync</c>）で ceiling は null・change stream は
-    /// <c>NotSupportedException</c> ③デコレータの Delete は事前読みなしで null 版を記録 ④サーバーの同期
+    /// <c>NotSupportedException</c> ③サーバーの同期
     /// エンドポイントは版なしテーブルだけ <c>MapVersionlessSyncEndpoints</c>（SyncPage＋SyncKeys）を張る。
     /// </remarks>
-    // 残す理由（P3-4b）：SQL Server の SQL の断片（版なしの記述子のキー順ページング SQL・版ありのソースの MIN_ACTIVE_ROWVERSION）。構造の表明（記述子の版・登録・ソース・デコレータの形）は行 code-sync-mixed-diagram-versionless-shapes へ移した（エンドポイントの選別は行 code-sync-versionless-endpoint-map-with-versionless-table へ任せた）
+    // 残す理由（P3-4b）：SQL Server の SQL の断片（版なしの記述子のキー順ページング SQL・版ありのソースの MIN_ACTIVE_ROWVERSION）。構造の表明（記述子の版・登録・ソースの形）は行 code-sync-mixed-diagram-versionless-shapes へ移した（エンドポイントの選別は行 code-sync-versionless-endpoint-map-with-versionless-table へ任せた）
     [Fact(
         DisplayName = "混在図の版なしテーブルは後勝ち専用の生成形（記述子・ソース・エンドポイント）になる"
     )]
@@ -366,14 +302,14 @@ public class SyncSupportGenerationTests
     }
 
     /// <summary>
-    /// 除外列のコピー面（<c>ISyncBinaryColumns</c>）が、ローカル・直結サーバー・HTTP サーバーの 3 箇所へ出る。
+    /// 除外列のコピー面（<c>ISyncBinaryColumns</c>）が、直結サーバー・HTTP サーバーの 2 箇所へ出る。
     /// </summary>
     /// <remarks>
-    /// エンジンはこの面しか見ないため、3 実装のどれか 1 つが欠けると「その転送経路でだけ blob が運ばれない」
+    /// エンジンはサーバー側をこの面でしか見ないため、どちらか 1 つが欠けると「その転送経路でだけ blob が運ばれない」
     /// という、型検査にもドリフトにも出ない非対称になる。
     /// </remarks>
-    // 残す理由（P3-4b）：HTTP サーバー側の BinaryColumns の条件式（`Count == 0 ? null : this`＝式本体）。構造の表明（記述子の列名・アクセサ・ローカルと直結の面・HTTP の委譲）は行 code-sync-binary-columns-implemented-on-three-surfaces へ移した
-    [Fact(DisplayName = "除外列のコピー面はローカル・直結・HTTP の 3 実装として出力される")]
+    // 残す理由（P3-4b）：HTTP サーバー側の BinaryColumns の条件式（`Count == 0 ? null : this`＝式本体）。構造の表明（記述子の列名・アクセサ・直結の面・HTTP の委譲）は行 code-sync-binary-columns-implemented-on-three-surfaces へ移した
+    [Fact(DisplayName = "除外列のコピー面は直結・HTTP の 2 実装として出力される")]
     public void SyncBinaryColumns_AreImplementedOnAllThreeSurfaces()
     {
         var (files, _) = Generate(Diagram(), SyncOptions());

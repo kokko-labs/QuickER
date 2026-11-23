@@ -16,7 +16,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 端末は同期のモデルの新しいエンジンの端末（<see cref="SyncModelEngineDevice"/>）と同じ部品で組む：ローカルの一時 DB にモデルの図の
 /// DDL を当て、同期する 4 表に <c>SyncLocalTracking.Ensure</c> でトリガーと状態の表を張り、開くたびの確認
 /// （<c>SyncLocalTrackingGuard</c>）で包んだ接続ファクトリ（<c>ObservedSqlConnectionFactory</c>）から <c>SqliteLocalRowStore</c> と
-/// リポジトリを作り、4 表の <c>TrackedSyncTable</c> で <c>TrackedSyncEngine</c> を組む。違いは 2 つ：接続文字列の
+/// リポジトリを作り、4 表の <c>SyncTable</c> で <c>SyncEngine</c> を組む。違いは 2 つ：接続文字列の
 /// <c>Default Timeout</c> を 1 秒にする（ロック待ちで終わる行が長く待たない）、フォルダーのリポジトリに行ごとの Save フックの口
 /// （<see cref="BeforeFolderSave"/>・<see cref="AfterFolderSave"/>）を持つ。
 /// </para>
@@ -68,7 +68,7 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
     public ModelItemRepository Items { get; private set; } = null!;
 
     /// <summary>端末のエンジン</summary>
-    public TrackedSyncEngine Engine { get; private set; } = null!;
+    public SyncEngine Engine { get; private set; } = null!;
 
     /// <summary>フォルダーのグラフ保存の After フックで呼ぶ関数（null なら何もしない）</summary>
     public Func<ModelFolderEntity, CancellationToken, Task>? AfterFolderSave { get; set; }
@@ -122,20 +122,20 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
     }
 
     /// <summary>同じ端末の DB を使う、別のエンジンのインスタンスを作る</summary>
-    public TrackedSyncEngine CreateEngine() => CreateEngine(observe: null);
+    public SyncEngine CreateEngine() => CreateEngine(observe: null);
 
     /// <summary>
     /// 同じ端末の DB を使い、フォルダーと品目の 2 表だけで組んだエンジンを作る（ラベルとイベントの表はトリガーで記録されるが、
     /// このエンジンの表ではない）
     /// </summary>
-    public TrackedSyncEngine CreateFolderAndItemEngine() =>
+    public SyncEngine CreateFolderAndItemEngine() =>
         new([
-            new TrackedSyncTable<ModelFolderEntity, int>(
+            new SyncTable<ModelFolderEntity, int>(
                 GeneratedSyncTables.ModelFolder,
                 Server.FolderSource,
                 Rows
             ),
-            new TrackedSyncTable<ModelItemEntity, int>(
+            new SyncTable<ModelItemEntity, int>(
                 GeneratedSyncTables.ModelItem,
                 Server.ItemSource,
                 Rows
@@ -156,7 +156,7 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
     /// <see cref="NonAdvancingSyncServerSource{TEntity, TKey}"/> で包む
     /// </param>
     /// <param name="rows">エンジンの 4 表が共有するローカルの行の口（null なら <see cref="Rows"/>）</param>
-    public TrackedSyncEngine CreateEngine(
+    public SyncEngine CreateEngine(
         Func<SyncEngineSourceCall, Task>? observe,
         Func<Task<byte[]?>>? ceiling = null,
         NonAdvancingSource? nonAdvancing = null,
@@ -166,22 +166,22 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
         var store = rows ?? Rows;
 
         return new([
-            new TrackedSyncTable<ModelFolderEntity, int>(
+            new SyncTable<ModelFolderEntity, int>(
                 GeneratedSyncTables.ModelFolder,
                 Observed(Server.FolderSource, ModelTables.Folders, observe, ceiling, nonAdvancing),
                 store
             ),
-            new TrackedSyncTable<ModelLabelEntity, string>(
+            new SyncTable<ModelLabelEntity, string>(
                 GeneratedSyncTables.ModelLabel,
                 Observed(Server.LabelSource, ModelTables.Labels, observe, ceiling, nonAdvancing),
                 store
             ),
-            new TrackedSyncTable<ModelItemEntity, int>(
+            new SyncTable<ModelItemEntity, int>(
                 GeneratedSyncTables.ModelItem,
                 Observed(Server.ItemSource, ModelTables.Items, observe, ceiling, nonAdvancing),
                 store
             ),
-            new TrackedSyncTable<ModelEventEntity, DateTime>(
+            new SyncTable<ModelEventEntity, DateTime>(
                 GeneratedSyncTables.ModelEvent,
                 Observed(Server.EventSource, ModelTables.Events, observe, ceiling, nonAdvancing),
                 store
@@ -194,7 +194,7 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
     /// </summary>
     /// <param name="counter">数える口（<see cref="Rows"/> を包んだもの）</param>
     /// <param name="observe">取得の観測（null なら観測しない）</param>
-    public TrackedSyncEngine CreateCountedEngine(
+    public SyncEngine CreateCountedEngine(
         CountingLocalRowStore counter,
         Func<SyncEngineSourceCall, Task>? observe = null
     ) => CreateEngine(observe, rows: counter);
@@ -231,7 +231,7 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
     public async Task<SyncResult> SyncAsync(
         SyncOptions? options,
         CancellationToken ct,
-        TrackedSyncEngine? engine = null
+        SyncEngine? engine = null
     )
     {
         Faults.Syncing = ModelActor.Device1;
@@ -250,11 +250,10 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
     public async Task<SyncRefreshResult> RefreshAsync(
         SyncRefreshOptions? options,
         CancellationToken ct,
-        TrackedSyncEngine? engine = null
+        SyncEngine? engine = null
     )
     {
         Faults.Syncing = ModelActor.Device1;
-        Faults.Refreshing = true;
 
         try
         {
@@ -263,7 +262,6 @@ internal sealed class SyncEngineFixedHarness : IAsyncDisposable
         finally
         {
             Faults.Syncing = null;
-            Faults.Refreshing = false;
         }
     }
 

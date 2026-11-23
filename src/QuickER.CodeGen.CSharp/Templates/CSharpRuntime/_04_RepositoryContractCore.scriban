@@ -461,8 +461,8 @@ public partial interface ISqlExecutor
 /// the transaction still open. A wrapper around an executor does not implement it unless it forwards the call itself.
 /// </para>
 /// <para>
-/// The statements take no parameters: the interface is for fixed statements such as the deletes of a synchronisation
-/// refresh. <b>Never build a statement by concatenating values into it.</b>
+/// The statements take no parameters: the interface is for fixed statements. <b>Never build a statement by concatenating
+/// values into it.</b>
 /// </para>
 /// </remarks>
 public interface ISqlBatchExecutor
@@ -884,84 +884,6 @@ public interface ISaveHookContext
             stream.Length,
             cancellationToken
         ).ConfigureAwait(false);
-    }
-}
-
-/// <summary>An unbounded binary column a save hook wrote through its <see cref="ISaveHookContext"/>.</summary>
-/// <param name="EntityType">The entity type whose column was written (the type the context is bound to).</param>
-/// <param name="PropertyName">The C# property name of the column.</param>
-/// <param name="Key">The primary key value the hook passed.</param>
-/// <param name="Context">The context of the save that wrote it (the same transaction).</param>
-{{ infra_visibility }} sealed record SaveHookBinaryColumnWrite(
-    Type EntityType,
-    string PropertyName,
-    object Key,
-    ISaveHookContext Context
-);
-
-/// <summary>Lets the code around a save see the unbounded binary columns its save hooks write, while the save is still open.</summary>
-/// <remarks>
-/// <para>
-/// A save hook's After writes inside the save's transaction, out of sight of the code that called the save. The sync
-/// journal is the one that has to know: a column written locally and not recorded is never uploaded, and the next
-/// download puts the server's value back over it. <see cref="Observe"/> registers what to do for the current flow.
-/// The save hook session takes the registration away with <see cref="Detach"/> while it runs the hooks, and reports to
-/// it each write that stored a value in a row, before the hook goes on. The observer runs inside the save's
-/// transaction (through <see cref="SaveHookBinaryColumnWrite.Context"/>), so what it writes commits or rolls back with
-/// the save, and an exception it throws fails the save.
-/// </para>
-/// <para>
-/// The registration flows with the async call (<see cref="AsyncLocal{T}"/>), so a save made elsewhere at the same time
-/// is not seen. A save a hook starts, on another database, is not seen either: the hooks run with the registration
-/// taken away, so only the save the registration was made around reports to it. Registrations nest: the innermost one
-/// sees the writes, and disposing it brings back the one around it.
-/// </para>
-/// </remarks>
-{{ infra_visibility }} static class SaveHookContextWrites
-{
-    private static readonly AsyncLocal<Func<SaveHookBinaryColumnWrite, CancellationToken, Task>?> _observer = new();
-
-    /// <summary>Registers what to do with each unbounded binary column a save hook writes in the current flow, until the result is disposed.</summary>
-    /// <param name="observer">Called with each write, inside the save's transaction.</param>
-    public static IDisposable Observe(Func<SaveHookBinaryColumnWrite, CancellationToken, Task> observer)
-    {
-        ArgumentNullException.ThrowIfNull(observer);
-        var outer = _observer.Value;
-        _observer.Value = observer;
-
-        return new Registration(outer);
-    }
-
-    /// <summary>Takes the registration of the current flow away until the result is disposed, handing it to the caller.</summary>
-    /// <remarks>
-    /// What the save hook session calls around the hooks it runs: the session reports the writes of its own hooks to
-    /// the observer it was handed, and a save a hook starts finds no registration.
-    /// </remarks>
-    /// <param name="observer">The registration taken away (null when the current flow has none).</param>
-    public static IDisposable Detach(out Func<SaveHookBinaryColumnWrite, CancellationToken, Task>? observer)
-    {
-        observer = _observer.Value;
-        _observer.Value = null;
-
-        return new Registration(observer);
-    }
-
-    /// <summary>Brings back the registration around this one when disposed (only once).</summary>
-    private sealed class Registration(Func<SaveHookBinaryColumnWrite, CancellationToken, Task>? outer)
-        : IDisposable
-    {
-        private bool _disposed;
-
-        public void Dispose()
-        {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _disposed = true;
-            _observer.Value = outer;
-        }
     }
 }
 

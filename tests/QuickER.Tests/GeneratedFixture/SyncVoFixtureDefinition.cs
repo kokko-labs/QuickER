@@ -14,13 +14,13 @@ namespace QuickER.Tests.GeneratedSyncVoFixture;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 同期の生成式（ミラー版の読み書き・キー整形・キー解析）は、値オブジェクトが有効なときだけ VO 型を
+/// 同期の生成式（版の列の読み書き・キー整形・キー解析）は、値オブジェクトが有効なときだけ VO 型を
 /// 経由する形になる。<see cref="SyncFixtureDefinition"/> は VO 無効のためその形を一度も通らず、交差は
 /// コンパイル検証だけで守られていた。ここは<b>実行時</b>に通す最小の図を用意する。
 /// </para>
 /// <para>
 /// 行バージョン列は <b>NOT NULL</b> で置く（実 SQL Server の <c>rowversion</c> と同じ宣言）。これが
-/// 「宣言は NOT NULL・実体は null」が構造的に起きる側で、ミラー版の読み出しを列宣言で出し分けると
+/// 「宣言は NOT NULL・実体は null」が構造的に起きる側で、版の列の読み出しを列宣言で出し分けると
 /// NullReferenceException になる:
 /// </para>
 /// <list type="bullet">

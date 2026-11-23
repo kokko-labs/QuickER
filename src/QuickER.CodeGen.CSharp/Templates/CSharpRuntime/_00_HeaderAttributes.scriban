@@ -179,8 +179,8 @@ public sealed class DbTableMetaAttribute : Attribute
 /// <para>
 /// The SQLite engine of the QuickER Repository does not: SQLite assigns nothing, so there the column is an ordinary column that
 /// INSERT / BulkInsert / UPDATE write like any other, with no version guard. That is what makes a multi-target setup
-/// (SQL Server as the server, SQLite as the local copy) work - the column is where the local copy mirrors the version the server
-/// assigned, so a later sync can send it back as the guard value.
+/// (SQL Server as the server, SQLite as the local copy) work - the column is where the local copy keeps the version the server
+/// assigned to the row.
 /// </para>
 /// </remarks>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]

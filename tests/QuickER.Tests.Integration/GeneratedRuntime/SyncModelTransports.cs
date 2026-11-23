@@ -59,7 +59,7 @@ internal interface ISyncModelServerRole : ISyncModelSources, IAsyncDisposable
     Task<ModelDbState> ReadStateAsync(CancellationToken ct);
 }
 
-/// <summary>モデルの世界の組み方（サーバー役・転送経路・外部の ISyncTable の代役）</summary>
+/// <summary>モデルの世界の組み方（サーバー役・転送経路・端末の作り方）</summary>
 internal sealed record SyncModelWorldOptions
 {
     /// <summary>直結・SQLite のサーバー役（既定）</summary>
@@ -74,41 +74,23 @@ internal sealed record SyncModelWorldOptions
         async (faults, ct) => await SyncModelServer.CreateAsync(faults, ct);
 
     /// <summary>
-    /// 端末の作り方（既定は製品の同期エンジンと記録デコレータの端末＝<see cref="SyncModelDevice.CreateAsync"/>）。別のエンジンの端末は
-    /// <see cref="SyncModelDevice.OpenAsync"/> で殻を開き、<see cref="SyncModelDevice.Install"/> で部品を載せて返す
+    /// 端末の作り方（既定は新しいエンジンの端末＝<see cref="SyncModelEngineDevice.CreateAsync(SyncModelDeviceRequest, CancellationToken)"/>）。
+    /// 作り方は <see cref="SyncModelDevice.OpenAsync"/> で殻を開き、<see cref="SyncModelDevice.Install"/> で部品を載せて返す
     /// </summary>
     public Func<
         SyncModelDeviceRequest,
         CancellationToken,
         Task<SyncModelDevice>
-    > CreateDevice { get; init; } =
-        (request, ct) =>
-            SyncModelDevice.CreateAsync(
-                request.Actor,
-                request.Server,
-                request.Faults,
-                request.ExternalTables,
-                ct
-            );
+    > CreateDevice { get; init; } = SyncModelEngineDevice.CreateAsync;
 
     /// <summary>端末の差分ソースを HTTP 越し（in-process の Kestrel）にするか</summary>
     public bool Http { get; init; }
-
-    /// <summary>表を外部の ISyncTable 実装の代役で包む端末</summary>
-    public IReadOnlyCollection<ModelActor> ExternalTables { get; init; } = [];
 
     /// <summary>世界の端末（既定は端末 1・2。広い世界の種は <see cref="SyncModelWorldShape.Devices"/>）</summary>
     public IReadOnlyList<ModelActor> Devices { get; init; } = SyncModelWorldShape.TwoDevices;
 
     /// <summary>この組み方の短い名前（出力用）</summary>
     public string Name { get; init; } = "direct";
-
-    /// <summary>
-    /// 「流せない」の例外（<see cref="SyncModelDevice.StopsScenario"/>）を、モデルの違反として記録せずにシナリオの外へ
-    /// 素通しにするか（既定は偽）。真にするのは、新しいエンジンの端末で決定的なシナリオを流して行ごとの結果を控える控えの
-    /// Fact だけ。偽のとき、この例外はほかの例外と同じ扱い（違反として記録されるか、テストの例外になる）
-    /// </summary>
-    public bool PassesNotRunnableThrough { get; init; }
 }
 
 /// <summary>サーバー役をリモートのエンドポイントの背後へ置くための、リモート面だけの薄いアダプタ</summary>

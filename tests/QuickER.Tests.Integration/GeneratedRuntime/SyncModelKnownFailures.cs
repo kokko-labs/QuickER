@@ -15,166 +15,16 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 乱数の種の失敗は、ここに載ったどれかの署名の正規形（<see cref="SyncModelRuntimeTests.Family"/>）に当たれば既知として数え、
 /// 載っているのに起きないことは見ない（種の数が少なくて起きないことがある）。乱数の項目は <see cref="Build"/> が決定的な項目から作る。
 /// </para>
-/// <para>
-/// 区切り 30 の終わりに直す区切り 30 の行を、区切り 31 で 31 の行を消し、この一覧を空にする。
-/// </para>
 /// </remarks>
 internal static class SyncModelKnownFailures
 {
     /// <summary>乱数の種の失敗の範囲</summary>
     public const string RandomScope = "random";
 
-    /// <summary>決定的なシナリオの項目（<see cref="Entry"/> で作る）</summary>
-    public static IReadOnlyList<KnownEntry> Scenarios { get; } =
-    [
-        // 受け入れ（P2-3-N15・修正 C で受け入れと決めた）：端末で一意な値を回した（入れ替えた）行は、行ごとの最後の値の書き込み
-        // では上げられず、ServerWins でも戻せない（夜間の種 366＝2 行・331＝3 行）。サーバーで回した行の割り切りと同じ形で、docs の
-        // 割り切りを両方の向きへ広げた
-        AcceptedEntry(
-            "P2-3-N15",
-            "docs/code-generation.md の既知の割り切り「Rows whose unique values were rotated on the device or on the server are not carried across.」（RefreshAsync か、仮の値を書いた後に一度同期してから最後の値を書く書き換えで解消する）。端末で回した値は、行ごとの最後の値を送るので途中の仮の値が届かず、サーバーがどの行も断る",
-            "n15-pending-unique-cycle",
-            "1/no-quiesce:pending-unique-cycle:model_folders"
-        ),
-        AcceptedEntry(
-            "P2-3-N15",
-            "docs/code-generation.md の既知の割り切り「Rows whose unique values were rotated on the device or on the server are not carried across.」（RefreshAsync か、仮の値を書いた後に一度同期してから最後の値を書く書き換えで解消する）。3 行以上で回しても同じ",
-            "n15-pending-unique-cycle-three-items",
-            "1/no-quiesce:pending-unique-cycle:model_items"
-        ),
-        // 受け入れ：サーバーで一意な値を入れ替えた 2 行は、端末へ適用できず毎回打ち切る（洗い替えで抜ける）
-        AcceptedEntry(
-            "P2-3",
-            "docs/code-generation.md の既知の割り切り「Rows whose unique values were rotated on the device or on the server are not carried across.」（RefreshAsync か、仮の値を書いた後に一度同期してから最後の値を書く書き換えで解消する）と、既存の決定的なシナリオ n8-true-swap-stops（入れ替えた値の持ち主の読み直しは、洗い替えで抜けるまで止まる＝既に決めた挙動）。乱数の種では、サーバーでの複数の実行に分かれた付け替えの合成でも端末から見て入れ替わる",
-            "swap-without-refresh-does-not-settle",
-            "1/no-quiesce:unique-swap:model_items"
-        ),
-        AcceptedEntry(
-            "P2-3",
-            "docs/code-generation.md の既知の割り切り「Rows whose unique values were rotated on the device or on the server are not carried across.」（RefreshAsync か、仮の値を書いた後に一度同期してから最後の値を書く書き換えで解消する）と、既存の決定的なシナリオ n8-true-swap-stops（入れ替えた値の持ち主の読み直しは、洗い替えで抜けるまで止まる＝既に決めた挙動）。乱数の種では、サーバーでの複数の実行に分かれた付け替えの合成でも端末から見て入れ替わる",
-            "swap-folder-names-without-refresh-does-not-settle",
-            "1/no-quiesce:unique-swap:model_folders"
-        ),
-        // 受け入れ：サーバーで 3 行の一意な値を回した行も、端末へ適用できず毎回打ち切る（2 行の入れ替えと同じ署名。乱数の種では
-        // 端末の未送信の行と古い写しの行が回転に混ざる形でも出る）
-        AcceptedEntry(
-            "NS-2",
-            "docs/code-generation.md の既知の割り切り「Rows whose unique values were rotated on the device or on the server are not carried across.」（2 行で入れ替えても 3 行以上で回しても同じ。RefreshAsync で解消する）",
-            "rotate-three-codes-without-refresh-does-not-settle",
-            "1/no-quiesce:unique-swap:model_items"
-        ),
-        // 受け入れ：塊をまたぐ形の行（ChunkBoundaryScenarios）のうち、行どうしの循環（両方の行が新しい）と一意な値の入れ替えは、
-        // 今のエンジンでは降ろせない（ダウンロードがその行で毎回打ち切る）。新しいエンジンは 1 回で全部の道でも塊の道でも、保留した
-        // 行をまとめて 1 つのトランザクションで書いて入れる（直結の Theory と小さい塊の端末の照合が持つ）
-        .. CurrentEngineCannotLoad(
-            "chunk-cross-table-cycle-both-new",
-            RowCycleReason,
-            "5/expect-result",
-            "5/expect-rows:model_folders",
-            "5/expect-rows:model_items",
-            "1/no-quiesce:conflicts-or-truncations"
-        ),
-        .. CurrentEngineCannotLoad(
-            "chunk-selfref-cycle-across-chunks",
-            RowCycleReason,
-            "5/expect-result",
-            "5/expect-rows:model_folders",
-            "1/no-quiesce:conflicts-or-truncations"
-        ),
-        .. CurrentEngineCannotLoad(
-            "chunk-unique-swap-across-chunks",
-            "docs/code-generation.md の既知の割り切り「Rows whose unique values were rotated on the device or on the server are not carried across.」（今のエンジンは入れ替えた 2 行を適用できず毎回打ち切る。RefreshAsync で解消する）",
-            "5/expect-result",
-            "5/expect-rows:model_items",
-            "1/no-quiesce:unique-swap:model_items"
-        ),
-        // 洗い替えの取得の後にサーバーの他者が親を消すと、バッチの古い写しの子が消えた親を指したまま入る
-        Entry(
-            "AG-R1",
-            RefreshStaleParentFixedIn,
-            "interrupt-server-AfterServerFetchBeforeApply-parent-after-child-selfref-delete-next-sync-refresh",
-            RefreshStaleParentSignature,
-            RefreshStaleParentReason
-        ),
-        Entry(
-            "AG-R1",
-            RefreshStaleParentFixedIn,
-            "interrupt-server-AfterServerFetchBeforeApply-parent-after-child-selfref-delete-next-sync-serverwins-refresh",
-            RefreshStaleParentSignature,
-            RefreshStaleParentReason
-        ),
-    ];
-
-    /// <summary>洗い替えの取得の後にサーバーで消えた親の項目の直す区切り</summary>
-    private const string RefreshStaleParentFixedIn = "きっかけ待ち（台帳 本番 AG-R1）";
-
-    /// <summary>洗い替えの取得の後にサーバーで消えた親の項目の理由</summary>
-    private const string RefreshStaleParentReason =
-        "洗い替えのバッチの古い写しの子が、取得の後にサーバーで消えた親を指し、ローカルの外部キーで例外になる（洗い替えは失敗として止まり、次の洗い替えで取り直せる）";
-
     /// <summary>
-    /// 洗い替えの取得の後にサーバーで消えた親の項目の署名（洗い替えの取得の後に割り込む書き込みは乱数の種の列に無いので、種には
-    /// 正規形の項目を作らない＝<see cref="SeedOnlySignatures"/>）
-    /// </summary>
-    private const string RefreshStaleParentSignature =
-        "1/throw:RefreshAsync~SyncTableBase.WriteRowsAndBlobsAsync>SqliteRepositoryCore.BulkInsertAsync:SQLite19:FOREIGN KEY constraint failed[apply:cross:in-scope]";
-
-    /// <summary>
-    /// 正規形が広すぎて、種を限らずに数えるとほかの不具合を隠す署名（決定的な項目の正規形から乱数の項目を作らず、種を名指しした
-    /// 項目 <see cref="SeedNamedRandomEntries"/> だけで数える）
-    /// </summary>
-    /// <remarks>
-    /// 塊をまたぐ形の行で今のエンジンが降ろせない形の項目（<see cref="CurrentEngineCannotLoad"/>）の署名のうち、行の期待の手の違反と
-    /// 分類できない静止化の失敗も含める（種に作ると種の不具合を広く隠す。一意な値の入れ替えの署名はほかの項目が正規形を持つので
-    /// 含めない）
-    /// </remarks>
-    private static readonly HashSet<string> SeedOnlySignatures =
-    [
-        RefreshStaleParentSignature,
-        "5/expect-result",
-        "5/expect-rows:model_folders",
-        "5/expect-rows:model_items",
-        "1/no-quiesce:conflicts-or-truncations",
-    ];
-
-    /// <summary>塊をまたぐ形の行のうち、行どうしの循環（両方の行が新しい）を今のエンジンが降ろせない理由</summary>
-    private const string RowCycleReason =
-        "docs/code-generation.md の既知の割り切り「rows that refer to each other in a cycle ... cannot be loaded back one at a time, so the reload stops at them, as the download does.」（今のエンジンのダウンロードは、互いのキーを持つ 2 行を 1 行ずつ入れられず毎回打ち切る）";
-
-    /// <summary>今のエンジンが降ろせない形の行の、署名ごとの受け入れの項目</summary>
-    /// <param name="scenario">シナリオの名前</param>
-    /// <param name="reason">docs の既知の割り切りを名指しした理由</param>
-    /// <param name="signatures">今のエンジンで出る署名の全部</param>
-    private static IEnumerable<KnownEntry> CurrentEngineCannotLoad(
-        string scenario,
-        string reason,
-        params string[] signatures
-    ) => signatures.Select(signature => AcceptedEntry("CH-B", reason, scenario, signature));
-
-    /// <summary>
-    /// 種を名指しした乱数の項目（分類できない静止化の失敗のように、正規形が広くて種を限らないとほかの不具合を隠す署名を、種で絞って
-    /// 載せる。いまは無い）
-    /// </summary>
-    private static readonly IReadOnlyList<KnownEntry> SeedNamedRandomEntries = [];
-
-    /// <summary>一覧（決定的なシナリオの項目と、その正規形から作った乱数の項目）</summary>
-    /// <remarks>
-    /// 乱数の項目の再現の扱いはどれも NotGuaranteed（起きないことを確かめない）。この一覧で乱数の種を流すのは今の端末の直結の乱数
-    /// （<see cref="SyncModelRuntimeTests.DirectSuite"/>）だけで、夜間も普段の数で流すので、夜間の種でだけ起きる形（端末で回した一意な値の
-    /// 循環）に届かない
-    /// </remarks>
-    public static KnownFailureSet Set { get; } =
-        Build(
-            "SyncModel",
-            Scenarios,
-            SyncModelRuntimeTests.Family,
-            seedOnlySignatures: SeedOnlySignatures,
-            seedNamed: SeedNamedRandomEntries
-        );
-
-    /// <summary>
-    /// 新しいエンジンの端末の乱数の種の既知の失敗の一覧（<see cref="SyncSupportAdoSqliteEngineRuntimeTests.RandomSeeds_ConvergeWithoutLoss"/>）。
-    /// 今の端末の一覧とは別に持ち、空で始める（載せる項目は、新しいエンジンの端末で出た失敗から理由つきで足す）
+    /// 新しいエンジンの端末の既知の失敗の一覧（直結の Theory <see cref="SyncModelRuntimeTests.Scenario_FailsExactlyAsListed"/> と乱数の種
+    /// <see cref="SyncSupportAdoSqliteEngineRuntimeTests.RandomSeeds_ConvergeWithoutLoss"/>）。空で始める（載せる項目は、新しい
+    /// エンジンの端末で出た失敗から理由つきで足す）
     /// </summary>
     public static KnownFailureSet EngineSet { get; } =
         Build("SyncModel", [], SyncModelRuntimeTests.Family);

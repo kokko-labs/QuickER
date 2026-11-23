@@ -20,8 +20,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// ここでしか確かめられないのは「<b>生成された</b>直結差分ソースが、<b>生成された</b>同期エンドポイント越しに
 /// 同じ答えを返すか」＝本物の <c>rowversion</c>・<c>MIN_ACTIVE_ROWVERSION()</c> による上限・<c>OUTPUT INSERTED</c> で
 /// 回収した版の書き戻しが、HTTP を挟んでも成立するか。エンジンの筋（バッチ継続・アンカー導出・削除伝搬・競合分類）は
-/// <see cref="SyncHttpRuntimeTests"/> が Docker 不在の CI でも常時通す。DI の組み上がり（HTTP 差分ソースとジャーナル記録
-/// デコレータ）と、初回の全件と 2 回目の差分（アンカー）は、同期の構成の行列（<see cref="SyncConfigMatrixRuntimeTests"/>）の
+/// <see cref="SyncHttpRuntimeTests"/> が Docker 不在の CI でも常時通す。DI の組み上がり（HTTP 差分ソースと、開くたびの確認で
+/// 包んだローカルの接続ファクトリ）と、初回の全件と 2 回目の差分（アンカー）は、同期の構成の行列（<see cref="SyncConfigMatrixRuntimeTests"/>）の
 /// HTTP の行が見る。ここに残すのは、上限の値そのものの往復・409 の競合・NULL の一意な値の 3 つ（構成の行列は競合と上限を表明しない）。
 /// </para>
 /// <para>

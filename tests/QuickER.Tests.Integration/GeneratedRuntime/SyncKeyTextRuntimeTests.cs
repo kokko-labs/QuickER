@@ -7,14 +7,10 @@ using Xunit;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// 日時の主キーのジャーナルのテキスト（#25）。どの Kind で書いた値も、読み戻した行（Kind を持たない）と同じテキストに
-/// なること、以前の版が Kind つきで書いたテキストを同じ形へ書き直して読むことを確かめる。
+/// 主キーのテキスト（#25）。日時はどの Kind で書いた値も、読み戻した行（Kind を持たない）と同じテキストになること、
+/// Kind つきのテキストも Kind を落として読むこと、decimal は指数表記を使わずスケールに依らないテキストになることを、
+/// 生成された記述子とキーのテキストの関数で直接確かめる。
 /// </summary>
-/// <remarks>
-/// ランの初めの書き直し（<c>SyncJournal.NormalizeKeyTextsAsync</c>）がジャーナルに残った Kind つきのテキストも直すので、
-/// 整形の誤りは同期の結果からは見えないことがある（ランの最中に記録したテキストだけが残る）。そのため整形そのものを
-/// 生成された記述子で直接確かめる。
-/// </remarks>
 [Trait("Category", "Integration")]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlite)]
 public sealed class SyncKeyTextRuntimeTests
@@ -46,7 +42,6 @@ public sealed class SyncKeyTextRuntimeTests
     public void LegacyText_IsNormalizedAndParsed(string keyText)
     {
         SyncKeyText.WithoutDateTimeKind(keyText).Should().Be(Expected);
-        GeneratedSyncTables.ModelEvent.NormalizeKeyText!(keyText).Should().Be(Expected);
 
         var parsed = GeneratedSyncTables.ModelEvent.ParseKey(keyText);
         parsed.Ticks.Should().Be(ClockTime.Ticks, "時計の時刻を保ったまま Kind だけを落とす");
@@ -59,13 +54,6 @@ public sealed class SyncKeyTextRuntimeTests
     [InlineData("")]
     public void OtherText_IsLeftAsItIs(string keyText) =>
         SyncKeyText.WithoutDateTimeKind(keyText).Should().Be(keyText);
-
-    [Fact(DisplayName = "[Sync/キー] 主キーが日時でない表は書き直しを持たない")]
-    public void NonDateTimeKey_HasNoNormalizer()
-    {
-        GeneratedSyncTables.ModelItem.NormalizeKeyText.Should().BeNull();
-        GeneratedSyncTables.ModelLabel.NormalizeKeyText.Should().BeNull();
-    }
 
     [Theory(
         DisplayName = "[Sync/キー] decimal の主キーは指数表記を使わずに書き、以前の指数表記のテキストも読む"
@@ -95,19 +83,4 @@ public sealed class SyncKeyTextRuntimeTests
         SyncKeyText.FormatDecimal(-0.0m).Should().Be("0");
         SyncKeyText.FormatDecimal(decimal.MaxValue).Should().Be("79228162514264337593543950335");
     }
-
-    [Theory(
-        DisplayName = "[Sync/キー] 以前の版が指数表記で書いた decimal のキーは書き直し、指数表記を含まないテキストは触らない"
-    )]
-    [InlineData("1E-06", "0.000001")]
-    [InlineData("1e-6", "0.000001")]
-    [InlineData("-1E-06", "-0.000001")]
-    [InlineData("1.5", "1.5")]
-    [InlineData("1.50", "1.50")]
-    [InlineData("100", "100")]
-    [InlineData("abc", "abc")]
-    [InlineData("E", "E")]
-    [InlineData("", "")]
-    public void DecimalKey_OnlyExponentTextIsRewritten(string keyText, string expected) =>
-        SyncKeyText.WithoutDecimalExponent(keyText).Should().Be(expected);
 }

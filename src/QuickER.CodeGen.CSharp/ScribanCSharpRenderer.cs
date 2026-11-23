@@ -48,7 +48,7 @@ internal sealed class RenderScope
     /// <summary>リモート面の ASP.NET Core サーバー実装（MapGeneratedRemoteEndpoints）を出力するか（サーバー専用スペックのみ true）</summary>
     public bool RemoteServer { get; init; }
 
-    /// <summary>双方向同期の支援コード（同期エンジンの固定部・同期記述子・ジャーナル記録デコレータ・直結差分ソース・DI）を出力するか</summary>
+    /// <summary>双方向同期の支援コード（同期エンジンの固定部・同期記述子・直結差分ソース・DI）を出力するか</summary>
     /// <remarks>Sync バケットを含むスペックだけが true（他のスペックでは false で、同期支援のコードは 1 行も出ない）。</remarks>
     public bool Sync { get; init; }
 
@@ -400,7 +400,7 @@ internal sealed class ScribanCSharpRenderer
             // リモート面の HTTP クライアント（per-entity クライアント・DI 登録・OwnedHttpClient）を出力するか。
             // Http バケットを含むスペックだけが true（分割時は Repositories.Http.g.cs・非分割時は本体スペックに同居）。
             ["render_http_client"] = scope.RenderHttpClient,
-            // 双方向同期の支援コード（固定エンジン・per-entity 記述子／デコレータ／直結差分ソース・DI）を出力するか。
+            // 双方向同期の支援コード（固定エンジン・per-entity 記述子／直結差分ソース・DI）を出力するか。
             // Sync バケットを含むスペックだけが true。
             ["render_sync"] = scope.Sync,
             // 同期専用エンドポイント（POST {prefix}/{ルート名}/Sync*）をサーバー実装ファイルへ張るか。

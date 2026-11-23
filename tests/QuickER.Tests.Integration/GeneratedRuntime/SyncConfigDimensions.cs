@@ -39,8 +39,8 @@ internal sealed record SyncConfigCase(
     /// <summary>ローカルのリポジトリを keyed で登録するか</summary>
     public bool LocalKeyed => LocalKey == SyncConfigDimensions.Keyed;
 
-    /// <summary>ローカルの同期する表のリポジトリをインスタンスの登録（シングルトン）にするか</summary>
-    public bool LocalAsInstances => LocalKey == SyncConfigDimensions.UnkeyedInstance;
+    /// <summary>キーなしの登録の後、ローカルの接続ファクトリをインスタンスの登録（シングルトン）で登録し直すか</summary>
+    public bool LocalFactoryAsInstance => LocalKey == SyncConfigDimensions.UnkeyedInstance;
 
     /// <summary>サーバーが HTTP の向こうにいるか</summary>
     public bool OverHttp =>
@@ -112,7 +112,10 @@ internal static class SyncConfigDimensions
     /// <summary>キーなしの登録</summary>
     public const string Unkeyed = "Unkeyed";
 
-    /// <summary>キーなしの登録の、同期する表のリポジトリをインスタンスの登録（シングルトン）に置き換えたもの</summary>
+    /// <summary>
+    /// キーなしの登録の後、ローカルの接続ファクトリを同じ接続文字列のインスタンスの登録（シングルトン）で登録し直したもの
+    /// （同期の登録より前に）
+    /// </summary>
     public const string UnkeyedInstance = "UnkeyedInstance";
 
     /// <summary>直結・サーバーのリポジトリはキーつき</summary>
@@ -167,7 +170,7 @@ internal static class SyncConfigDimensions
                 new Factor(
                     LocalKey,
                     [new Level(Keyed), new Level(Unkeyed), new Level(UnkeyedInstance)],
-                    "ローカルのリポジトリと同期エンジンの登録のキー（AddGeneratedSqliteRepositories と AddGeneratedSyncEngine の localServiceKey）と、キーなしの登録の同期する表のリポジトリをインスタンスの登録にした形"
+                    "ローカルのリポジトリと同期エンジンの登録のキー（AddGeneratedSqliteRepositories と AddGeneratedSyncEngine の localServiceKey）と、キーなしの登録の後でローカルの接続ファクトリをインスタンスで登録し直した形（同期の登録が包む相手がインスタンスの登録）"
                 ),
                 new Factor(
                     Server,
@@ -216,10 +219,7 @@ internal static class SyncConfigDimensions
                 .Select(c => new ScenarioRow<SyncConfigCase>(c.Id, Finding(c), Description(c), c))
         );
 
-    /// <summary>
-    /// 既知の失敗（main で赤になる行）。空＝修正 E で 4m-E1（非 keyed のローカル登録で同期の DI の登録が必ず投げる）と
-    /// 4m-E2（値オブジェクトのキーを Before フックが決める新しい行のグラフ保存が、ジャーナル記録デコレータ越しだけ失敗する）を直した。
-    /// </summary>
+    /// <summary>既知の失敗（赤になる行）。今は空</summary>
     public static KnownCaseLedger Known { get; } = new("SyncConfig", []);
 
     /// <summary>台帳の行</summary>
@@ -247,7 +247,7 @@ internal static class SyncConfigDimensions
     private static string? Finding(SyncConfigCase c) =>
         c.RemovesParentWithNewChild ? "本番E1"
         : c.ExcludesParent ? "本番E2"
-        : c.LocalAsInstances ? "本番E4"
+        : c.LocalFactoryAsInstance ? "本番E4"
         : !c.LocalKeyed ? "4m-E1"
         : c.Fixture == VoKey && c.HookAssignsKey ? "4m-E2"
         : null;
@@ -255,11 +255,11 @@ internal static class SyncConfigDimensions
     /// <summary>行の流れの説明</summary>
     private static string Description(SyncConfigCase c) =>
         c.ExcludesParent
-            ? "親の表を除外して登録→解決→除外した親の直接の書き込みは記録しない→除外した親のグラフ保存で足した子を同期 1 回で上げる→サーバーの新しい子を同期 1 回で降ろす→洗い替え"
-            : "登録→解決→ローカルの新しい行を同期 1 回で上げる→サーバーの新しい行を同期 1 回で降ろす→洗い替え"
+            ? "親の表を除外して登録→解決→登録の形の検査→除外した親の直接の書き込みは未送信に残らない→除外した親のグラフ保存で足した子だけが未送信になり同期 1 回で上がる→サーバーの新しい子を同期 1 回で降ろす→洗い替え"
+            : "登録→解決→登録の形の検査→ローカルの新しい行を同期 1 回で上げる→サーバーの新しい行を同期 1 回で降ろす→洗い替え"
                 + (
                     c.RemovesParentWithNewChild
-                        ? "→保存済みの親をキーの無い新しい子ごと消すグラフ保存を同期 1 回でサーバーへ届ける"
+                        ? "→保存済みの親をキーの無い新しい子ごと消すグラフ保存は親の削除だけを未送信にし、同期 1 回でサーバーへ届ける"
                         : ""
                 );
 
@@ -316,12 +316,6 @@ internal static class SyncConfigDimensions
         // Save フックはグラフ保存（SaveAsync）でだけ走り、直接の CRUD（InsertAsync）は素通りする＝キーを決めるフックは
         // 直接の書き込みでは走らない
         if (hook == AssignsKey && via == Direct)
-        {
-            return false;
-        }
-
-        // インスタンスの登録はコンテナを組む前に作るので、コンテナに登録した Save フック（AddSaveHook）を受け取れない
-        if (local == UnkeyedInstance && hook == AssignsKey)
         {
             return false;
         }

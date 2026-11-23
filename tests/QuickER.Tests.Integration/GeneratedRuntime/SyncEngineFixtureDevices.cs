@@ -37,13 +37,13 @@ internal sealed record SyncFixtureServerSources(
 }
 
 /// <summary>
-/// SyncFixture の端末で新しいエンジン（<c>TrackedSyncEngine</c>）を組む口。端末の DB は同期のトリガーの端末
+/// SyncFixture の端末で新しいエンジン（<c>SyncEngine</c>）を組む口。端末の DB は同期のトリガーの端末
 /// （<see cref="SyncTriggerHarness"/>）で作り、4 表に <c>SyncLocalTracking.Ensure</c> でトリガーと状態の表を張る。
 /// </summary>
 /// <remarks>
 /// 組み方は同期のモデルの新しいエンジンの端末（<see cref="SyncEngineFixedHarness"/>）と同じ：開くたびの確認
 /// （<c>SyncLocalTrackingGuard</c>）で包んだ接続ファクトリ（<c>ObservedSqlConnectionFactory</c>）から
-/// <c>SqliteLocalRowStore</c> とリポジトリを作り、4 表の <c>TrackedSyncTable</c> でエンジンを組む。リポジトリは記録の
+/// <c>SqliteLocalRowStore</c> とリポジトリを作り、4 表の <c>SyncTable</c> でエンジンを組む。リポジトリは記録の
 /// デコレータで包まない（記録はトリガーだけが行う）。サーバー役は呼び出し側が差分ソースで渡す（SQLite の代役・実 SQL Server の
 /// 直結・HTTP のどれでもよい）。
 /// </remarks>
@@ -70,7 +70,7 @@ internal sealed class SyncFixtureEngineDevice : IDisposable
     public SS.SyncOrderLineRepository Lines { get; private set; } = null!;
 
     /// <summary>端末のエンジン</summary>
-    public S.TrackedSyncEngine Engine { get; private set; } = null!;
+    public S.SyncEngine Engine { get; private set; } = null!;
 
     /// <summary>端末を作り、渡した差分ソースで 4 表のエンジンを組む</summary>
     /// <param name="sources">サーバーの差分ソース</param>
@@ -97,23 +97,23 @@ internal sealed class SyncFixtureEngineDevice : IDisposable
                 Markers = new SS.SyncMarkerRepository(factory),
                 Lines = new SS.SyncOrderLineRepository(factory),
             };
-            device.Engine = new S.TrackedSyncEngine([
-                new S.TrackedSyncTable<S.SyncOrderEntity, int>(
+            device.Engine = new S.SyncEngine([
+                new S.SyncTable<S.SyncOrderEntity, int>(
                     S.GeneratedSyncTables.SyncOrder,
                     sources.Orders,
                     device.Rows
                 ),
-                new S.TrackedSyncTable<S.SyncMarkerEntity, int>(
+                new S.SyncTable<S.SyncMarkerEntity, int>(
                     S.GeneratedSyncTables.SyncMarker,
                     sources.Markers,
                     device.Rows
                 ),
-                new S.TrackedSyncTable<S.SyncOrderLineEntity, int>(
+                new S.SyncTable<S.SyncOrderLineEntity, int>(
                     S.GeneratedSyncTables.SyncOrderLine,
                     sources.Lines,
                     device.Rows
                 ),
-                new S.TrackedSyncTable<S.SyncNoteEntity, int>(
+                new S.SyncTable<S.SyncNoteEntity, int>(
                     S.GeneratedSyncTables.SyncNote,
                     sources.Notes,
                     device.Rows
@@ -139,7 +139,7 @@ internal sealed class SyncFixtureEngineDevice : IDisposable
 }
 
 /// <summary>
-/// SyncVoFixture の端末で新しいエンジン（<c>TrackedSyncEngine</c>）を組む口。組み方は <see cref="SyncFixtureEngineDevice"/>
+/// SyncVoFixture の端末で新しいエンジン（<c>SyncEngine</c>）を組む口。組み方は <see cref="SyncFixtureEngineDevice"/>
 /// と同じで、エンジンは注文の表だけで組む（明細の表もトリガーは張る）。
 /// </summary>
 internal sealed class SyncVoFixtureEngineDevice : IDisposable
@@ -156,7 +156,7 @@ internal sealed class SyncVoFixtureEngineDevice : IDisposable
     public VS.SyncvoOrderRepository Orders { get; private set; } = null!;
 
     /// <summary>端末のエンジン（注文の表だけ）</summary>
-    public V.TrackedSyncEngine Engine { get; private set; } = null!;
+    public V.SyncEngine Engine { get; private set; } = null!;
 
     /// <summary>端末を作り、渡した注文の差分ソースでエンジンを組む</summary>
     /// <param name="orders">サーバーの注文の差分ソース</param>
@@ -181,8 +181,8 @@ internal sealed class SyncVoFixtureEngineDevice : IDisposable
             {
                 Orders = new VS.SyncvoOrderRepository(factory),
             };
-            device.Engine = new V.TrackedSyncEngine([
-                new V.TrackedSyncTable<V.SyncvoOrderEntity, V.OrderIdValue>(
+            device.Engine = new V.SyncEngine([
+                new V.SyncTable<V.SyncvoOrderEntity, V.OrderIdValue>(
                     V.GeneratedSyncTables.SyncvoOrder,
                     orders,
                     rows
@@ -210,7 +210,7 @@ internal sealed class SyncVoFixtureEngineDevice : IDisposable
 /// <summary>
 /// SyncFixture のサーバー役（2 つ目の SQLite の DB）。版の採番と版ガードは <see cref="SyncTestServerRepository{TEntity, TKey}"/>、
 /// blob の書き込みで版を進めるのは <see cref="SyncTestOrderBinaryColumns"/>、差分ソースは <see cref="SyncTestServerSources"/> の
-/// 組み立てを使う（<see cref="SyncRuntimeTestsBase"/> のサーバー役と同じ部品）。
+/// 組み立てを使う。
 /// </summary>
 internal sealed class SyncFixtureTestServer : IDisposable
 {
@@ -233,6 +233,12 @@ internal sealed class SyncFixtureTestServer : IDisposable
     /// <summary>サーバー役の注文の除外列のアクセサ（blob の書き込みで版を進める）</summary>
     public S.ISyncBinaryColumns<int> OrderBlobs { get; private set; } = null!;
 
+    /// <summary>サーバー役の素の注文のリポジトリ（版を採番しない。名前付きクエリと blob の観測用）</summary>
+    public S.ISyncOrderRepository OrdersRaw { get; private set; } = null!;
+
+    /// <summary>サーバー役のメモ（版なし）のリポジトリ（版を採番しない素のリポジトリ）</summary>
+    public S.IRepository<S.SyncNoteEntity, int> Notes { get; private set; } = null!;
+
     /// <summary>4 表の差分ソース</summary>
     public SyncFixtureServerSources Sources { get; private set; } = null!;
 
@@ -252,6 +258,8 @@ internal sealed class SyncFixtureTestServer : IDisposable
             var server = new SyncFixtureTestServer(db)
             {
                 Sql = sql,
+                OrdersRaw = ordersRaw,
+                Notes = new SS.SyncNoteRepository(factory),
                 OrderBlobs = new SyncTestOrderBinaryColumns(ordersRaw, sql, versions),
                 Orders = new SyncTestServerRepository<S.SyncOrderEntity, int>(
                     ordersRaw,
@@ -279,7 +287,7 @@ internal sealed class SyncFixtureTestServer : IDisposable
                 SyncTestServerSources.CreateOrders(sql, server.Orders, server.OrderBlobs),
                 SyncTestServerSources.CreateMarkers(sql, markers),
                 SyncTestServerSources.CreateLines(sql, server.Lines),
-                SyncTestServerSources.CreateNotes(sql, new SS.SyncNoteRepository(factory))
+                SyncTestServerSources.CreateNotes(sql, server.Notes)
             );
 
             return server;
@@ -296,8 +304,8 @@ internal sealed class SyncFixtureTestServer : IDisposable
 }
 
 /// <summary>
-/// SyncVoFixture のサーバー役（2 つ目の SQLite の DB）。書き込みの面と差分ソースは <see cref="SyncVoRuntimeTests"/> のサーバー役
-/// （<see cref="SyncVoRuntimeTests.SyncVoTestServerWriter"/>・<see cref="SyncVoRuntimeTests.SyncVoTestServerSource"/>）を使う。
+/// SyncVoFixture のサーバー役（2 つ目の SQLite の DB）。書き込みの面と差分ソースは
+/// <see cref="SyncVoTestServerWriter"/>・<see cref="SyncVoTestServerSource"/> を使う。
 /// </summary>
 internal sealed class SyncVoFixtureTestServer : IDisposable
 {
@@ -332,16 +340,13 @@ internal sealed class SyncVoFixtureTestServer : IDisposable
                 db.ReadWriteCreateConnectionString
             );
             var ordersRaw = new VS.SyncvoOrderRepository(factory);
-            var writer = new SyncVoRuntimeTests.SyncVoTestServerWriter(ordersRaw);
+            var writer = new SyncVoTestServerWriter(ordersRaw);
 
             return new SyncVoFixtureTestServer(db)
             {
                 OrdersRaw = ordersRaw,
                 Writer = writer,
-                Orders = new SyncVoRuntimeTests.SyncVoTestServerSource(
-                    new VS.SqlExecutor(factory),
-                    writer
-                ),
+                Orders = new SyncVoTestServerSource(new VS.SqlExecutor(factory), writer),
             };
         }
         catch

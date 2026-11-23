@@ -23,7 +23,7 @@ namespace QuickER.CodeGen.CSharp;
 ///     式木評価）。ADO も EF Core も参照せず、同じく <c>using QuickER.Runtime;</c> 付き</item>
 ///   <item><b>AspNetCore</b>: リモートサーバーの固定エンジン（RemoteServerEngine・エラー分類・詳細公開ポリシー・
 ///     バイナリ転送の補助型）。ASP.NET Core の FrameworkReference のみに依存し、同じく <c>using QuickER.Runtime;</c> 付き</item>
-///   <item><b>Sync</b>: 双方向同期エンジンの固定コード（SyncEngine・SyncJournal・SyncTable 基底階層・結果／競合レコード）。
+///   <item><b>Sync</b>: 双方向同期エンジンの固定コード（SyncEngine・SyncTable・変更の記録・結果／競合レコード）。
 ///     BCL のみ依存で、同じく <c>using QuickER.Runtime;</c> 付き</item>
 /// </list>
 /// </para>
@@ -273,10 +273,10 @@ public sealed class RuntimePackageSourceRenderer
     /// 双方向同期エンジンパッケージ（<see cref="RuntimePackages.Sync"/>）のソースをレンダリングする。
     /// </summary>
     /// <remarks>
-    /// 同期の固定エンジン（<c>SyncEngine</c>・<c>SyncJournal</c>・<c>SyncTable</c> 基底・<c>SyncSession</c>・
+    /// 同期の固定エンジン（<c>SyncEngine</c>・<c>SyncTable</c>・<c>SyncLocalTracking</c>・
     /// 結果／競合レコード）を、名前空間 <c>QuickER.Runtime.Sync</c> で 1 ファイルへ出力する。共通契約
     /// （<c>IRepositoryCore</c>・<c>ISqlExecutor</c>・<c>ConcurrencyMode</c>・<c>SaveConflictException</c>・<c>EntityBaseCore</c>）は
-    /// コアを <c>using QuickER.Runtime;</c> で参照する。per-entity の記述子・デコレータ・直結差分ソース・DI 登録は
+    /// コアを <c>using QuickER.Runtime;</c> で参照する。per-entity の記述子・直結差分ソース・DI 登録は
     /// スキーマ依存物として生成側に残るため、DI への依存も持たない（BCL のみ）。
     /// </remarks>
     public string RenderSync()
@@ -432,7 +432,7 @@ public sealed class RuntimePackageSourceRenderer
             // （EmitSchemaDependent=false が抑止する）。
             RemoteServer = remoteServer,
             // 同期の固定エンジンは専用パッケージ（QuickER.Runtime.Sync）だけが持つ。per-entity の記述子・
-            // デコレータ・直結差分ソース・DI 登録はスキーマ依存物として生成側に残る（EmitSchemaDependent=false が抑止する）。
+            // 直結差分ソース・DI 登録はスキーマ依存物として生成側に残る（EmitSchemaDependent=false が抑止する）。
             Sync = sync,
             Dialect = dialect,
             MultiDialect = false,

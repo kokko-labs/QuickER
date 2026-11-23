@@ -280,8 +280,7 @@ internal static class SyncModelEngineTransports
 /// </summary>
 /// <remarks>
 /// 直結に無いもの（アンカーの Base64 の往復・409 の競合の写し・バイナリのエンドポイントを通る blob のコピー）が、操作の
-/// 列の組み合わせの中で直結と同じ結果になることを見る。サーバー側の失敗の注入は 500 として届く。流す行は
-/// <see cref="SyncModelScenarioParts.Runs"/> が決める（今のエンジンだけの印のある行は流さない）。
+/// 列の組み合わせの中で直結と同じ結果になることを見る。サーバー側の失敗の注入は 500 として届く。
 /// </remarks>
 [Trait("Category", "Integration")]
 [MatrixAxisValue(SyncModelTransportAxis.Name, nameof(SyncModelTransport.Http))]
@@ -291,17 +290,10 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncM
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
-    /// <summary>転送とサーバー役の組み方（端末の作り方を含めない。転送の軸の名乗りの照合が読む）</summary>
-    private static readonly SyncModelWorldOptions HttpTransport = new()
-    {
-        Http = true,
-        Name = "http",
-    };
+    /// <summary>テストが流す世界の組み方（転送とサーバー役。端末は既定の新しいエンジンの端末。転送の軸の名乗りの照合も読む）</summary>
+    private static readonly SyncModelWorldOptions Http = new() { Http = true, Name = "http" };
 
-    /// <summary>テストが流す世界の組み方（端末は新しいエンジンの端末）</summary>
-    private static readonly SyncModelWorldOptions Http = SyncModelEngineDevice.On(HttpTransport);
-
-    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => HttpTransport;
+    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => Http;
 
     /// <summary>
     /// HTTP で流す決定的なシナリオの名前のうち、このクラスが受け持つ分（残りは <see cref="SyncModelScenarioParts"/> の
@@ -380,8 +372,7 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncM
 /// </para>
 /// <para>
 /// 決定的なシナリオは直結の新しいエンジンの端末と比べ、SQL Server でだけ起きる既知の失敗
-/// （<see cref="SyncModelEngineTransports.SqlServerOnly"/>）を直結の違反に足す。流す行は <see cref="SyncModelScenarioParts.Runs"/>
-/// が決める（今のエンジンだけの印のある行は流さない）。
+/// （<see cref="SyncModelEngineTransports.SqlServerOnly"/>）を直結の違反に足す。
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
@@ -400,13 +391,10 @@ public sealed class SyncModelSqlServerRuntimeTests(
     private SyncModelWorldOptions Options => OptionsFor(fixture);
 
     /// <summary>
-    /// 実 SQL Server のサーバー役と新しいエンジンの端末で世界を組む設定（分けたシナリオのクラスと共有する）
+    /// 実 SQL Server のサーバー役と既定の新しいエンジンの端末で世界を組む設定（分けたシナリオのクラスと共有する。転送の軸の
+    /// 名乗りの照合も読む）
     /// </summary>
     internal static SyncModelWorldOptions OptionsFor(SqlServerContainerFixture fixture) =>
-        SyncModelEngineDevice.On(TransportFor(fixture));
-
-    /// <summary>転送とサーバー役の組み方（端末の作り方を含めない。転送の軸の名乗りの照合が読む）</summary>
-    private static SyncModelWorldOptions TransportFor(SqlServerContainerFixture fixture) =>
         new()
         {
             CreateServer = async (faults, ct) =>
@@ -415,7 +403,7 @@ public sealed class SyncModelSqlServerRuntimeTests(
         };
 
     /// <summary>転送とサーバー役の組み方（コンテナにはサーバー役を作るときにだけ触れる）</summary>
-    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => TransportFor(fixture);
+    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => Options;
 
     /// <summary>
     /// 実 SQL Server で流す決定的なシナリオの名前のうち、このクラスが受け持つ分（残りは <see cref="SyncModelScenarioParts"/> の
@@ -611,11 +599,8 @@ public sealed class SyncSupportRemoteAdoSqlServerRuntimeTests(
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
-    /// <summary>テストが流す世界の組み方（端末は新しいエンジンの端末）</summary>
-    private SyncModelWorldOptions Options => SyncModelEngineDevice.On(Transport);
-
-    /// <summary>転送とサーバー役の組み方（端末の作り方を含めない。転送の軸の名乗りの照合が読む）</summary>
-    private SyncModelWorldOptions Transport =>
+    /// <summary>テストが流す世界の組み方（転送とサーバー役。端末は既定の新しいエンジンの端末。転送の軸の名乗りの照合も読む）</summary>
+    private SyncModelWorldOptions Options =>
         new()
         {
             CreateServer = async (faults, ct) =>
@@ -625,16 +610,13 @@ public sealed class SyncSupportRemoteAdoSqlServerRuntimeTests(
         };
 
     /// <summary>転送とサーバー役の組み方（コンテナにはサーバー役を作るときにだけ触れる）</summary>
-    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => Transport;
+    SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => Options;
 
-    /// <summary>
-    /// HTTP × 実 SQL Server で流す決定的なシナリオの名前（<see cref="SyncModelScenarioParts.Runs"/> が決める＝今のエンジンだけの印の
-    /// ある行は流さない）
-    /// </summary>
+    /// <summary>HTTP × 実 SQL Server で流す決定的なシナリオの名前</summary>
     internal static IReadOnlyList<string> ScenarioNames() =>
         [
             .. SyncModelScenarios
-                .All.Where(s => SyncModelScenarioParts.Runs(s, SyncModelTransport.SqlServerHttp))
+                .All.Where(s => s.RunsOn(SyncModelTransport.SqlServerHttp))
                 .Select(s => s.Name),
         ];
 

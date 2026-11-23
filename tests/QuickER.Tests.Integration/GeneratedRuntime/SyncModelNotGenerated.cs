@@ -27,13 +27,6 @@ internal static class SyncModelNotGenerated
                     Random
                 ),
                 NotGenerated.Accepted(
-                    "external-table-substitute",
-                    "外部の ISyncTable 実装の代役",
-                    "エンジンの内部の面を持たない実装は、外部キーで断られた書き込みの報告などを持たず公開の面どおりに例外を投げる（その差は不具合ではない）。代役は決まった形のシナリオだけが使う",
-                    Random
-                        + "（外部の表の決まった形のシナリオ 26-external-table-overwrites-pending-edit）"
-                ),
-                NotGenerated.Accepted(
                     "null-unique-values",
                     "一意な値の null",
                     "同期のモデルの図の一意な列（model_folders.name・model_items.code）は NOT NULL で、null を作るには図を変える必要がある。docs の「SQL Server なら NULL も値として数える」の約束は SyncFixture の実 SQL Server のテストが持つ",
@@ -57,11 +50,11 @@ internal static class SyncModelNotGenerated
                     "表どうしの循環（フォルダーが品目を指す列）を書く手",
                     "並行の書き手が行の循環を作るのを生成器は防げず（端末 1 がフォルダーを品目にピン留めし、端末 2 がその品目をそのフォルダーの下へ移す）、サーバーで消えた循環の行は端末に残る（docs の既知の割り切り）ので、静止化が終わらない種が出て、受け入れの署名で外すとその種の後ろの不具合を隠す。表の循環の経路は決まった形の行が持つ",
                     Random
-                        + " の行 `cycle-pin-to-new-item-uploads-in-rounds` / `cycle-pinned-item-is-read-back-before-folder` / `cycle-serverwins-restores-folder-pinned-to-new-item` / `refresh-empties-tables-in-a-foreign-key-cycle` / `refresh-force-in-a-foreign-key-cycle` / `refresh-failed-wipe-in-a-foreign-key-cycle`"
+                        + " の行 `cycle-pin-to-new-item-uploads-in-rounds` / `cycle-pinned-item-is-read-back-before-folder` / `cycle-serverwins-restores-folder-pinned-to-new-item` / `refresh-empties-tables-in-a-foreign-key-cycle` / `refresh-force-in-a-foreign-key-cycle`"
                 ),
                 NotGenerated.Accepted(
                     "refresh-interrupt-apply-skip",
-                    "洗い替え・割り込み・適用の Before フックの飛ばし・ピン留め",
+                    "洗い替え・割り込み・ピン留め",
                     "生成器は毎歩実際の DB を読んで操作を選ぶので、これらを混ぜると既存の種の操作の列が変わる。決まった形のシナリオ（割り込みの網）が受け持つ",
                     "`SyncModelRuntimeTests.InterruptScenarios_CoverEveryPointAndShape`"
                 ),
@@ -76,7 +69,7 @@ internal static class SyncModelNotGenerated
                     "一意な値の厳密な入れ替え（循環）",
                     "同じバッチの入れ替えは docs の既知の割り切りで、静止化が終わらないことを受け入れている。付け替えの形は値を空けた後に取る順だけを作る",
                     Random
-                        + " の行 `swap-without-refresh-does-not-settle` / `swap-folder-names-without-refresh-does-not-settle`"
+                        + " の行 `swap-codes-settles-in-one-sync` / `swap-folder-names-settles-in-one-sync`"
                 ),
                 NotGenerated.Accepted(
                     "server-extras",
@@ -114,6 +107,12 @@ internal static class SyncModelNotGenerated
                     "乱数の同期の手は上限を製品の既定（300,000 行）のまま渡し、乱数の世界の行数は上限に届かない。小さい上限の水準を足すと、上限を超えて断られた実行を判定役が扱う必要がある。上限を超えて断る形・超えても降ろす形は決まった形の行と決定的なシナリオが持つ",
                     Random
                         + " の行 `dl-row-limit-exceeded-with-unsent-change-refuses-and-applies-nothing` / `dl-row-limit-exceeded-after-upload-applies-everything` / `dl-row-limit-equal-to-fetched-rows-is-not-refused` / `refresh-force-over-row-limit-discards-unsent-and-is-not-refused`・`table:SyncEngineFixed` の行 `refresh-over-row-limit-with-change-written-during-fetch-is-refused` / `refresh-force-over-row-limit-with-discarded-key-rewritten-during-fetch-is-refused`"
+                ),
+                NotGenerated.Accepted(
+                    "stale-entity-saves",
+                    "同期が降ろす前に読んだ実体を、降ろした後に保存する書き込み（古い読みの保存）",
+                    "生成器は手のたびに端末の DB を読んでから書くので、手元に持ち越した古い実体で保存する手を作らない。古い読みの保存を送信の段が見分ける形・見分けない形は決まった形の行が持つ",
+                    "`table:SyncEngineFixed` の行 `stale-entity-saved-after-download-collect-reports-modified-on-server` / `stale-entity-saved-after-own-upload-is-not-a-conflict`"
                 ),
             ]
         );

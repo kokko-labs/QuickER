@@ -57,7 +57,7 @@ internal sealed record SyncTriggerRowState(
     long ChangeSeq
 );
 
-/// <summary>同期のモデルの図の部品（記録デコレータで包まない素の生成 Repository）</summary>
+/// <summary>同期のモデルの図の部品（何にも包まない素の生成 Repository）</summary>
 /// <param name="Folders">フォルダー</param>
 /// <param name="Labels">ラベル（版なし）</param>
 /// <param name="Items">品目（NOT NULL の除外 blob <c>payload</c>）</param>
@@ -437,7 +437,8 @@ internal sealed class SyncTriggerHarness : IDisposable
     }
 
     /// <summary>
-    /// 行の状態の表のエンジンだけが書く列（<c>base_version</c>・<c>known</c>・<c>sw_seq</c>・<c>blob_owed</c>）を、表とキー
+    /// 行の状態の表のエンジンだけが書く列（<c>base_version</c>・<c>known</c>・<c>sw_seq</c>・<c>blob_owed</c>・
+    /// <c>applied_version</c>）を、表とキー
     /// （型とテキスト）で引けるテキスト（列ごとに格納の型とテキスト）にして読む
     /// </summary>
     /// <param name="ct">キャンセルトークン</param>
@@ -449,7 +450,7 @@ internal sealed class SyncTriggerHarness : IDisposable
         await using var connection = await OpenAsync(ct);
         await using var command = connection.CreateCommand();
         command.CommandText =
-            "SELECT table_name, \"key\", base_version, known, sw_seq, blob_owed FROM quicker_sync_row";
+            "SELECT table_name, \"key\", base_version, known, sw_seq, blob_owed, applied_version FROM quicker_sync_row";
         await using var reader = await command.ExecuteReaderAsync(ct);
 
         while (await reader.ReadAsync(ct))
@@ -481,7 +482,7 @@ internal sealed class SyncTriggerHarness : IDisposable
         await using var connection = await OpenAsync(ct);
         await using var command = connection.CreateCommand();
         command.CommandText =
-            "UPDATE quicker_sync_row SET base_version = x'0A0B0C', known = 1, sw_seq = 42, blob_owed = 'Payload'";
+            "UPDATE quicker_sync_row SET base_version = x'0A0B0C', known = 1, sw_seq = 42, blob_owed = 'Payload', applied_version = x'0D0E0F'";
         await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -508,7 +509,7 @@ internal sealed class SyncTriggerHarness : IDisposable
 
     /// <summary>
     /// 表の行のうち、行の状態の表が未送信と印を付けた行の数を、製品の条件
-    /// （<c>TrackedSyncEngine.NotUnsentCondition</c>＝未送信でない行に真になる条件）から数える（表の全行 − 条件に当たる行）
+    /// （<c>SyncEngine.NotUnsentCondition</c>＝未送信でない行に真になる条件）から数える（表の全行 − 条件に当たる行）
     /// </summary>
     /// <param name="tableName">表の名前</param>
     /// <param name="ct">キャンセルトークン</param>
@@ -517,9 +518,9 @@ internal sealed class SyncTriggerHarness : IDisposable
         var key = $"{Quote(tableName)}.{Quote(KeyColumn(tableName))}";
         var condition = Fixture switch
         {
-            SyncTriggerFixture.SyncModel => M.TrackedSyncEngine.NotUnsentCondition(key),
-            SyncTriggerFixture.Sync => S.TrackedSyncEngine.NotUnsentCondition(key),
-            _ => V.TrackedSyncEngine.NotUnsentCondition(key),
+            SyncTriggerFixture.SyncModel => M.SyncEngine.NotUnsentCondition(key),
+            SyncTriggerFixture.Sync => S.SyncEngine.NotUnsentCondition(key),
+            _ => V.SyncEngine.NotUnsentCondition(key),
         };
 
         await using var connection = await OpenAsync(ct);

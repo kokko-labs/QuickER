@@ -54,7 +54,7 @@ internal sealed record SyncTriggerRecordingCase(
 /// </summary>
 /// <remarks>
 /// <para>
-/// 書き込みは記録デコレータで包まない素の生成 Repository・生 SQL・接続の上の文で行い、記録は <c>SyncLocalTracking.Ensure</c>
+/// 書き込みは何にも包まない素の生成 Repository・生 SQL・接続の上の文で行い、記録は <c>SyncLocalTracking.Ensure</c>
 /// が張ったトリガーだけが行う。行はキーの形（int・文字列・datetime2・値オブジェクト）、版なしの表、書き込みの道（直接の
 /// CRUD・一括挿入・グラフ保存・生 SQL・条件つきの一括削除・条件なしの削除・Stream・Save フックの中の blob）、主キーの変更、
 /// 失敗した書き込み、外部キーの動作による連鎖、適用中の印、トリガーを張らない表で分ける。
@@ -1047,6 +1047,41 @@ internal static class SyncTriggerRecordingRows
                 )
             ),
             Row(
+                "graph-save-hook-assigned-keys-of-new-rows",
+                "グラフ保存の Before の Save フックが、同じ仮のキー（0）を持つ新しい品目 2 つにそれぞれ別のキーを決めると、"
+                    + "親と、フックが決めた 2 つのキーを記録する（仮のキー 0 は記録に無い。フックが無ければ 2 つ目の挿入が主キーの"
+                    + "重複で断られる）",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    null,
+                    async (h, ct) =>
+                    {
+                        var factory = new LightJournalSyncModelConnectionFactory(
+                            h.ConnectionString
+                        );
+                        var folders = new M.Repositories.Sqlite.ModelFolderRepository(
+                            factory,
+                            new M.SaveHookRegistry().Add<M.ModelItemEntity>(
+                                new ItemKeyAssigningHook(101)
+                            )
+                        );
+                        var folder = Folder(9, "nine");
+                        var first = Item(0, 9, "c-a", "a");
+                        var second = Item(0, 9, "c-b", "b");
+                        folder.MarkAdded();
+                        first.MarkAdded();
+                        second.MarkAdded();
+                        folder.ModelItems.Add(first);
+                        folder.ModelItems.Add(second);
+                        await folders.SaveAsync(folder, cancellationToken: ct);
+                        new[] { first.ItemId, second.ItemId }
+                            .Should()
+                            .Equal([101, 102], "フックが決めたキーで保存される");
+                    },
+                    [Live(Folders, 9), Live(Items, 101, "Payload"), Live(Items, 102, "Payload")]
+                )
+            ),
+            Row(
                 "raw-sql-insert-update-delete",
                 "生 SQL の挿入・更新・削除を、実行した順に記録する（挿入は除外 blob の名前つき）",
                 new(
@@ -1504,5 +1539,25 @@ internal static class SyncTriggerRecordingRows
         ];
 
         return new ScenarioTable<SyncTriggerRecordingCase>(EngineIds.GeneratedRuntime, rows);
+    }
+
+    /// <summary>挿入する品目に、決めた順にキーを振る Before の Save フック</summary>
+    private sealed class ItemKeyAssigningHook(int first) : M.ISaveHook<M.ModelItemEntity>
+    {
+        private int _next = first;
+
+        public Task<bool> BeforeSaveAsync(
+            M.ModelItemEntity entity,
+            M.SaveOperation operation,
+            CancellationToken cancellationToken = default
+        )
+        {
+            if (operation == M.SaveOperation.Insert)
+            {
+                entity.ItemId = _next++;
+            }
+
+            return Task.FromResult(true);
+        }
     }
 }

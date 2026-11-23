@@ -1,6 +1,6 @@
 # GeneratedRuntime（生成コードのランタイムテスト）
 
-`tests/QuickER.Tests.Integration/GeneratedRuntime/` の規則。実装先どうしの一致（`BackendParity*.cs`）、共通基底＋派生の形、双方向同期の検証（同期のモデル・構成の行列・`SyncRuntimeTestsBase`）を扱う。
+`tests/QuickER.Tests.Integration/GeneratedRuntime/` の規則。実装先どうしの一致（`BackendParity*.cs`）、共通基底＋派生の形、双方向同期の検証（同期のモデル・構成の行列・同期のエンジンの決まった形の行・トリガーの表）を扱う。
 エンジンの共通の枠組み（種・既知の失敗・網羅の計数・次元表・登録簿）は `tests/QuickER.Tests/TestSupport/CLAUDE.md`「エンジンの核（Engines/）」を参照する。
 同期エンジンの規則そのものは `src/QuickER.Runtime.Sync/CLAUDE.md`「ガードテストの一覧」を参照する。
 
@@ -44,7 +44,7 @@
   - 実装先が 1 つ：機能の名前・実装先の名前の順に並べる（例 `SaveHookInMemoryRuntimeTests`・`TranslatorParityEfCoreSqlServerRuntimeTests`）。リモートは実装先の名前の代わりに Remote とサーバーの実装先の名前を並べ、リポジトリなしは Remote だけにする。
   - 同じ機能 × 実装先を担当するクラスが 2 本以上あるときは、実装先の名前と接尾辞の間に区別の語を挟む（例 `SaveHookAdoSqliteBinaryWriteRuntimeTests`・`RemoteTransportRemoteServerEngineRuntimeTests`）。区別の語は大文字で始め、実装先の名前（`RuntimeTarget` の値の名前）で始めない（リポジトリなしのクラスがサーバーを名乗る名前や、別の実装先を担当する名前に読めないようにする）。区別の語は名前がぶつかるときだけ使い、組の主（ほかの実装先に同じ基底の兄弟があるクラス）は区別なしにする。
   - 実装先が 2 つ以上かエンジン：機能の名前で始める（例 `BackendParitySqlServerRuntimeTests`・`MultiTargetRepositoryRuntimeTests`）。間は自由。
-  - 規則に合わない既存のクラスは既知の一覧 `RuntimeTestNamingKnown`（理由つき）に載せ、`GuardKnownList` で 2 方向に照合する（一覧に無い違反も、無くなった・合うようになったクラスも赤）。今の一覧は双方向同期のクラス 20 本だけで、同期の作り直し（0.4.0 の後）で構成と一緒に付け直す。改名したら一覧から消す。基底クラス（`*RuntimeTestsBase`）は抽象で走査の外なので規則を掛けない。ガード：`RuntimeTestMatrixTests.NewRuntimeTestClasses_FollowNamingRule`。
+  - 規則に合わない既存のクラスは既知の一覧 `RuntimeTestNamingKnown`（理由つき）に載せ、`GuardKnownList` で 2 方向に照合する（一覧に無い違反も、無くなった・合うようになったクラスも赤）。今の一覧は双方向同期のクラス 14 本だけで、どの行も理由は「名乗る機能と実装先の名前へ、同期のテストの構成と一緒に付け直すまで残す」。改名したら一覧から消す。基底クラス（`*RuntimeTestsBase`）は抽象で走査の外なので規則を掛けない。ガード：`RuntimeTestMatrixTests.NewRuntimeTestClasses_FollowNamingRule`。
 - 運用：
   - テストのクラスを足すときは属性を書き、そのセルの空きの宣言を消して生成物を書き直す。空きの宣言を残したまま属性を付けると、その列は空きと担当の両方で赤になり、`RuntimeMatrixRows` の宣言を消すと緑になる（続けて生成物を書き直す）。
   - ガード：`RuntimeTestMatrixTests`（`Targets_MatchProductDialects`・`EveryRuntimeTestClass_ShouldAppearInMatrix`・`EveryMatrixCell_ShouldBeCoveredOrDeclaredAsGap`・`Matrix_ShouldBeMostlyCovered`・`RuntimeMatrixDrift_MatchesRecord`・`NewRuntimeTestClasses_FollowNamingRule`・`Checks_NameEveryProblemShape`）。
@@ -206,65 +206,34 @@
 
 ### 決定的なシナリオと Theory
 
-- エンジンの振る舞いの決定的なシナリオは `SyncModelScenarios.Engine*.cs` にある。対象はダウンロード・アップロードの基本・再生の判定・ack・削除伝搬・グラフ保存・後勝ち・競合と ServerWins / LocalWins・外部キー・割り込み・記録の取り消し・洗い替え・blob・フック。
-- 同期のモデルの 4 つの転送（直結・HTTP・実 SQL Server の 3 つの Theory と、HTTP × 実 SQL Server の夜間だけの Fact）が、同じ宣言 `SyncModelScenario.Transports` から行を作り、新しいエンジンの端末（`SyncModelEngineDevice.On(...)`）で流す。今はどのシナリオも全転送で流れる（サーバー役の口は SQLite の代役も実 SQL Server も同じ点で持つ）。
-  - 流す行は `SyncModelScenarioParts.Runs` が決める：今のエンジンだけの印（`SyncModelScenario.CurrentEngineOnly`）のある行は流さない。印の行は今のエンジンの控えが流す（下の「今のエンジンの控え」）。
+- 同期のエンジン（`SyncEngine`）の振る舞いの決定的なシナリオは `SyncModelScenarios.cs` と `SyncModelScenarios.Engine*.cs`・`SyncModelScenarios.HolderKeptByOtherRows.cs`・`SyncModelScenarios.Judge.cs` にある。対象はダウンロード・アップロードの基本・送る操作の決め方・削除伝搬・グラフ保存・後勝ち・競合と ServerWins / LocalWins・外部キー・一意な値の付け替え・割り込み・洗い替え・blob・フック・塊をまたぐ大きい取得・判定役の対照。
+- 同期のモデルの 4 つの転送（直結・HTTP・実 SQL Server の 3 つの Theory と、HTTP × 実 SQL Server の夜間だけの Fact）が、同じ宣言 `SyncModelScenario.Transports` から行を作り、エンジンの端末（`SyncModelEngineDevice`）で流す。今はどのシナリオも全転送で流れる（サーバー役の口は SQLite の代役も実 SQL Server も同じ点で持つ）。
   - 直結の Theory（`SyncModelRuntimeTests.Scenario_FailsExactlyAsListed`）は、既知の失敗の一覧 `SyncModelKnownFailures.EngineSet`（空）のその行の署名の組どおりに失敗することを表明する。転送の Theory（`SyncModelHttpRuntimeTests.Scenario_MatchesDirect`・`SyncModelSqlServerRuntimeTests.Scenario_MatchesDirect`）と夜間の Fact は、直結の結果と同じ違反（正規化した署名）になることを比べる。
-  - 主の Theory では「流せない」は違反（素通しの印を立てない）。
-- 直結の結果の使い回し（`SyncModelDirectRuns`）：直結・新しいエンジンの端末で流した結果を、違反の無いものだけ、プロセスの中でシナリオごとに 1 回だけ流し、直結の Theory と転送の Theory が使い回す（新しいエンジンの端末の世界は、同時に並べる数が増えるほど 1 つあたりが遅くなるので、流す世界の数を減らす）。
+- 直結の結果の使い回し（`SyncModelDirectRuns`）：直結・エンジンの端末で流した結果を、違反の無いものだけ、プロセスの中でシナリオごとに 1 回だけ流し、直結の Theory と転送の Theory が使い回す（エンジンの端末の世界は、同時に並べる数が増えるほど 1 つあたりが遅くなるので、流す世界の数を減らす）。
   - 使い回すのは例外なく終わって違反が 1 つも無い結果だけ。違反のある結果（既知の失敗の行・判定役の対照の行・退行）と例外で終わった実行は使い回さず、呼んだ行ごとに自分で流す（1 つの行の失敗がほかの行の比べ方へ混ざらない）。
-  - 鍵は `SyncModelDirectRuns.KeyOf` の 1 か所（世界の組み方の名乗り `SyncModelWorldOptions.Name` とシナリオの名前）。組み方は `SyncModelDirectRuns.Options` の 1 つだけで、シナリオが決めるもの（外部の ISyncTable の代役・端末の数・判定役の包み・手の列）は名前で決まる。名前の一覧（`SyncModelScenarios.All`）に無い複製のシナリオは使い回さない。
+  - 鍵は `SyncModelDirectRuns.KeyOf` の 1 か所（世界の組み方の名乗り `SyncModelWorldOptions.Name` とシナリオの名前）。組み方は `SyncModelDirectRuns.Options` の 1 つだけで、シナリオが決めるもの（端末の数・判定役の包み・手の列）は名前で決まる。名前の一覧（`SyncModelScenarios.All`）に無い複製のシナリオは使い回さない。
   - 取り出した結果が頼まれたシナリオのものであることを、結果に持たせたシナリオの参照で確かめ、違えば `InvalidOperationException` で行を赤にする（鍵を誤ると、流していないシナリオの結果で行が緑になる）。
 - 直結・HTTP・実 SQL Server の Theory は `SyncModelScenarioParts` が行の番号の余りで 2 つ・4 つ・2 つのクラスへ分けて並列に流す。xUnit は同じクラスの行を並列に流さず、HTTP の行を 1 クラスに置くと直列が同期の Theory の時間を決めるため。
   - 分けたクラス（`SyncModelRuntimeTestsPart2`・`SyncModelHttpRuntimeTestsPart2`〜`4`・`SyncSupportAdoSqlServerScenarioPart2RuntimeTests`）は転送の軸の目印（`ISyncModelTransportTests`・`MatrixAxisValue`）を持たない。軸の値ごとのクラスは本体の 1 つだけ。
   - 実 SQL Server の 2 つの分は、SQL Server の別々のコンテナのコレクション（本体は `SqlServerSecondContainerCollection`・2 つ目は `SqlServerContainerCollection`）に置く。同じコレクションのテストは 1 本ずつ流れるので、同じコレクションに置くと分けた意味が無い（普段の SQL Server のテストの時間の半分以上をこの Theory が占める）。
-  - HTTP × 実 SQL Server の決定的なシナリオは、普段の CI で流さず夜間だけ全部流す（ユーザーの決定 2026-11-13＝普段は実 SQL Server の直結が失敗の注入の行も持つ）。行ごとの Theory でなく、夜間の目印（`NightlyEngine`）を持つ 1 つの Fact `SyncSupportRemoteAdoSqlServerRuntimeTests.Scenarios_MatchDirect_Nightly` が、種の決め方（`SeedSource.Resolve`）のプロファイルが夜間のときだけ全シナリオを並列度 2 で流し、失敗をまとめて報告する。普段のプロファイルで行を出さない Theory はスキップ（スキップ 0 の原則に当たる）になるため。
+  - HTTP × 実 SQL Server の決定的なシナリオは、普段の CI で流さず夜間だけ全部流す（普段は実 SQL Server の直結が失敗の注入の行も持つ）。行ごとの Theory でなく、夜間の目印（`NightlyEngine`）を持つ 1 つの Fact `SyncSupportRemoteAdoSqlServerRuntimeTests.Scenarios_MatchDirect_Nightly` が、種の決め方（`SeedSource.Resolve`）のプロファイルが夜間のときだけ全シナリオを並列度 2 で流し、失敗をまとめて報告する。普段のプロファイルで行を出さない Theory はスキップ（スキップ 0 の原則に当たる）になるため。
   - 分ける数とその数のクラスは別々の場所にあるので、`SyncModelRuntimeTests.ScenarioParts_CoverEveryScenarioOncePerTransport` が `SyncModelScenarioParts.Names` を呼ぶ MemberData を反射で集め、転送ごとの行の和が流すシナリオとちょうど一致し重ならないことと、コレクションを持つ分（実 SQL Server）の分けたクラスが別々のコレクションにあることを表明する。mutation 実証済み（実 SQL Server を分ける数を 3 にする・2 つの分を同じコレクションに置く、のそれぞれで赤）。
-- 実 SQL Server の転送が見るもの：本物の rowversion の版ガード・`MIN_ACTIVE_ROWVERSION()` の上限のアンカー・TOP のページング・外部キーエラーの分類・実 `varbinary(max)`・照合順序、それらと失敗の注入・割り込みの点・HTTP のシリアライズ（版の Base64・400 / 409 / 500 の分類）との組み合わせ。
+- 実 SQL Server の転送が見るもの：本物の rowversion の版ガード・`MIN_ACTIVE_ROWVERSION()` の取得の上限・TOP のページング・外部キーエラーの分類・実 `varbinary(max)`・照合順序、それらと失敗の注入・割り込みの点・HTTP のシリアライズ（版の Base64・400 / 409 / 500 の分類）との組み合わせ。
   - SQL Server に固有の事実を期待の手（結果・行・未送信の行の面など）で表明し、Theory は「直結と同じ違反になる」を比べる。
   - SQL Server だけに効く壊れ方は実 SQL Server の Theory が、全転送に効く壊れ方は直結の Theory が拾う。mutation 実証済み。
 
-### SyncRuntimeTestsBase に残したもの
+### 差分ソースの HTTP と実 SQL Server の固有のテスト
 
-エンジンの外の仕組みを確かめる 19 メソッド（端末は今のエンジン）。
-
-- 並行のロックと割り込み（記録と業務の書き込みの間・バッチの適用中・実行の重なり・別の接続の読み取り）。
-- 記録の文の形（複数行の INSERT・id の並び・フックが決めたキー）。
-- 全書き込み入口の記録と、生 SQL を記録しないこと。
-- 登録簿なしの例外。
-- 別の DB の保存のフック。
-- NULL 許容の計算列。
-- サーバーで NULL になった blob。
-- 知らない除外の型。
-- 一覧に載らない参照。
-
-NULL 許容の計算列・サーバーで NULL になった blob・一覧に載らない参照の新しいエンジンの側は、決まった形の行（下の「新しいエンジンの決まった形の行」）が持つ。
-
-転送別の派生は次の 2 つ。
-
-- `SyncSqliteRuntimeTests`：直結・CI 常時。サーバー役も SQLite で版採番と版ガードを代役し、差分ソースを差し替える安全網。
-- `SyncHttpRuntimeTests`：HTTP・CI 常時。in-process Kestrel・アンカーの Base64 往復・400 拒否・サーバー不在。
-
-実 SQL Server の固有は次の 2 つだけ。
-
-- `SyncSqlServerRuntimeTests`：NULL を許す一意制約の 2 件（`sync_markers` は SyncFixture にしか無い）と、洗い替えの内容の一致の計測。
+- `SyncHttpRuntimeTests`：HTTP・CI 常時。SyncFixture の SQLite のサーバー役（`SyncFixtureTestServer`）を in-process Kestrel の向こうへ置き、差分ソースの面でアンカーの Base64 往復・続きの有無・上限・全キー・400 拒否を見る。`ServerDown_SurfacesAsHttpRequestException` はエンジンの端末で、エンジンも HTTP の例外を包まずに伝えることを見る。
+- `SyncSqlServerRuntimeTests`：NULL を許す一意制約の 2 件（`sync_markers` は SyncFixture にしか無い）。
 - `SyncSqlServerHttpRuntimeTests`：上限の値の HTTP の往復・版の書き戻しと 409 の競合の収集・NULL の一意な値。
-
-端末を新しいエンジンへ差し替えたテストは次の 4 つ（クラスと名前はそのまま。端末は `SyncEngineFixtureDevices.cs` の `SyncFixtureEngineDevice`＝SyncFixture の 4 表にトリガーを張り、`SqliteLocalRowStore` と `TrackedSyncTable` でエンジンを組む口。サーバーの差分ソースは DI に登録した直結か HTTP の生成の差分ソース）。
-
-- `SyncSqlServerRuntimeTests.NullUniqueValueTakenOnServer_IsReportedOrSettled`・`SyncSqlServerHttpRuntimeTests.NullUniqueValueTakenOnServer_IsReportedOverHttp`：未送信は端末の行の状態の表で読む。
-- `SyncSqlServerHttpRuntimeTests.Upload_WritesBackVersionAndCollectsConflictOverHttp`。
-- `SyncHttpRuntimeTests.ServerDown_SurfacesAsHttpRequestException`：新しいエンジンも HTTP の例外を包まずに伝える。
-
-そのほかの同期のテスト：
-
-- `SyncConstructionExclusionTests`：構築時除外・登録時 fail-fast。
-- `SyncRefreshBenchmarkRuntimeTests`：時間は表明せず `ITestOutputHelper` へ出力し、表明は 3 経路の内容ダイジェスト一致のみ。
-- 外部の `ISyncTable` 実装の代役（公開の面だけを転送）はシナリオだけで使う。内部の面を持たない実装の差は不具合ではないため。
+- 端末は `SyncEngineFixtureDevices.cs` の `SyncFixtureEngineDevice`（SyncFixture の 4 表にトリガーを張り、`SqliteLocalRowStore` と `SyncTable` でエンジンを組む口）。サーバーの差分ソースは DI に登録した直結か HTTP の生成の差分ソース。未送信は端末の行の状態の表で読む。
+- 生 SQL の `INSERT … RETURNING` が別の接続の読み取りを待つことは `BusyTimeoutDefaultAdoSqliteRuntimeTests.RawSqlReturning_WaitsForReaderOnAnotherConnection` が見る。
+- 生成の DI の登録（`AddGeneratedSyncEngine`）の構築時の除外と登録時の断りは、トリガーの確認の表の DI の行（`table:SyncTriggerGuard` の行 `di-*`。下の「同期のトリガーのテスト」）が見る。
 
 ### テストのサーバー役
 
-- `SyncTestServer*` は SyncFixture・SyncModelFixture・SyncVoFixture で 1 つにまとめられない。版の付与とガード・差分の SQL は同じ意味でも、生成型（`IRepository<,>`・`EntityBaseCore`・`SaveConflictException`）がフィクスチャごとの名前空間で別の型になるため。
+- サーバー役（SyncFixture の `SyncTestServer*`・`SyncFixtureTestServer`、SyncModelFixture の `SyncModelServer*`、SyncVoFixture の `SyncVoTestServer*`・`SyncVoFixtureTestServer`）はフィクスチャをまたいで 1 つにまとめられない。版の付与とガード・差分の SQL は同じ意味でも、生成型（`IRepository<,>`・`EntityBaseCore`・`SaveConflictException`）がフィクスチャごとの名前空間で別の型になるため。
 - 共有しているのは、型引数で共有できる採番の規則（`SyncTestVersionSequence`）と版を付ける包み（`SyncTestServerRepository`）だけ。
 
 ### 同期のモデル（SyncModelRuntimeTests）
@@ -279,15 +248,15 @@ NULL 許容の計算列・サーバーで NULL になった blob・一覧に載�
 - 最初の形（1 歩目の前に端末がどう行を持つか）：
   - None：空から始め、後勝ちの静かな同期 1 回で初期データへそろえる。
   - Refresh：洗い替え（blob を運ぶ）1 回で作る（docs の洗い替えの用途の初回構築）。
-  - Journaled：最初の同期の前に Repository 越しに書く（通常のオフライン編集。一部は初期データのキー・一意な値とぶつける）。書き手の操作として履歴へ積む。
-  - Untracked：最初の同期の前に Repository を通らずに入れる（記録されない・ミラー版も無い・サーバーに無いキーだけ＝端末のキーの範囲の基点＋800 の帯）。誰の書き込みでもないので履歴へ積まず、消失なしの表明は「無い」を期待する（docs：上がらず削除伝搬で消える）。
+  - Journaled：最初の同期の前に Repository 越しに書く（トリガーが記録する通常のオフライン編集。一部は初期データのキー・一意な値とぶつける）。書き手の操作として履歴へ積む。
+  - Untracked：最初の同期の前に記録させずに入れる（端末の口 `SyncModelDevice.WriteUntrackedAsync`。行の状態も無い・サーバーに無いキーだけ＝端末のキーの範囲の基点＋800 の帯）。誰の書き込みでもないので履歴へ積まず、消失なしの表明は「無い」を期待する（docs：上がらず削除伝搬で消える）。
   - 中身は 3 本目の乱数（`SyncModelGenerator.PreloadSeed`）だけで引く。追跡しない帯のキーと値は、ほかの書き手の同じキー・別表記の候補にしない。
   - 初期データへそろったかの照合は None・Refresh の端末だけに掛ける。
   - 最初の同期をしない端末（Journaled・Untracked）から見ると、初期データはまだ受け取っていないほかの書き手の内容。その端末がそのキーをサーバーと同じ内容（品目は blob も）で持つまで、版の競合の根拠の判定と消失なしの表明は、初期データをそのキーの書き手に数える。
   - 追跡しない行に端末が初めて書いたら、その行の今の内容と blob をその端末の書き込みとして履歴へ積む（Repository 越しの更新・blob の書き込みは、サーバーへの挿入として全列を送る）。
-  - 作らない形（サーバーにあるキーの追跡しない行・ミラー版つきの行の持ち込み・別の端末の DB の写し・端末 4 台以上）は `SyncModelNotGenerated` に宣言する。
+  - 作らない形（サーバーにあるキーの追跡しない行・外で版を書いた行の持ち込み・別の端末の DB の写し・端末 4 台以上・小さい取得の行数の上限・古い読みの保存〔同期が降ろす前に読んだ実体を降ろした後に保存する書き込み。項目 stale-entity-saves。見分ける形と見分けない形は同期のエンジンの決まった形の行が持つ〕ほか）は `SyncModelNotGenerated` に Accepted で宣言する。
 - 空振りの守り：広い世界の種が既定の種の数のとき、最初の形ごとに実際に効いたことを `CoverageGuard` で表明する（`SyncModelRun.PreloadEffects`＝洗い替えで作った端末がそろった・初期データのキーへの記録が DuplicateOnServer になった・最初の同期の前の記録が UniqueValueTakenOnServer で断られた・どの書き込みも触れなかった追跡しない行が静止化の後にどの端末にも無い）。
-- 3 台目があって初めて起きる順序は、決まった形の行 `three-devices-change-reaches-the-other-two-in-different-orders`（全転送・3 台の世界）が持つ：端末 1 が UploadAsync だけで上げて受理記録を残し、端末 2 がその版を降ろしてから編集して上げ、端末 3 は端末 2 の版だけを降ろす。端末 1 は受理記録のキーに来た端末 2 の版を自分のエコーとみなさずに降ろす（エコーの判定をキーだけにする壊し方で赤）。
+- 3 台目があって初めて起きる順序は、決まった形の行 `three-devices-change-reaches-the-other-two-in-different-orders`（全転送・3 台の世界）が持つ：端末 1 が UploadAsync だけで上げ（まだ降ろさない）、端末 2 がその版を降ろしてから編集して上げ、端末 3 は端末 2 の版だけを降ろす。端末 1 は自分が上げたキーに来た端末 2 の版を自分のエコーとみなさずに降ろし、端末 3 は端末 2 の版を元にした編集を競合なしに上げる。
 
 - 表明：
   - 止まらない：静止化が、例外・未送信・競合・打ち切りを残さず終わる。
@@ -300,7 +269,7 @@ NULL 許容の計算列・サーバーで NULL になった blob・一覧に載�
   - 書き手がその端末だけのキーへの版の競合は、根拠なしとして違反にする。
   - サーバーが書き込みを断った理由の競合（DeleteRefusedOnServer・UniqueValueTakenOnServer・ParentMissingOnServer）と、後勝ち＋ServerWins の決着は、実行の直後のサーバーに根拠が無ければ `3/spurious:{表}:{理由}:{形}` にする（`SyncModelRun.CheckRefusalBasisAsync`）。
   - 根拠はサーバーの状態からだけ取る。DeleteRefused＝参照する行がある／UniqueValueTaken＝同じ一意な値の別の行がある／ParentMissing＝親が無い。
-  - 端末のエンジンが決定の持ち越しを宣言し（`CarriesServerWinsDecision` が真）、台帳が実行の前から戻せなかった行の決定を持ち、その実行が DiscardedByServerWins を報告した後勝ち＋ServerWins の決着は、決定を果たした決着として根拠の確認に掛けない（期待値からは外す。決定の果たし方は実行ごとの照合の `5/carry:*` が照らす）。台帳の決定は宣言に依らず作るので、宣言が偽のエンジンの決着は今までどおり根拠を確かめる。台帳はテスト側の記録だけを読む。決まった形の行は `judge-carry-fulfilled-by-lww-serverwins-is-not-spurious`・`judge-undeclared-carry-lww-serverwins-settlement-without-basis-is-spurious`・`judge-lww-serverwins-settlement-without-basis-is-spurious`。
+  - 端末のエンジンが決定の持ち越しを宣言し（`CarriesServerWinsDecision` が真）、台帳が実行の前から戻せなかった行の決定を持ち、その実行が DiscardedByServerWins を報告した後勝ち＋ServerWins の決着は、決定を果たした決着として根拠の確認に掛けない（期待値からは外す。決定の果たし方は実行ごとの照合の `5/carry:*` が照らす）。台帳の決定は宣言に依らず作るので、宣言が偽の端末（判定役の包みが宣言を偽にした端末）の決着は根拠を確かめる。台帳はテスト側の記録だけを読む。決まった形の行は `judge-carry-fulfilled-by-lww-serverwins-is-not-spurious`・`judge-undeclared-carry-lww-serverwins-settlement-without-basis-is-spurious`・`judge-lww-serverwins-settlement-without-basis-is-spurious`。
   - 決定を果たした行は送られていない（エンジンはその行を送らずにサーバーの行で戻す）ので、同じ実行のほかの行の拒否の根拠を確かめるとき、その行を届かなかった行に数え、その行の未送信の付け替え・値の手放しで根拠を打ち消さない（`RecordLastWriteWinsSettlementsAsync` が決着と別に返し、`CheckRefusalBasisAsync` へ届かなかった行として渡す）。決まった形の行は `fk-lww-serverwins-label-delete-refused-while-item-reparent-is-held`（全転送。決定を果たした品目の付け替えの間に断られたラベルの削除は根拠あり）、対照は `judge-unfulfilled-reparent-delete-refusal-without-basis-is-spurious`（競合にも決着にも果たした決定にも入らない付け替えは、今までどおり届いたとみなして `pending-reparent` で名指しする）。
   - 参照する行・持ち主が同じ端末の未送信で付け替わる／値を手放すなら、その表がその実行の範囲にあり、その行がその実行で届かなかったのでない限り数えない。
     - 届かなかったかは、報告された競合・決着に加え、値を手放す書き込み自身に実行の後のサーバーで断られる根拠（親が無い・手放されていない別の行が値を持つ）があるかで決める（判定は 1 段。ServerWins が戻せずに決着を保留した行は報告されないため）。決まった形の行は `repro-d2-upsert-unique-lww-serverwins-held-holder-is-basis`。
@@ -336,42 +305,43 @@ NULL 許容の計算列・サーバーで NULL になった blob・一覧に載�
   - 実 SQL Server の乱数の種は、AsciiCase・NonAsciiCase・TrailingSpace の別表記がそれぞれ 1 回以上サーバーに断られたことを `CoverageGuard` で表明する（`SyncModelRun.SpellingRefusals`。同じ値の Exact・Empty はどのサーバー役でも断られ、直結の種の網羅が受け持つ）。
 - 取得の上限の固定もサーバー役が持つ（`ISyncModelServerRole.FixesFetchCeilingAtRunStart`）：SQLite の代役は上限を持たない（false）、実 SQL Server は `MIN_ACTIVE_ROWVERSION()` を実行ごとに 1 回取る（true）。実行の途中にサーバーへ書かれた行は、固定するサーバー役ではその実行で降りず、次の実行で降りる（docs の洗い替えの節と上限の説明）。
   - 決まった形の行は、期待を転送の名前でなくこの性質で選ぶ手 `WhenServerFixesCeilingOp(IfFixed, IfOpen)` で書く。固定する側（IfFixed）では「その実行の直後は降りていない → 次の同期で降りる」を表明する（取りこぼさないことの裏付け）。
-  - 使う行は `dl-server-update-after-upload-is-still-downloaded`（取得の直前に書かれた版）と、割り込みの網の洗い替え × 持ち主 × 更新 × 取得の前の点の 4 行（下の「割り込みの点」）と、実行の途中にサーバーの他者が書く洗い替え・同期の行 3 本（`fk-parent-created-between-table-fetches-arrives-in-same-sync`・`blob-refresh-discard-leaves-no-blob-on-row-changed-after-ceiling`・`blob-refresh-discard-empties-blob-of-row-written-after-retry`）。今のエンジンの同期は、持ち主の読み直し・親の解決役がキーで読み直して上限の後の版を拾うので、ほかの行はどのサーバー役でも同じ期待になる。
-  - 実行の途中にサーバーの他者が書く行（`ArmInterruptOp` の書き手がサーバーの他者）を足すときは、書かれた版がその実行に入ることを期待に置くなら、この手で枝を分ける（洗い替えは解決役で拾わないので、固定するサーバー役では入らない）。分けない行は、実 SQL Server の転送でだけ赤になる。
+  - 使う行は `dl-server-update-after-upload-is-still-downloaded`（取得の直前に書かれた版）と、割り込みの網の洗い替え × 持ち主 × 更新 × 取得の前の点の 4 行（下の「割り込みの点」）と、実行の途中にサーバーの他者が書く洗い替え・同期の行 3 本（`fk-parent-created-between-table-fetches-arrives-in-same-sync`・`blob-refresh-discard-leaves-no-blob-on-row-changed-after-ceiling`・`blob-refresh-discard-empties-blob-of-row-written-after-retry`）。ほかの行は、どのサーバー役でも同じ期待で書いてある（実 SQL Server の Theory が直結と同じ違反になることで確かめる）。
+  - 実行の途中にサーバーの他者が書く行（`ArmInterruptOp` の書き手がサーバーの他者）を足すときは、書かれた版がその実行に入ることを期待に置くなら、この手で枝を分ける。分けない行は、実 SQL Server の転送でだけ赤になる。
 - DuplicateOnServer の決着の中身は決まった形の行が持つ：Collect＝`conflict-duplicate-key-on-server-is-reported`・LocalWins＝`lw-overwrites-duplicate-key-on-server`・ServerWins＝`sw-duplicate-key-on-server-reloads-server-row`（同期＝同じ実行のダウンロードが揃える）と `sw-duplicate-key-on-server-upload-only-reloads-server-row`（単独の UploadAsync＝ServerWins が自分で読み直す）・後勝ち＝`lww-duplicate-key-on-server-overwrites`。モデルは書き手が 2 人のキーの決着を表明しない（報告せずに上書きする壊し方は、乱数の種では結果の表の網羅だけが捕まえる）。
-- 表どうしの循環の列（`pinned_item_id`）は乱数の列が書かない（並行の書き手が行の循環を作るのを生成器は防げず、サーバーで消えた循環の行は端末に残る＝docs の既知の割り切り）。洗い替え以外の経路は決まった形の行が持つ：`cycle-pin-to-new-item-uploads-in-rounds`（新しい品目へのピン留めが最初の巡で断られ次の巡で通る）・`cycle-pinned-item-is-read-back-before-folder`（ダウンロードで解決役がピン留めの先を読み直す）・`cycle-serverwins-restores-folder-pinned-to-new-item`（ServerWins の読み直しで同じ。戻せなかった行の決定を持ち越すエンジンでは、その実行の直後は端末の内容のまま未送信で、次の ServerWins の同期で品目と一緒に戻る＝`WhenEngineDeclaresOp`）。今のエンジンの解決役がフォルダー→品目の辺を辿らない壊し方で 3 行とも赤になる（mutation 実証済み）。
+- 表どうしの循環の列（`pinned_item_id`）は乱数の列が書かない（並行の書き手が行の循環を作るのを生成器は防げず、サーバーで消えた循環の行は端末に残る＝docs の既知の割り切り）。洗い替え以外の経路は決まった形の行が持つ：`cycle-pin-to-new-item-uploads-in-rounds`（新しい品目へのピン留めが最初の巡で断られ次の巡で通る）・`cycle-pinned-item-is-read-back-before-folder`（ダウンロードがピン留めの先の品目のまだ無いフォルダーを打ち切らずに入れる）・`cycle-serverwins-restores-folder-pinned-to-new-item`（単独の UploadAsync の ServerWins。端末に無い品目をピン留めするサーバーの行はその実行では戻さず、フォルダーは端末の内容のまま未送信で残り、次の ServerWins の同期で品目と一緒に戻る。枝はエンジンの宣言 `CarriesServerWinsDecision` で選ぶ＝`WhenEngineDeclaresOp`）。
 - 次元表 `SyncModelDimensions`：
   - OpFamily に 4 つの形、因子 UniqueTable・PropagateDeletes・Excluded（2 表・3 表の水準 two・three を含む）・Batch・Blobs（後ろ 4 つは SyncOptions の Source）・FaultKind・KeyOrigin（own・stolen・not-insert）・Spelling（UniqueSpelling の値と none）・PayloadSize（small・large・none）。
   - 世界の形の因子 Devices（2・3）・Preload（操作の書き手の最初の形＝`ModelPreload` の値。サーバーの他者は None）。2 台の世界の最初の形が None 以外の組・端末 3 が 2 台の世界にいる組・サーバーの他者が None 以外の組は、定義から起こり得ない組として外す。
   - 3 因子の組 (Policy, OpFamily, PropagateDeletes)・(Actor, OpFamily, UniqueTable)・(Preload, Mode, Policy)。
   - Blobs=False は受け入れの組（乱数は常に blob を運ぶ。docs の「運ぶかは端末ごとに一貫させる」）。
   - サーバーの他者（Actor=Server・Via=None）× 衝突し得る別表記は受け入れの組。
-- 実行の結果の表 `SyncModelOutcomeDimensions`（登録簿 SyncModel/Outcomes）：SyncConflictReason と SyncLocalRowChangeReason の全値×Mode×Policy。実行の後の結果だけを数え、乱数を引かない。
-- 網羅の行 `SyncModelCoverageRows`（Id は `coverage-`・14 行）：
+- 実行の結果の表 `SyncModelOutcomeDimensions`（登録簿 SyncModel/Outcomes）：SyncConflictReason と SyncLocalRowChangeReason（値は `DiscardedByServerWins` だけ）の全値×Mode×Policy。実行の後の結果だけを数え、乱数を引かない。網羅しない組の一覧 `SyncModelOutcomeDimensions.EngineGaps` は空。
+- 網羅の行 `SyncModelCoverageRows`（Id は `coverage-`・8 行）：
   - 乱数の種で作れない組を持つ。サーバーの他者の Extras の操作 4 つ（作り直し・失敗する書き込み・キーだけのスタブ・持っていた実体での削除）・グラフ保存の失敗する書き込み。
   - DuplicateOnServer は乱数の種が同じキーの挿入で作る（行を持たない）。
-  - 既定の 60 種でたまたま欠ける組も持つ。表を除外したダウンロード・後勝ちの RemovedBeforeDownload・Collect と LocalWins の ReloadedForUniqueValue・Collect と LocalWins と後勝ちの RemovedForUniqueValue（未送信の無い古い写しの形）。
+  - 既定の 60 種でたまたま欠ける組も持つ：フォルダー・イベントをそれぞれ除外したダウンロード（`coverage-download-excluding-folders-and-events`）。
   - 広い世界の既定の種でたまたま欠ける組も持つ：端末 3 のフォルダーの delete-take-reparent（`coverage-device3-delete-take-reparent-folders`・3 台の世界）と、追跡しない行を入れた端末のラベルを除外した同期（`coverage-untracked-device-sync-excluding-labels`・行の入力の `Preloads` で最初の形を宣言する）。
-  - 直結の乱数のテスト `RandomSeeds_ConvergeWithoutLoss` が種の前に並列に流す（単独の種では流さない）。操作を 1 歩ずつ次元表で、同期の結果を結果の表で数える。
+  - 8 行の内訳：サーバーの他者の Extras の 4 行（`coverage-server-reinsert`・`coverage-server-failing-write`・`coverage-server-delete-stub`・`coverage-server-delete-held`）・`coverage-graph-failing-write`・上の 3 行。
+  - 直結の乱数のテスト `SyncSupportAdoSqliteEngineRuntimeTests.RandomSeeds_ConvergeWithoutLoss` が種の前に並列に流す（単独の種では流さない）。操作を 1 歩ずつ次元表で、同期の結果を結果の表で数える。
   - 行は生成器の代わりにモード・ポリシー・種の組を宣言する（例：`coverage-server-delete-stub`）（`SyncModelDimensions.Observe` の多重定義）。行の同期が宣言と違えば構築で断る。
   - 決定的なシナリオ（`SyncModelScenarios`）は別の Theory で流れて網羅の計数に入らないが、網羅の行は数える。行は期待の操作を持たず、次元表に無い操作の型は宣言の誤り。
   - 行の違反は既知の失敗の一覧で外さず、すべて新しい失敗として赤にする。
-  - 残る網羅しない組は Blobs=False の受け入れだけ。
+  - 残る網羅しない組は受け入れの組だけ（`SyncModelDimensions.EngineGaps`＝Blobs=False と、サーバーの他者 × ぶつかり得る別表記。結果の表の `SyncModelOutcomeDimensions.EngineGaps` は空）。
   - mutation 実証済み。
 - 静止化が終わらないときは、最後の周の打ち切りと競合を分類して署名を細かくする（`SyncModelRun.ClassifyStuckTruncationsAsync`）。
   - 一意な値の回転：`1/no-quiesce:unique-swap:{表}`（docs の既知の割り切り＝受け入れ）。打ち切った行のサーバーの値をローカルで持つ行、その行のサーバーの値をローカルで持つ行…と辿って元の行へ戻る形で、2 行の厳密な入れ替えはその最短の形（判定は `SyncModelRun.UniqueRotation`。回転の途中に未送信の行・古い写しの行が混ざっても同じ）。2 行の入れ替えは打ち切りの分類の最初に、3 行以上の回転はほかの形（端末側の循環を含む）が説明しなかった打ち切りにだけ最後に当てる。2 行に限ると 3 行以上の回転が粗い署名に落ち、最初に当てると端末だけで回した循環を `pending-unique-cycle` から奪う。
   - 値を取る行自身の古い参照が持ち主を残す：`1/no-quiesce:holder-referenced-by-taker:{表}`。
-  - 持ち主がサーバーに無く、別の表のローカルの行が持ち主を（推移的に）参照し、その行のサーバーの行が値を取る行の下にある：`1/no-quiesce:holder-referenced-by-other-table:{表}`。引き留める行がどれも送るものを持たなければエンジンが消して抜ける（`src/QuickER.Runtime.Sync/CLAUDE.md`「一意な値の持ち主を新しくする」）ので、この署名が残るのは、エンジンが消さない形だけ。そのうち、参照する行の中にローカルの行がサーバーの行と同じ最新の写しがある形は `1/no-quiesce:holder-referenced-by-other-table-current-child:{表}` に分ける（`SyncModelRun.HasCurrentReferrer`）。最新の写しはエンジンが降ろし直す約束を残して消す（`src/QuickER.Runtime.Sync/CLAUDE.md`「降ろし直す約束（quicker_sync_row_pending）」）ので、この署名が出るのは、ほかの理由（送るものがある・範囲の外の行が参照する）で消せない形に最新の写しが混ざるときだけ。
+  - 持ち主がサーバーに無く、別の表のローカルの行が持ち主を（推移的に）参照し、その行のサーバーの行が値を取る行の下にある：`1/no-quiesce:holder-referenced-by-other-table:{表}`。そのうち、参照する行の中にローカルの行がサーバーの行と同じ最新の写しがある形は `1/no-quiesce:holder-referenced-by-other-table-current-child:{表}` に分ける（`SyncModelRun.HasCurrentReferrer`）。引き留める行の形ごとの期待は決定的なシナリオ（`SyncModelScenarios.HolderKeptByOtherRows.cs`）が持つ。
   - 端末側の一意な値の循環：`1/no-quiesce:pending-unique-cycle:{表}`。
   - 回転の場合は回転の行すべての、値を取る行自身の古い参照の場合は打ち切った行と持ち主の行の、別の表の参照の場合は打ち切った行・持ち主・参照する行と、サーバーで値を取る行の下にあるために止まった打ち切りの行の、循環は集まりの行の競合を説明済みにする。
   - どれにも当たらない打ち切りか説明の付かない競合が残れば、粗い署名 `1/no-quiesce:conflicts-or-truncations` もあわせて出す。分類できた分が隠さない。
-  - 固定は `swap-folder-names-without-refresh-does-not-settle`・`swap-without-refresh-does-not-settle`・`rotate-three-codes-without-refresh-does-not-settle`（3 行の回転）・`n15-pending-unique-cycle`（静止化の失敗の署名は表の名前を残すので表ごとに 1 行）。mutation 実証済み。
-    - どの行も今のエンジンでだけ静止化しない形で、今のエンジンの控えで `known` になる（今のエンジンの一覧 `SyncModelKnownFailures.Set`）。新しいエンジンは入れ替えと回転を同じ適用で降ろすので、入れ替え・回転の 3 行は今のエンジンだけの印を持ち、`n15-pending-unique-cycle` は直結の Theory で緑になる。
+  - 署名が名指す形の行：`swap-folder-names-settles-in-one-sync`・`swap-codes-settles-in-one-sync`・`rotate-three-codes-settles-in-one-sync`（3 行の回転）・`n15-pending-unique-cycle`・`n15-pending-unique-cycle-three-items`（静止化の失敗の署名は表の名前を残すので表ごとに 1 行）。
+    - 同期のエンジンは入れ替えと回転を同じ適用で降ろすので、入れ替え・回転の 3 行は「1 回の同期が打ち切りも競合も残さずに降ろし、端末の行がサーバーと同じ値になる」を表明して緑になる。端末で回した循環の 2 行も、直結の Theory で緑（既知の失敗の一覧 `SyncModelKnownFailures.EngineSet` は空）。署名と分類は、乱数の種でこの形が出たときに細かく名指しするために残す。
   - 別の表の参照の判定が狭い（持ち主がサーバーにある・参照する行のサーバーの行が値を取る行の下に無い・参照する行がサーバーに無い・同じ表の参照、のどれも数えない）ことは、DB を使わない対照 `SyncModelRuntimeTests.OtherTableHolderShape_CountsOnlyTheNarrowShape` が表明する（条件を 1 つずつ外すと赤になる）。一意な値の比べ方をサーバー役のものから序数へ戻すと、持ち主の名前が大文字と末尾の空白だけ違う形（実 SQL Server の比べ方では当たり、序数では当たらない）が赤になる（`StuckShape` も同じ対照で見る）。最新の写しの形を分ける判定（`HasCurrentReferrer`）も同じ対照が見る。
-- 既知の失敗の一覧は乱数の組ごとに持つ：新しいエンジンの直結の組は `SyncModelKnownFailures.EngineSet`（空）、今のエンジンの直結の組は `SyncModelKnownFailures.Set`。
-- 既知の失敗の一覧の乱数の項目のうち RegularSeeds / NightlySeeds の項目は、全部の種をまとめて照合して「起きない」も赤にする。種ごとの照合は「載っていない」しか見ないため。今の `SyncModelKnownFailures.Set` の乱数の項目はどれも再現を保証しない（NotGuaranteed）。今のエンジンの直結の乱数は夜間も普段の数で流すので、夜間の種でだけ起きる形（端末で回した一意な値の循環）に届かない。
+- 既知の失敗の一覧は、直結の組（決定的なシナリオの直結の Theory と直結の乱数の種）が `SyncModelKnownFailures.EngineSet`（空）、ほかの転送の乱数の種が `SyncModelEngineTransports.Known`（空）。
+- 既知の失敗の一覧の乱数の項目のうち RegularSeeds / NightlySeeds の項目は、全部の種をまとめて照合して「起きない」も赤にする。種ごとの照合は「載っていない」しか見ないため。
 - 乱数の種の照合は、静止化で起きた例外を途中の同期の例外と同じに扱い、表明 2・3 の署名から表の名前を外して行う（`SyncModelRuntimeTests.Family`）。
-- 種の数は `QUICKER_SYNC_MODEL_SEEDS`（既定 60）と、広い世界の種の `QUICKER_SYNC_MODEL_WIDE_SEEDS`（既定 48）。夜間に数を増やすのは新しいエンジンの直結の組だけ（400＋広い世界 80。下の「新しいエンジンの端末で流す同期のモデル」）で、今のエンジンの直結の乱数（`SyncModelRuntimeTests.RandomSeeds_ConvergeWithoutLoss`）は夜間の目印を持たず、夜間も普段の数で流す。広い世界の種は同じテストの中で既存の種の後に流し、種ごとの照合と再現の手順はその範囲の決め方で、既知の失敗の「起きない」の照合は既存の範囲の種だけで、網羅しない組の照合は 2 つの範囲がどちらも既定の種の数のときだけ行う。種の指紋は範囲ごとに別の記録（`SyncModel`・`SyncModelWide`）。時刻と乱数の出どころは種だけ。
+- 種の数は `QUICKER_SYNC_MODEL_SEEDS`（既定 60）と、広い世界の種の `QUICKER_SYNC_MODEL_WIDE_SEEDS`（既定 48）。夜間に数を増やすのは直結のエンジンの端末の組だけ（400＋広い世界 80。下の「エンジンの端末」）。広い世界の種は同じテストの中で既存の種の後に流し、種ごとの照合と再現の手順はその範囲の決め方で、既知の失敗の「起きない」の照合は既存の範囲の種だけで、網羅しない組の照合は 2 つの範囲がどちらも既定の種の数のときだけ行う。種の指紋は範囲ごとに別の記録（`SyncModel`・`SyncModelWide`）。時刻と乱数の出どころは種だけ。
 - 1 種だけ流すときは `QUICKER_SYNC_MODEL_SEED`（直結）か `QUICKER_SYNC_MODEL_TRANSPORT_SEED`（HTTP・実 SQL Server）を使う。
 - 広い世界の種（120000 以上）もこの変数で流せ、種の番号から世界の形が決まるので、番号の範囲が合う側の計画にだけ載せて 1 回だけ流す（`SyncModelSignatures.ResolvePlans`）。
 - 単独の種のとき、実 SQL Server は種を 4 で割った余りで失敗の注入なし（0・1）かあり（2・3）かが決まり、受け持つ側のテストだけが流す。
@@ -383,33 +353,25 @@ NULL 許容の計算列・サーバーで NULL になった blob・一覧に載�
 判定役（`SyncModelRun`）は、端末のエンジンを面越しに呼び、エンジンの自己申告に依らない台帳で実行 1 回ごとの結果を照らす。規則の正本は `SyncModelRun.Ledger.cs` の先頭の remarks。
 
 - 継ぎ目（`SyncModelDeviceFacets.cs`）：
-  - 端末のエンジンの面 `IModelDeviceSync`（`RunAsync`・`RefreshAsync`）と、状態の面 `IModelDeviceSyncState`（未送信の行ごとの `ModelPendingRow`＝表・キー・追加か更新を含むか・削除を含むか・サーバーがその行を知っているか・変わる印）。製品のエンジンの実装は `ProductModelDeviceSync`・`JournalModelDeviceSyncState`。
-  - 端末の作り方は `SyncModelWorldOptions.CreateDevice` で差し替える。判定役は、エンジンの記録の表（ジャーナル・受理記録）を直接読まずに、状態の面を読む。
-  - エンジンの宣言 `IModelDeviceSync.CarriesServerWinsDecision`：ServerWins の実行が戻せなかった行の決定を、後の実行へ持ち越すか。製品のエンジンは偽。
-  - エンジンの宣言 `IModelDeviceSync.AppliesThroughSaveHooks`：サーバーの行の適用がローカルの Save フックを通るか。製品のエンジンは真、新しいエンジン（`SyncModelEngineDevice`）は偽、判定役の包みは包んだエンジンの値を引き継ぐ。偽の端末では、適用の行をフックに飛ばさせる失敗の注入（`ApplySkip`）を仕掛ける手を、仕掛ける前に「流せない」で断る。
-  - エンジンの宣言 `IModelDeviceSync.DerivesResumePointFromLocalVersions`：ダウンロードの再開点を、ローカルの行の版の列（ミラー版）の最大値から導くか。製品のエンジンは真（ServerWins で戻した行の版の列を据え置く）、新しいエンジンは偽（再開点を表ごとに別に持ち、戻した行の版の列はサーバーの版になる）、判定役の包みは包んだエンジンの値を引き継ぐ。
-  - エンジンの宣言 `IModelDeviceSync.RefetchesHeldRowsInSameRun`：同期と洗い替えの取得で保留して取り残した行を、同じ実行の中で上限を取り直してもう 1 回取得するか。製品のエンジンは偽（取り残した行は後の実行が降ろす）、新しいエンジンは真（その間にサーバーで変わった行も同じ実行に入る）、判定役の包みは包んだエンジンの値を引き継ぐ。
-  - エンジンの宣言 `IModelDeviceSync.RefusesDownloadOverRowLimit`：1 回の取得が降ろす行が `SyncOptions.DownloadRowLimit` を超え、範囲の表に未送信の変更があるとき、何も適用せずに `SyncDownloadTooLargeException` で断るか。製品のエンジンは偽（上限を読まずに降ろす）、新しいエンジンは真、判定役の包みは包んだエンジンの値を引き継ぐ。
-  - 宣言で振る舞いが変わる決まった形の行は、期待の手 `WhenEngineDeclaresOp`（端末・宣言 `EngineDeclaration`・真の手・偽の手）で枝を選ぶ。エンジンや転送の名前で選ばず、どちらの枝も結果を行ごとの値で表明する（`CarriesServerWinsDecision` の枝は例外で終わった ServerWins の 3 行・`fk-lww-serverwins-label-delete-refused-while-item-reparent-is-held`・`cycle-serverwins-restores-folder-pinned-to-new-item`、`DerivesResumePointFromLocalVersions` の枝は `ack-serverwins-restored-row-then-edit-is-not-a-false-duplicate`・`sw-restore-does-not-advance-anchor`・`dl-table-emptied-outside-sync`・`refresh-skips-referring-tables-missing-locally`、`RefetchesHeldRowsInSameRun` の枝は割り込みの網の洗い替え × `unique-holder-after-taker` × 更新 × 取得の前の点の 4 行の、上限を固定するサーバー役の枝、`RefusesDownloadOverRowLimit` の枝は `dl-row-limit-exceeded-with-unsent-change-refuses-and-applies-nothing`）。
+  - 端末のエンジンの面 `IModelDeviceSync`（`RunAsync`・`RefreshAsync`）と、状態の面 `IModelDeviceSyncState`（未送信の行ごとの `ModelPendingRow`＝表・キー・追加か更新を含むか・削除を含むか・サーバーがその行を知っているか・変わる印）。エンジンの端末の実装は `EngineModelDeviceSync`（`SyncEngine` を呼ぶ）・`EngineModelDeviceSyncState`（行の状態の表の未送信の行から作る）。
+  - 端末の作り方は `SyncModelWorldOptions.CreateDevice`（既定は `SyncModelEngineDevice.CreateAsync`）で差し替える。判定役は、端末の状態の表を直接読まずに、状態の面を読む。
+  - エンジンの宣言 `IModelDeviceSync.CarriesServerWinsDecision`：ServerWins の実行が戻せなかった行の決定を、後の実行へ持ち越すか。エンジンの端末は真。判定役の包み（`SyncModelJudgeBreaks.cs`）は名乗る値を包みの宣言 `SyncModelJudgeDevice.CarriesServerWinsDecision` で決める（持ち越しを照らす対照の行は真、ほかの多くの対照の行は偽）。宣言が偽の端末は対照の行の包みだけなので、下の照合のうち「宣言が偽の端末」の枝は対照の行が守る。
+  - 宣言で振る舞いが変わる決まった形の行は、期待の手 `WhenEngineDeclaresOp`（端末・宣言 `EngineDeclaration`・真の手・偽の手）で枝を選ぶ。宣言は `CarriesServerWinsDecision` の 1 つだけ。エンジンや転送の名前で選ばず、どちらの枝も結果を行ごとの値で表明する（使う行は例外で終わった ServerWins の 3 行・`fk-lww-serverwins-label-delete-refused-while-item-reparent-is-held`・`cycle-serverwins-restores-folder-pinned-to-new-item`）。エンジンの端末が通るのは真の枝。
   - 降ろす行の上限は、同期の手 `ModelSyncOp.DownloadRowLimit` と洗い替えの手 `RefreshWithOptionsOp.DownloadRowLimit`（どちらも internal・null は製品の既定）で渡す。決まった形の行だけが設定し、生成器は設定しない（internal のプロパティは種の指紋の要約に載らない）。
-  - 端末の部品 `SyncModelDeviceParts` の口と、端末（`SyncModelDevice`）の読み口。今の端末は製品のジャーナルを持つ端末で、そこでの振る舞いを併せて書く。
-    - `WriteUntrackedAsync`（記録しない書き込みを流す関数）：記録しない書き込み（最初の形 Untracked の行・一括の Raw の挿入・`LocalSqlOp` の `Untracked`・判定役の包みの生の SQL）を、流す間は端末の未送信の記録が残らないように流す。前からある未送信の記録は変えない。同期のモデルは記録しない書き込みをすべて `SyncModelDevice.WriteUntrackedAsync(write, ct, withoutForeignKeys)` に通す。
-      - 書き込みの関数は接続を受け取る（`Func<DbConnection?, Task>`）。口を省略した端末（今の端末）は null を渡し、関数は今までどおり Raw 系のリポジトリ・自分で開く接続で書く（記録デコレータの内側で書くので記録が作られない）。
-      - 口を持つ端末（新しい端末）は、口が接続を開いて製品の `SyncLocalTracking.WriteUntrackedAsync` を呼び、関数はその接続だけで書く（行は `SyncModelDevice.LocalRows`＝`ILocalRowStore.InsertAsync`、SQL はその接続のコマンド）。接続は、外部キーありが `ILocalRowStore.CreateDedicatedConnection`、外部キーなし（`withoutForeignKeys`）が外部キーの検査を切ったプールしない接続。
-      - 関数が接続を受け取ったのに Raw 系のリポジトリ・`device.Sql`（別の接続）で書くと、API が持つ書き込みのロックを待って失敗する。呼ぶ所は、接続が null かどうかで書き方を分ける。
-    - `ClearPendingRecordsAsync`：1 行の未送信の記録を全部消す。判定役の対照の行の包みが、エンジンが記録を捨てた結果を作るのに使う（記録しない書き込みとは別の明示の手順）。口を省略すると、製品のジャーナルの表（`quicker_sync_journal`）からその行の記録を消す（今の端末はこちら）。
-    - `RequireJournal`・`RequireEngine`（手の名前）：製品のジャーナル・エンジンを返す。持たない端末（別のエンジンへ載せ替えた端末）では、手の名前つきの `NotSupportedException` を投げる。メッセージは定数 `SyncModelDevice.UnsupportedPrefix` で始まり、手の名前は `SyncModelDevice.UnsupportedHand(exception)` で取り出す。今の端末は両方を持つので投げない。製品のジャーナルの表を読み書きする手は、SQL を流す前にこの口を通る。`LocalSqlOp`・`ExpectLocalSqlOp` の SQL が製品のジャーナルの補助の表 4 つ（記録・コピー待ち・受理記録・降ろし直す約束）を名指しするときも、流す前にこの口を通る（手の名前は「手:表」）。
-    - `CurrentParts()`：今の端末の部品を返す。部品の一部だけ差し替えて `Install` で載せ直す包みが使う（ほかの部品・口は今のまま持ち越す）。
-  - 「流せない」：端末で流せない手は「流せない」（`SyncModelDevice.Unsupported`）の `NotSupportedException` で終わる。新しいエンジンは、持たない部分の例外の書式（`QUICKER-SYNC-PENDING`）を持たない（生成テンプレートと同期のランタイムに残っていないことは `SourceRuleTests` の規則 `sync-engine-pending-markers-in-templates`・`sync-engine-pending-markers-in-runtime` が固定する）。
-  - 素通しの印 `SyncModelWorldOptions.PassesNotRunnableThrough`（既定は偽）：真の世界では、判定役は「流せない」の例外を違反として記録せずにシナリオの外へ出す。真にするのは控えの部品 `SyncModelScenarioLedger.RunAsync` だけ（今のエンジンの控えの Fact `SyncSupportAdoSqliteCurrentEngineRuntimeTests.ScenarioLedgerDrift_MatchesRecord` と小さい塊の端末の Fact `SyncSupportAdoSqliteEngineRuntimeTests.SmallChunkScenarios_MatchDirect` が使う）で、偽の世界（主の Theory と乱数の種）ではほかの例外と同じ扱い（違反か、テストの例外）。
-  - 生の SQL の手 `LocalSqlOp` の指定 `Untracked`（既定は偽）：真なら SQL を `SyncModelDevice.WriteUntrackedAsync` を通して流す（外部キーの検査を切った接続）。端末が前から持っていた状態・壊れた状態を作る手（利用者が送る編集でない業務の表の書き込み）に付け、偽の手はトリガーで記録する端末では利用者の書き込みとして記録される。業務の表を書かない手（DDL・補助の表だけ・トリガーを足す・落とす）には付けない。
+  - 端末の部品 `SyncModelDeviceParts` の口と、端末（`SyncModelDevice`）の読み口：
+    - `WriteUntrackedAsync`（記録しない書き込みを流す口）：記録しない書き込み（最初の形 Untracked の行・一括の Raw の挿入・`LocalSqlOp` の `Untracked`・判定役の包みの生の SQL）を、流す間は端末の未送信の記録が残らないように流す。前からある未送信の記録は変えない。同期のモデルは記録しない書き込みをすべて `SyncModelDevice.WriteUntrackedAsync(write, ct, withoutForeignKeys)` に通す。
+      - 口が接続を開いて製品の `SyncLocalTracking.WriteUntrackedAsync` を呼び、書き込みの関数（`Func<DbConnection, Task>`）はその接続だけで書く（行は `SyncModelDevice.LocalRows`＝`ILocalRowStore.InsertAsync`、SQL はその接続のコマンド）。接続は、外部キーありが `ILocalRowStore.CreateDedicatedConnection`、外部キーなし（`withoutForeignKeys`）が外部キーの検査を切ったプールしない接続。
+      - 関数が渡された接続でなく生成の Repository・`device.Sql`（別の接続）で書くと、API が持つ書き込みのロックを待って失敗する。
+    - `ClearPendingRecordsAsync`：1 行の未送信を外す（エンジンの端末は行の状態の表のその行の未送信を外す）。判定役の対照の行の包みが、エンジンが記録を捨てた結果を作るのに使う（記録しない書き込みとは別の明示の手順）。
+    - `CurrentParts()`：その端末がいま載せている部品を返す。部品の一部だけ差し替えて `Install` で載せ直す包み（判定役の包み）が使う（ほかの部品・口は今のまま持ち越す）。
+  - 生の SQL の手 `LocalSqlOp` の指定 `Untracked`（既定は偽）：真なら SQL を `SyncModelDevice.WriteUntrackedAsync` を通して流す（外部キーの検査を切った接続）。端末が前から持っていた状態・壊れた状態を作る手（利用者が送る編集でない業務の表の書き込み）に付け、偽の手はトリガーが利用者の書き込みとして記録する。業務の表を書かない手（DDL・補助の表だけ・トリガーを足す・落とす）には付けない。
 - 台帳「端末の持ち分」（`SyncModelRun.Ledger.cs`）：（端末・表・キー）→ その端末が自分で書いてまだ届いていない最後の内容。品目の blob は行と別の品目。
-  - 作るのは、書き込みの手の前後の端末の DB の差分・実行の前後の端末とサーバーの DB・実行の公開の結果（競合・`LocalRowChanges`）・失敗の注入の控えだけ。状態の面・ジャーナル・受理記録は読まない（エンジンが印を間違えたときに、判定が一緒に間違えないため）。状態の面を読むのは、比べる相手にする照合（`5/facet:server-knows`）だけ。
+  - 作るのは、書き込みの手の前後の端末の DB の差分・実行の前後の端末とサーバーの DB・実行の公開の結果（競合・`LocalRowChanges`）・失敗の注入の控えだけ。状態の面・端末の状態の表は読まない（エンジンが印を間違えたときに、判定が一緒に間違えないため）。状態の面を読むのは、比べる相手にする照合（`5/facet:server-knows`）だけ。
 - 実行ごとの照合（署名は `5/` の族。根拠の判定と同じく実行の直後に確定し、静止化が失敗しても報告する）：
   - `5/stale-overwrite`：実行が、端末の持ち分の無い行の古い内容で、サーバーの内容を変えた。
   - `5/unreported-overwrite`：版で守る実行が、端末が最後に見た後のほかの書き手の内容を、競合を報告せずに端末の内容で上書きした。
   - `5/local-discard`：端末の持ち分の内容が、報告なしに端末からもサーバーからも消えた（Collect の競合の報告だけでは許さない）。
-  - `5/carry:overwrote`・`5/carry:edit-lost`：戻せなかった行の決定の内容をサーバーへ書いた（宣言が真のエンジンだけ違反）・決定の後の編集が報告なしに消えた（宣言に依らず違反）。宣言が真のエンジンでは決定を行の単位で持つ：行の決定が決定の後のその行の編集で外れたら同じ行の blob の決定も外し、実行の間に行（blob を除く列）が変わった品目には blob の決定を作らない（編集した行の記録は blob の列ごと送る）。決定の後に編集の無い行の blob の決定は今までどおり照らす。逆向きに、決定の後に端末が記録つきの書き込みで blob を書いた品目は行の決定も外す（エンジンの決定の印は行の連番に付き、blob だけの書き込みも連番を進めるので、後の実行が行を blob と一緒に送る）。blob の内容では決めない（エンジンがサーバーの blob を端末へ写しても端末の書き込みではなく、行の決定は外れない）。宣言が偽のエンジンでは台帳の作り方を変えない（数えるだけの件数も同じ）。対照の行は `judge-carry-blob-overwrite-is-a-violation`（編集の無い行の blob の上書きは違反）・`judge-carry-item-row-overwrite-is-a-violation`（行も blob も編集の無い品目の行の上書きは違反）・`judge-carry-item-row-overwrite-after-engine-copied-blob-is-a-violation`（エンジンが blob を写しただけの品目の行の上書きは違反）・`judge-carry-blob-decision-voided-by-row-edit-is-not-overwrite`（行を編集した後に blob を送っても上書きにしない）・`judge-carry-row-decision-voided-by-blob-edit-is-not-overwrite`（blob を編集した後に行を送っても上書きにしない）。決まった形の行は `blob-only-edit-after-serverwins-discarded-unknown-insert-uploads-row-and-blob`。
+  - `5/carry:overwrote`・`5/carry:edit-lost`：戻せなかった行の決定の内容をサーバーへ書いた（宣言が真のエンジンだけ違反）・決定の後の編集が報告なしに消えた（宣言に依らず違反）。宣言が真のエンジンでは決定を行の単位で持つ：行の決定が決定の後のその行の編集で外れたら同じ行の blob の決定も外し、実行の間に行（blob を除く列）が変わった品目には blob の決定を作らない（編集した行の記録は blob の列ごと送る）。決定の後に編集の無い行の blob の決定は照らす。逆向きに、決定の後に端末が記録つきの書き込みで blob を書いた品目は行の決定も外す（エンジンの決定の印は行の連番に付き、blob だけの書き込みも連番を進めるので、後の実行が行を blob と一緒に送る）。blob の内容では決めない（エンジンがサーバーの blob を端末へ写しても端末の書き込みではなく、行の決定は外れない）。宣言が偽のエンジンでは台帳の作り方を変えない（数えるだけの件数も同じ）。対照の行は `judge-carry-blob-overwrite-is-a-violation`（編集の無い行の blob の上書きは違反）・`judge-carry-item-row-overwrite-is-a-violation`（行も blob も編集の無い品目の行の上書きは違反）・`judge-carry-item-row-overwrite-after-engine-copied-blob-is-a-violation`（エンジンが blob を写しただけの品目の行の上書きは違反）・`judge-carry-blob-decision-voided-by-row-edit-is-not-overwrite`（行を編集した後に blob を送っても上書きにしない）・`judge-carry-row-decision-voided-by-blob-edit-is-not-overwrite`（blob を編集した後に行を送っても上書きにしない）。決まった形の行は `blob-only-edit-after-serverwins-discarded-unknown-insert-uploads-row-and-blob`。
   - `5/out-of-scope-write`・`5/serverwins-wrote`：実行が範囲の外の表のサーバーの行を変えた・Versioned＋ServerWins の実行がサーバーを変えた。
   - `5/unowned-send`：追加・更新の競合か DiscardedByServerWins を報告したキーに、端末の書き込みが無かった。
   - `5/facet:server-knows`：状態の面の「サーバーが知っているか」が、モデルの観測と食い違う。
@@ -417,12 +379,11 @@ NULL 許容の計算列・サーバーで NULL になった blob・一覧に載�
 - 乱数の種が既定の種の数のとき、照合ごとに確かめた件数が 1 件以上あることを `CoverageGuard` で表明する（`SyncModelRuntimeTests` の `GuardedRunChecks`。空振りの守り）。
   - 守る種類は、流した端末のエンジンの宣言（`CarriesServerWinsDecision`）から決める。宣言の片方のエンジンでだけ数える種類（`SyncModelRun.RunCheckCountedOnlyWhenCarrying`＝種類 → 数えるエンジンの宣言の値）は、もう片方のエンジンでは定義から 0 件なので、`SyncModelRun.GuardedRunChecksFor` が並びから除く。組の名前では除かない。
   - 宣言の値は、種ごとに世界の全端末から集め、1 回の実行で 1 種類であることを表明してから使う。
-  - 宣言が偽のエンジンは 11 種類、宣言が真のエンジンは `carry-overwrote`・`local-discard-after-unreported-serverwins` を除いた 9 種類（`carry-held`・`carry-fulfilled` はどちらでも守る）。
-- 違反にせず数えるだけにする形（宣言が偽のエンジンの今の振る舞い。宣言が真のエンジンでは違反）：
-  - 単独のアップロード × ServerWins が戻せなかった行を知らせず、後の実行が送るか黙って片付ける。
-  - 行を書いた後・帳簿（記録の削除・受理記録）を書く前に、blob のコピーの失敗で例外になる窓の 4 つの現れ方。決まった形の行が今の振る舞いを固定する：`blob-thrown-serverwins-then-collect-overwrites-newer-server-blob`（残った blob の記録が後で古い blob を送る）・`thrown-serverwins-sync-leaves-restored-row-out-of-local-row-changes`（戻した行が例外の一覧に載らない）・`thrown-serverwins-upload-then-lww-sends-restored-row-as-edit`（戻した行の記録が残り、後の実行が古い写しを送る）・`thrown-resolver-row-delete-is-dropped-and-row-comes-back`（親の解決役が持ち込んだ行の削除が黙って捨てられ、行が戻る。解決役は今のエンジンにだけあるので、今のエンジンだけの印を持ち、今のエンジンの控えで流れる）。
-  - 数えるだけにするのは、その実行でその行の blob の読み出しの失敗が当たったとき（失敗の注入の控え）か、同期で端末が最後に見た後にほかの書き手がその行を変えていたときだけ。窓の外の同じ形は違反のまま。
-  - 持ち越しを宣言するエンジンを足すときは、この 4 本が違反にならないことを受け入れにし、行の期待を書き直す。
+  - 宣言が偽の端末なら 11 種類、宣言が真の端末（エンジンの端末）は `carry-overwrote`・`local-discard-after-unreported-serverwins` を除いた 9 種類（`carry-held`・`carry-fulfilled` はどちらでも守る）。
+- 違反にせず数えるだけにする種類（`SyncModelRun.RunCheckCountedOnlyWhenCarrying` の 7 種類。どれも消失なしの期待に触れない）：
+  - 宣言が真の端末で数えるだけなのは `local-discard-after-thrown-serverwins`（例外で終わった ServerWins の実行が戻せなかった行の内容が、後の実行で報告なしに消えた。例外で送る前に止まった行が後で普通に届いた形も含む粗い目安）だけ。
+  - ほかの 6 種類（`carry-overwrote`・`local-discard-after-unreported-serverwins`・`unreported-overwrite-after-thrown-serverwins`・`local-discard-unreported-in-thrown-serverwins`・`resend-after-thrown-serverwins`・`local-discard-of-delete-on-row-brought-in-by-thrown-run`）は、宣言が偽の端末でだけ数えるだけにし、宣言が真の端末では元の照合の違反になる。偽の端末で数えるだけにするのは、戻せなかった行の決定の後の形と、例外で終わった ServerWins の実行が行を書いた後で例外になる窓（その実行でその行の blob の読み出しの失敗が当たった・同期で端末が最後に見た後にほかの書き手がその行を変えていた）に当たる形だけで、窓の外の同じ形は違反のまま。
+  - 例外で終わった ServerWins の実行の後の振る舞いは、決まった形の行が `WhenEngineDeclaresOp` の真の枝で表明する：`blob-thrown-serverwins-then-collect-overwrites-newer-server-blob`（例外の一覧に品目が DiscardedByServerWins で載り、次の同期は写し待ちの blob を降ろしてサーバーの新しい blob を上書きしない）・`thrown-serverwins-sync-leaves-restored-row-out-of-local-row-changes`（戻した 2 行が例外の一覧に両方載る）・`thrown-serverwins-upload-then-lww-sends-restored-row-as-edit`（続く後勝ちの同期は何も送らず、サーバーの他者の更新を降ろす）。偽の枝は宣言が偽の端末の期待で、エンジンの端末は通らない。
 - 台帳の規則の守りの行：`sw-discards-insert-then-delete-on-key-taken-on-server`（ほかの書き手と同じキーで入れてすぐ消した行の記録を ServerWins が捨てたと報告する）・`sw-discards-delete-left-by-failed-run-after-recreate-elsewhere`（例外で送る前に止まった削除の記録が、後で競合と破棄として報告される）。どちらも docs どおりの報告で、`5/unowned-send` にならない。
 - 外部キーの表明（`4/foreign-key:{子の表}`）：書き込みの手・一括挿入・実行（例外で終わった実行・洗い替えを含む）の前後で `PRAGMA foreign_key_check` の違反の集合を比べ、新しく出来た違反だけを数える。違反の同一性は（子の表・子の行の主キーの値・親の表・外部キーの番号）で、rowid では比べない。利用者の手（`LocalSqlOp`＝外部キーを切った専用の接続）が作った違反は数えない。前からある違反を作る手（親の無いラベル）は `LocalSqlOp` の `Untracked` を付けて流し、端末の記録に残さない。
 - 対照の行 `judge-*`（`SyncModelScenarios.Judge.cs`・30 本・直結だけ）：端末のエンジンを外から壊す包み（`SyncModelJudgeBreaks.cs`）で違反の形を作り、判定役が宣言した署名の集合どおりに名指しすることを確かめる。
@@ -433,28 +394,23 @@ NULL 許容の計算列・サーバーで NULL になった blob・一覧に載�
   - 根拠の確認と持ち越し：`judge-carry-fulfilled-by-lww-serverwins-is-not-spurious`（持ち越しを宣言したエンジンが決定を果たした後勝ち＋ServerWins の決着は根拠の確認に掛けない）・`judge-undeclared-carry-lww-serverwins-settlement-without-basis-is-spurious`（対照：宣言の無いエンジンの決着は、台帳に決定があっても根拠なしなら `3/spurious`）・`judge-lww-serverwins-settlement-without-basis-is-spurious`（対照：決定の無い決着は根拠なしなら `3/spurious`）・`judge-unfulfilled-reparent-delete-refusal-without-basis-is-spurious`（対照：果たした決定に入らない付け替えは届いたとみなし、根拠の無い削除の拒否は `pending-reparent`。包みの `ReportsDeleteRefused` で削除の競合を作る）。
   - 外部キー：`judge-foreign-key-existing-violation-is-not-counted`・`judge-foreign-key-new-violation-is-counted`・`judge-foreign-key-new-violation-in-thrown-run-is-counted`・`judge-foreign-key-swapped-violation-is-counted`・`judge-foreign-key-reinserted-violation-is-not-counted`。
 - 守りの薄い点：
-  - 数えるだけの窓のうち blob の読み出しの失敗は行の単位で判定する。エンジンはバッチの行を全部書いてから blob をコピーするので、同じバッチのほかの品目も同じ状態になりうる。その形は違反になる（偽の赤の向き）。出たら、表の単位（その実行でその端末の失敗が当たり、行が blob を持つ表の行）へ広げる。
+  - 数えるだけの窓（宣言が偽の端末）のうち blob の読み出しの失敗は行の単位で判定する。同じ実行のほかの品目が同じ状態になる形は違反になる（偽の赤の向き）。出たら、表の単位（その実行でその端末の失敗が当たり、行が blob を持つ表の行）へ広げる。
   - ダウンロードの側の窓（ほかの書き手の変更）は、普段の種にも決まった形の行にも例が無い。
-  - 持ち越しを宣言するエンジンでだけ効く条件（数えるだけにする条件の「宣言が偽」）は、そのエンジンの受け入れが守る。
-- mutation 実証済み（照合と下ろす規則を 1 つずつ壊す・控えの立て方と外し方・数えるだけの窓の条件・外部キーの表明の比べ方。逆向きの規則の端末の書き込みの条件を外して編集の無い品目の行の決定も外すと `judge-carry-item-row-overwrite-is-a-violation`、逆向きの規則を blob の内容の比較で決めると `judge-carry-item-row-overwrite-after-engine-copied-blob-is-a-violation`、決定を果たしていない決着の行も果たした決定に入れると `judge-lww-serverwins-settlement-without-basis-is-spurious`・`judge-undeclared-carry-lww-serverwins-settlement-without-basis-is-spurious`、実行の前の未送信の行をすべて届かなかった行に数えると `judge-unfulfilled-reparent-delete-refusal-without-basis-is-spurious` が赤）。製品のエンジンを外から細工して 288 種を流す計測では、古い内容での上書きと持ち越した決定の上書きは当たった種をすべて名指しし、ローカルの変更を黙って捨てる細工は、細工が効いていない種（直後の実行がどのみち同じ行を戻して報告する種）を除いてすべて名指しする。
+- mutation 実証済み（照合と下ろす規則を 1 つずつ壊す・控えの立て方と外し方・数えるだけの窓の条件・外部キーの表明の比べ方。逆向きの規則の端末の書き込みの条件を外して編集の無い品目の行の決定も外すと `judge-carry-item-row-overwrite-is-a-violation`、逆向きの規則を blob の内容の比較で決めると `judge-carry-item-row-overwrite-after-engine-copied-blob-is-a-violation`、決定を果たしていない決着の行も果たした決定に入れると `judge-lww-serverwins-settlement-without-basis-is-spurious`・`judge-undeclared-carry-lww-serverwins-settlement-without-basis-is-spurious`、実行の前の未送信の行をすべて届かなかった行に数えると `judge-unfulfilled-reparent-delete-refusal-without-basis-is-spurious` が赤）。
 
 ### シナリオの操作とモデルの期待
 
 - 決定的なシナリオは、エンジンの事実を期待の操作で表明する（操作は次元表に載せず、乱数の操作の列には混ぜない）
   - `Expect.Pending(端末)`：端末の未送信の行を、状態の面（`IModelDeviceSyncState.ReadPendingAsync`）と端末の表のいまの行から `{表} key={キー} row={present|gone}` の行（表・キーの順）にして表明する（`row` はその行がいま端末の表に在るか）。どの端末のエンジンでも同じ言葉で答えるよう、記録の数・記録の版・書いた blob の列・サーバーがその行を知っているかは載せない。
-  - 記録の表を読む期待（`Expect.Journal`・`Expect.Acks`・`Expect.BlobPending`）と、記録の表を書く手（下の `RefuseJournalRemovalOp`・`OpenNewJournalOp`・`LegacyKeyTextsOp`・`RecordJournalOp`・`LeftoverUnsetKeyEntryOp`）は、今のエンジンの端末でだけ流せる。使うのは今のエンジンだけの印の行だけで、ほかの行は `Expect.Pending` と振る舞いの期待（実行の結果・端末とサーバーの行・その後の同期が送るか）で書く。
-  - `ExpectPayloadOp`：サーバーが断った書き込みが、行の書き込みで止まり blob を残さない（`n6-*`。端末の行が未送信のまま残ることは `Expect.Pending` で表明する。受理記録が無いことを見る `ExpectNoAckOp` は今のエンジンの端末でだけ流せ、今は使う行が無い）
+  - 決定的なシナリオは、端末の状態の表を直接読む期待を持たない。未送信は `Expect.Pending` で、ほかは振る舞いの期待（実行の結果・端末とサーバーの行・その後の同期が送るか）で書く。
+  - `ExpectPayloadOp`：書き手（端末かサーバー役）の品目の blob を確かめる（例：サーバーが断った書き込みが行の書き込みで止まり blob を残さない `n6-*`。端末の行が未送信のまま残ることは `Expect.Pending` で表明する）
   - `ExpectLocalRowChangeOp`：実行が自分から変えた行の一覧（`SyncResult.LocalRowChanges`）に、表・キー・理由が載る（`thrown-serverwins-run-hides-settlement` など）
-  - `RefuseJournalRemovalOp`：端末のローカル DB に、1 つのキーの記録の削除を断るトリガーを仕掛ける・外す（記録を捨ててから行を消す順を、途中で失敗させて確かめる＝`holder-referenced-by-other-table-entries-go-before-rows`）
-  - `OpenNewJournalOp`：端末のローカル DB に新しい `SyncJournal` のインスタンスを開き、最初の使用の表の作成を流す（アプリの再起動に当たる。補助の表の一部が無い古い DB に足りない表が作られる＝`holder-referenced-by-other-table-current-child-legacy-local-schema`）。降ろし直す約束の件数とトリガーは、汎用の `ExpectLocalSqlOp`・`LocalSqlOp` で書く
+  - 端末の DB の件数やトリガーを見る手は、汎用の `ExpectLocalSqlOp`・`LocalSqlOp` で書く
   - `ModelRefreshOp.ExpectScopeRefusal`：範囲外の行が範囲内の行を参照する洗い替えが断られ、端末の DB が変わらない（`42-refresh-refused-by-rows-outside`）
-  - `LegacyKeyTextsOp`：以前の版が書いた形のキーのテキストを作る（`25-legacy-journal-key-text` / `25-legacy-ack-key-text`）
-  - `RecordJournalOp`：ジャーナルへ直接記録して、プロセスごと落ちて残った記録を作る（`replay-unlanded-delete-entry-is-discarded`）
-  - `LeftoverUnsetKeyEntryOp` / `ExpectNoUnsetKeyEntryOp`：キーの決まらない記録が落ちて残った形と、アップロードの判定がそれを消すこと（`e2-leftover-unset-key-entry`）
   - サーバーの他者の操作は、ハーネスの `ApplyOnServerAsync` がサーバー役のリポジトリのグラフ保存での削除も行う（網羅の行のキーだけのスタブ・持っていた実体での削除）
-- 例外で終わった後勝ち＋ServerWins の実行でも、モデルは実行前の未送信の記録と突き合わせて捨てた行を推定する（`SyncModelRun.SyncAsync` の注入した失敗の catch から `RecordLastWriteWinsSettlementsAsync`）
-  - 推定するのは、記録が消え、送るものがあり、サーバーの値が送った値でなく、ServerWins がローカルを戻したか、サーバーに行の無い upsert か、実行が DiscardedByServerWins と報告した行だけ（書き込みの履歴の最後の値で比べると、blob だけを書いた品目を「削除を書いた」と取り違える）
-  - 送るものが無いのは、行ありで削除だけ・行なしで削除なし・行なしで削除ありでもサーバーの版が分からない行（版を持つ表で、削除の記録のどれも版を持たず、実行の前の受理記録も無い。docs の「送る操作の決め方」の表の Gone｜Otherwise＝行はサーバーに届いていない。判定は `SyncModelRun.NeverReachedServer`）。最後の形を推定に入れると、同じ実行のダウンロードが同じキーのほかの書き手の行を降ろしたのを決着と取り違え、根拠のない `3/spurious:*:DeleteRefusedOnServer:no-basis` になる。決まった形の行は `lww-serverwins-unuploaded-insert-delete-on-taken-key-is-not-a-settlement`
+- 例外で終わった後勝ち＋ServerWins の実行でも、モデルは実行前の未送信の行と突き合わせて捨てた行を推定する（`SyncModelRun.SyncAsync` の注入した失敗の catch から `RecordLastWriteWinsSettlementsAsync`）
+  - 推定するのは、未送信の変わる印が全部消え、送るものがあり、サーバーの値が送った値でなく、ServerWins がローカルを戻したか、サーバーに行の無い upsert か、実行が DiscardedByServerWins と報告した行だけ（書き込みの履歴の最後の値で比べると、blob だけを書いた品目を「削除を書いた」と取り違える）
+  - 送るものが無いのは、行ありで削除だけ・行なしで削除なし・行なしで削除ありでもサーバーがその行を知らない行（状態の面の `ServerKnowsRow` が偽＝行はサーバーに届いていない）。最後の形を推定に入れると、同じ実行のダウンロードが同じキーのほかの書き手の行を降ろしたのを決着と取り違え、根拠のない `3/spurious:*:DeleteRefusedOnServer:no-basis` になる。決まった形の行は `lww-serverwins-unuploaded-insert-delete-on-taken-key-is-not-a-settlement`
 - 空の blob の期待（N12）
   - 空の blob を見逃すのは、空でない blob を書いた端末と、消された品目を上げ直した端末（同期の前にサーバーに無く後にある＝挿入の経路・`_recreators`）がすべて、その品目の競合を報告されたか ServerWins に変更を捨てられたときだけ（`_conflictsTo`）
   - blob を書いた後でその品目が削除され作り直されたら、期待値を決めない（`_blobHistoryCut`）
@@ -464,30 +420,31 @@ NULL 許容の計算列・サーバーで NULL になった blob・一覧に載�
 
 - `SyncModelHttpRuntimeTests`：in-process の Kestrel・生成された HTTP の差分ソースと同期専用のエンドポイント。サーバー側の注入した失敗は 500 で届くので、実行中に失敗が起きたかで見分ける。
 - `SyncModelSqlServerRuntimeTests`（Docker）：世界ごとにデータベースを作る実 SQL Server のサーバー役。生成された直結の差分ソース・本物の rowversion。
-- `SyncSupportRemoteAdoSqlServerRuntimeTests`（Docker・転送の値 `SqlServerHttp`）：同じ実 SQL Server のサーバー役を in-process の Kestrel の背後へ置き、生成された HTTP の差分ソースでつなぐ。決定的なシナリオは夜間だけ（上の「決定的なシナリオと Theory」）、乱数の種は普段も流す。名前は行列の名前の規則に従う（同期のモデルの仲間の `SyncModel…` は既知の一覧に載っていて、双方向同期の作り直しでそろえる）。
+- `SyncSupportRemoteAdoSqlServerRuntimeTests`（Docker・転送の値 `SqlServerHttp`）：同じ実 SQL Server のサーバー役を in-process の Kestrel の背後へ置き、生成された HTTP の差分ソースでつなぐ。決定的なシナリオは夜間だけ（上の「決定的なシナリオと Theory」）、乱数の種は普段も流す。名前は行列の名前の規則に従う（同期のモデルの仲間の `SyncModel…` は名前の既知の一覧 `RuntimeTestNamingKnown` に載っている）。
 - 実 SQL Server のサーバー役は、生成物の外側の包み（`SyncModelFaultingRepository`・`SyncModelFaultingSource`・`SyncModelFaultingBinaryColumns`）で、SQLite の代役と同じ点の失敗の注入と割り込みを起こす（版の採番とガードはしない）。版なしの表（ラベル）の書き手は代役と同じく包まない（書き込みの失敗をラベルの書き込みで使わない）。入口の割り込みと書き込みの失敗は `SyncModelFaults.BeforeServerWriteAsync` の 1 つを両方の包みが呼ぶ。
-- どれも端末は新しいエンジンの端末（`SyncModelEngineDevice.On(...)`）で、次を確かめる。
+- どれも端末はエンジンの端末（`SyncModelEngineDevice`）で、次を確かめる。
   - 決定的なシナリオが直結と同じ違反になること。例外は入口・違反の種類・推定した形へ正規化して比べる（`SyncModelSignatures`）。直結の側は `SyncModelDirectRuns` の結果。
-  - 乱数の種が既知の失敗（`SyncModelEngineTransports.Known`・空で始める）にしか当たらないこと。種の数は `QUICKER_SYNC_MODEL_TRANSPORT_SEEDS`（既定 10・夜間 100＝`SyncModelSignatures.NightlySeedCount`）と、広い世界の種の `QUICKER_SYNC_MODEL_TRANSPORT_WIDE_SEEDS`（既定 4・夜間 20＝`SyncModelSignatures.NightlyWideSeedCount`）。乱数の種の Fact はどれも夜間の目印を持つ（`NightlyEngineTrait.Selected`）。網羅は観測と要約だけで、網羅しない組は新しいエンジンの直結の乱数の種で照合する。実 SQL Server の 2 つのクラスは、どちらの範囲も種の組の余り 0・1 の種（失敗の注入なし）と余り 2・3 の種（失敗の注入の組）を別の Fact で流す（`SyncModelSignatures.SqlServerSeeds`・`SqlServerFaultSeeds`）。
+  - 乱数の種が既知の失敗（`SyncModelEngineTransports.Known`・空で始める）にしか当たらないこと。種の数は `QUICKER_SYNC_MODEL_TRANSPORT_SEEDS`（既定 10・夜間 100＝`SyncModelSignatures.NightlySeedCount`）と、広い世界の種の `QUICKER_SYNC_MODEL_TRANSPORT_WIDE_SEEDS`（既定 4・夜間 20＝`SyncModelSignatures.NightlyWideSeedCount`）。乱数の種の Fact はどれも夜間の目印を持つ（`NightlyEngineTrait.Selected`）。網羅は観測と要約だけで、網羅しない組は直結の乱数の種で照合する。実 SQL Server の 2 つのクラスは、どちらの範囲も種の組の余り 0・1 の種（失敗の注入なし）と余り 2・3 の種（失敗の注入の組）を別の Fact で流す（`SyncModelSignatures.SqlServerSeeds`・`SqlServerFaultSeeds`）。
 - SQL Server でだけ起きる既知の失敗は `SyncModelEngineTransports.SqlServerOnly`（空で始める）に置く（HTTP × 実 SQL Server も同じ一覧で比べる）。形は `SyncModelSqlServerRuntimeTests.SqlServerOnly_AreWellFormed` が見る。
-- 既知の失敗は `SyncModelKnownFailures` の厳格な一覧（載っているシナリオはその署名の組どおりに失敗しなければ赤・載っていない失敗も赤）で一時的に外し、直したら消す。新しいエンジンの端末の一覧は `SyncModelKnownFailures.EngineSet`（空）、今のエンジンの端末の一覧は `SyncModelKnownFailures.Set`（控えと今のエンジンの直結の乱数が使う）。`Set` の受け入れの項目（一意な値の入れ替え・回転と、塊をまたぐ形の行の今のエンジンで降ろせない分）は、理由に docs の既知の割り切りの文を名指しする。
+- 既知の失敗は `SyncModelKnownFailures` の厳格な一覧（載っているシナリオはその署名の組どおりに失敗しなければ赤・載っていない失敗も赤）で一時的に外し、直したら消す。直結の一覧は `SyncModelKnownFailures.EngineSet`（空。項目を足すときは、エンジンの端末で出た失敗から理由つきで足す）。一覧の形は `SyncModelRuntimeTests.KnownFailures_AreWellFormed` が見る。
 
 ### 同期の構成の行列
 
-- `SyncConfigMatrixRuntimeTests`（登録簿 SyncModel/Config・`SyncConfigDimensions`・Docker）は、組める組の全積 172 行を流す。軸は次のとおり。
+- `SyncConfigMatrixRuntimeTests`（登録簿 SyncModel/Config・`SyncConfigDimensions`・Docker）は、組める組の全積 196 行を流す（6 因子の水準の全積 384 から、原理的に組めない組＝AddGeneratedSyncSupport × HTTP・キーなしのローカル × キーなしの直結・キーを決めるフック × 直接の挿入を外した数。どちらのフィクスチャもリモートサービスを持つので HTTP の行も両方にある）。軸は次のとおり。
   - 主キーの型：行列の軸 `SyncConfigFixtures`（IntKey＝SyncFixture・VoKey＝SyncVoFixture）。
-  - ローカルの登録のキーの有無と、キーなしの登録の同期する表のリポジトリをインスタンスの登録（シングルトン）に置き換えた形（`UnkeyedInstance`）。インスタンスの登録はコンテナの前に作るのでコンテナに登録した Save フックを受け取れず、キーを決めるフックとは組まない。
+  - ローカルの登録の形（因子 LocalKey）：キーつき・キーなし・キーなしの登録の後でローカルの接続ファクトリを同じ接続文字列のインスタンスの登録（シングルトン）で登録し直した形（`UnkeyedInstance`。同期の登録より前に登録し直す）。
   - サーバーの差分ソース：直結の keyed / 非 keyed・HTTP の baseAddress / HttpClient ファクトリ。
-  - AddGeneratedSyncSupport か分けた登録。
+  - AddGeneratedSyncSupport か分けた登録（差分ソースと `AddGeneratedSyncEngine`）。
   - キーを決める Before フックの有無。
   - 書き込みの経路（因子 Via）：直接の挿入・グラフ保存・`GraphRemoveParentWithNewChild`・`GraphViaExcludedParent`。
+- 同期の登録は、ローカルの接続ファクトリを開くたびの確認つきの包みに差し替えて `SyncEngine` を組む。ローカルの書き込みは同期する表のトリガーが記録し、未送信はエンジンの未送信の一覧で読む。トリガーと状態の表は包んだ接続ファクトリの最初の接続で張られるので、ローカルの DB にはスキーマだけを先に作り、行は包んだ接続（リポジトリ）でだけ書く。
 - 流れは「登録 → 解決 → 登録の形の検査 → 新しい行を同期 1 回で上げる → サーバーの新しい行を 1 回で降ろす → 洗い替え 1 回で両方の行がそろう」。
   - 解決はスコープを検査するプロバイダ（`ValidateScopes = true`）の、行ごとのスコープの中で行う（シングルトンがスコープのサービスを掴む登録の形を断る）。
-  - 洗い替えの段は登録の形ごとに全消しと流し込みが通ることを見る（今の 2 つのフィクスチャは木の図。表どうしの循環は同期のモデルの決定的な行 `refresh-*-foreign-key-cycle*` が 4 つの転送で見る。図の形の軸は足していない）。
-  - 登録の形（`SyncConfigFixtures.RegistrationProblems`）：ローカルの注文と明細のリポジトリがジャーナル記録デコレータ（構築時に除外した親の表も）／差分ソースが転送経路の型（HTTP は HttpSyncServerSource・直結は DirectSyncSource）／サーバーのリポジトリは素のまま。
-  - 2 回目の同期が降ろすのはその 1 行だけ（ミラー版から導いたアンカー）。
-  - `GraphRemoveParentWithNewChild` は、新しい親をグラフ保存で書いて同じ流れを通した後に段を 1 つ足す：上げ下げした 2 つの親に、キーの無い新しい子を足して親を消すグラフ保存（単数と複数の SaveAsync）と、新しい子だけを MarkRemoved したグラフ保存を流し、後勝ちの同期 1 回でサーバーから親が消え、ジャーナルに未送信もキーの無い記録も残らないことを見る。IntKey は消す親の下に、サーバーに同じキーの行がある新しい版なしの子（`sync_notes`）も入れ、サーバーのその行が残ることを見る。
-  - `GraphViaExcludedParent` は、親の表を `excludeFromSync` に入れた登録（Support・Split の両方）で、同じ流れを同期する子の表（明細）で流す。親はテストがサーバーとローカルへ直接入れ、除外した親の直接の挿入と更新がジャーナルに何も残さないこと、除外した親を書き換えて子を足すグラフ保存が子の表だけを記録すること、子が同期 1 回で上がりローカルに残ることを見る。
+  - 洗い替えの段は登録の形ごとに洗い替えが例外なく通り、両方の行がローカルにそろうことを見る（今の 2 つのフィクスチャは木の図。表どうしの循環は同期のモデルの決定的な行 `refresh-*-foreign-key-cycle*` が 4 つの転送で見る。図の形の軸は足していない）。
+  - 登録の形（`SyncConfigFixtures.RegistrationProblems`）：ローカルの接続ファクトリは開くたびの確認つきの包み（`ObservedSqlConnectionFactory`）／ローカルの注文と明細のリポジトリは SQLite の側の生成の Repository の型そのもの（何にも包まない。構築時に除外した親の表も）／差分ソースは転送経路の型（HTTP は HttpSyncServerSource・直結は DirectSyncSource）／サーバーのリポジトリは SQL Server の側の生成の Repository の型そのもの・サーバーの接続ファクトリは包まない／ローカルの接続を 1 回開いた後、トリガーは除外していない同期する表にだけ在る。リポジトリは生成の型と解決した型が同じかで見る（包みで登録すると食い違う）。
+  - 2 回目の同期が降ろすのはその 1 行だけ（表ごとの再開点）。
+  - `GraphRemoveParentWithNewChild` は、新しい親をグラフ保存で書いて同じ流れを通した後に段を 1 つ足す：上げ下げした 2 つの親に、キーの無い新しい子を足して親を消すグラフ保存（単数と複数の SaveAsync）と、新しい子だけを MarkRemoved したグラフ保存を流し、未送信は 2 つの親の削除だけになり（新しい子は DB のどの行も消さないのでトリガーが記録しない）、後勝ちの同期 1 回でサーバーから親が消えて未送信が残らないことを見る。IntKey は消す親の下に、サーバーに同じキーの行がある新しい版なしの子（`sync_notes`）も入れ、サーバーのその行が残ることを見る。
+  - `GraphViaExcludedParent` は、親の表を `excludeFromSync` に入れた登録（Support・Split の両方）で、同じ流れを同期する子の表（明細）で流す。親はテストがサーバーとローカルへ直接入れ、除外した親の直接の挿入と更新が未送信に何も残さないこと、除外した親を書き換えて子を足すグラフ保存が子の表だけを未送信にすること、子が同期 1 回で上がりローカルに残ることを見る（未送信の一覧はエンジンの表の行だけを返すので、除外した表に記録の仕組みが無いことは登録の形の検査のトリガーの表明が受け持つ）。
   - サーバーの DB は全部の行で共有するので、この 2 つの水準はサーバーに足した補助の行を行の終わりに消す（後の行の最初の同期と洗い替えが、親の無い行を降ろさないようにする）。キーは行ごとに 3 つ（ローカルの新しい行・サーバーの新しい行・補助の親）。
 - 既知の失敗は KnownCaseLedger で、今は空。行の由来の指摘は行に残す。
 - 網羅しない組の一覧は空。VoKey×HTTP は SyncVoFixture にリモートサービスを足して流す。
@@ -496,45 +453,47 @@ NULL 許容の計算列・サーバーで NULL になった blob・一覧に載�
 ### 割り込みの点
 
 - 同期・洗い替えの実行の名前つきの時点（`ModelInterruptPoint`）で、実行と別の流れから書き込みを 1 回差し込む。書き手（`SyncModelScenarios.InterruptWriter`）はその端末（ローカルの書き込み）かサーバーの他者（サーバーへの書き込み）で、1 つの割り込みに書き込みを順に並べられる。操作は `ArmInterruptOp`、仕組みは `SyncModelFaults.InterruptAsync`（呼ぶのはサーバー役の包み＝SQLite の代役と実 SQL Server の両方）。
-  - 時点：サーバーへの行の書き込みの直前／差分・ページ・キーの取得の直前／取得が 1 行以上を返した後でエンジンがロックを取って適用する前。
-  - 別の流れは `ExecutionContext.SuppressFlow` の下の `Task.Run`。同期の抑止の印も書き込みロックのリースも引き継がない。
-- 点はどれも、エンジンがローカルの書き込みロックを持たない時点に置く。端末の割り込みの書き込みはデコレータの書き込みロックを待つので、ロックの中に置くと待ち合って止まる（適用の最中・洗い替えには差し込めない）。上限 30 秒で待つのをやめ、`interrupt/deadlock` の違反にする。サーバーの他者の書き込みはローカルのロックを待たないので、洗い替えの取得の前後にも差し込む。
-- 割り込みの書き込みは通常の書き込みと同じ経路（`WriteAsync`）で、書き手の操作として履歴へ積む。
+  - 時点：サーバーへの行の書き込みの直前／差分・ページ・キーの取得の直前／取得が 1 行以上を返した後でエンジンがそのバッチを適用する前。
+  - 別の流れは `ExecutionContext.SuppressFlow` の下の `Task.Run`。実行の流れの状態を引き継がない（アプリの別の流れの書き込みと同じ）。
+- 点はどれも、エンジンが端末の DB のトランザクションを開いていない時点（サーバーを待つ間）に置く。端末の割り込みの書き込みは端末の DB の書き込みのロックを待つので、適用のトランザクションの中に置くと待ち合って止まる。上限 30 秒で待つのをやめ、`interrupt/deadlock` の違反にする。端末の書き手もサーバーの他者も、同期と洗い替えのどちらにも差し込む（洗い替えはサーバーへ書かないので、サーバーへの書き込みの直前の点には来ない）。
+- 割り込みの書き込みは通常の書き込みと同じ経路（`SyncModelRun` の `WriteAsync`）で、書き手の操作として履歴へ積む。
 - 仕掛けたのに点に来なかった割り込みは `interrupt/not-fired:{点}` の違反にする（黙った空振りの守り）。
-- 決まった形のシナリオが仕掛けたのに起きなかった失敗（`ArmFaultOp` の種類・空の取得・適用の飛ばし・フックの blob の書き込み）も、シナリオの終わりに `fault/not-fired:{種類}` の違反にする（`SyncModelFaults.PendingFaults`・`FinishAsync` の `requireArmedFaultsFired`）。失敗の口がサーバー役から外れても結果が同じになる行（失敗の後のやり直し・根拠の判定の after-fault の行など 29 行）が、黙って緑になるのを防ぐ。乱数の種と網羅の行は確率で仕掛けるので対象外。サーバー役の包み（SQLite の代役・実 SQL Server）の入口を外すと、失敗の口を使う行すべてが `interrupt/not-fired` か `fault/not-fired` で赤になる（mutation 実証済み）。
+- 決まった形のシナリオが仕掛けたのに起きなかった失敗（`ArmFaultOp` の種類・空の取得・フックの blob の書き込み）も、シナリオの終わりに `fault/not-fired:{種類}` の違反にする（`SyncModelFaults.PendingFaults`・`FinishAsync` の `requireArmedFaultsFired`）。失敗の口がサーバー役から外れても結果が同じになる行（失敗の後のやり直し・根拠の判定の after-fault の行など 29 行）が、黙って緑になるのを防ぐ。乱数の種と網羅の行は確率で仕掛けるので対象外。サーバー役の包み（SQLite の代役・実 SQL Server）の入口を外すと、失敗の口を使う行すべてが `interrupt/not-fired` か `fault/not-fired` で赤になる（mutation 実証済み）。
 - 端末の書き手の行は点 3 × ポリシー 2（Collect・ServerWins）× 前段 4（更新・削除→作り直し・削除・blob の書き込み）× 割り込みの書き込み 3（更新・削除・作り直し）のうち起こり得る 35 行＋フォルダーの `d1-folder-recreate-delete` の 1 行。
   - 外す組は原理的に起こり得ないものだけ：行が無いのに更新・削除する組・行があるのに作り直す組（`SyncModelScenarios.IsPossibleInterruptShape`）と、ServerWins × サーバーへの書き込みの直前（Versioned＋ServerWins はサーバーへ書かない＝`IsPossibleInterruptPoint`）。
-  - Collect の行の名前は 4m-D1 からのまま（`interrupt-{点}-{形}`）、ServerWins の行は `-serverwins` を付ける。ServerWins の行はサーバーの他者が別の品目を変え、取得が 1 行以上を返す点にも来るようにする。
-  - `interrupt-BeforeServerWrite-delete-recreated`（4m-D1）・`interrupt-BeforeServerWrite-recreate-deleted`（P5-2 の S1）・`interrupt-*-update-blob-written-serverwins`（S2）・`interrupt-*-recreate-deleted-serverwins`（先行の D5）もこの網の行。
-- サーバーの書き手の行（`SyncModelScenarios.ServerInterruptCells`）は点 2（取得の直前・取得の後で適用の前）× ポリシー 2 × 前段 3 × 割り込みの書き込み 2（更新・削除）× 実行の種類 2（同期・洗い替え）× 後段 2（次の同期・編集してから同期）× その後の失敗 2（なし・次の取得の失敗）のうち起こり得る 84 行。名前は `interrupt-server-{点}-{前段}-{書き込み}-{後段}[-fetch-fails][-serverwins][-refresh]`。
-  - 前段：`parent-after-child-selfref`（端末に無いフォルダー p とその子 c。バッチで c が p より前に来て、親の解決役が p を読み直す）・`parent-after-child-cross-table`（対照：p と p の下の品目。解決役は動かない）・`unique-holder-after-taker`（端末のフォルダー h が名前を手放し、別のフォルダーが取り、h をもう一度更新する。一意な値の持ち主の読み直しが h を読み直す）。
-  - 削除の書き込みは、サーバーの外部キー（NO ACTION）が受け付けるよう、子フォルダーを null の親へ・品目を別のフォルダーへ移してから対象の行を消す（解決役が親を見つけられない分岐を踏む）。
-  - 外す組：サーバーへの書き込みの直前の点（端末が送るものの無い形なので来ない）と、削除 × 編集してから同期（消した行は端末で編集できない）。`SyncModelScenarios.IsPossibleServerInterrupt`。
-  - 次の取得の失敗（`ServerInterruptFault.NextFetchFails`）は、割り込みの書き込みの後でその端末に取得の失敗を仕掛け（`ArmInterruptOp` の `ThenArm`）、割り込まれた同期のバッチの大きさを 2 にする。同期は取得の後の点のバッチ（解決役が読み直した対象の行を古い写しで上書きする）を書いてから、同じ表の次のバッチの取得で例外になる（`ExpectThrowOp`）。この水準は、書き込みの単位のコミットから表のダウンロードの終わりまでの窓を見るので、窓がある組（取得の後の点・更新・同期）にだけある：取得の前の点は割り込みの後に取得したバッチが新しい写しを持ち、削除は解決役が読み直す行が無く、洗い替えは受理記録をバッチのコミットごとに消す。後段の期待は同期の行と同じで、降ろした数は前段で違うので見ない。
-    - この水準の `parent-after-child-*` × 編集してから同期の 4 行（`interrupt-server-AfterServerFetchBeforeApply-parent-after-child-cross-table-update-edit-sync-fetch-fails`・`interrupt-server-AfterServerFetchBeforeApply-parent-after-child-cross-table-update-edit-sync-fetch-fails-serverwins`・`interrupt-server-AfterServerFetchBeforeApply-parent-after-child-selfref-update-edit-sync-fetch-fails`・`interrupt-server-AfterServerFetchBeforeApply-parent-after-child-selfref-update-edit-sync-fetch-fails-serverwins`）は、バッチを確定してから次の取得で失敗する窓を前提にするので、今のエンジンだけの印を持つ（新しいエンジンの 1 回で全部の道は、取得の失敗で何も降りない）。
-  - 後段の期待は期待の操作で表明する（汎用の「消失なし」は、端末の編集が古い受理記録でサーバーの新しい内容を上書きする形を拾えない）。取得の後の点の更新は、次の同期が内容ごと降ろす（downloaded=1）・Collect の編集は ModifiedOnServer の競合。取得の前の点は、次の同期は何も降ろさない・Collect の編集はそのまま上がる。ServerWins の編集は点に依らず捨てられてサーバーの内容に戻る。削除は次の同期の後に対象の行が端末に無い。
-  - 洗い替え × `parent-after-child-selfref` × 削除 × 取得の後の点の 2 行（Collect・ServerWins）は、今のエンジンの一覧 `SyncModelKnownFailures.Set` に Pending（きっかけ待ち）で載っていて、今のエンジンの控えで `known` になる：今のエンジンの洗い替えのバッチの古い写しの子が、取得の後にサーバーで消えた親を指し、ローカルの外部キーで例外になる（洗い替えは失敗として止まり、次の洗い替えで取り直せる）。今の挙動を期待の操作で固定しない。新しいエンジンの端末では緑（直結の Theory）。署名は種の正規形の項目を作らない（`SeedOnlySignatures`。洗い替えの取得の後に割り込む書き込みは乱数の種の列に無い）。
-  - 書き手ごとの行の宣言が起こり得る組をすべて含み、行の同期がそのポリシーで流れ、サーバーの書き手の行の割り込まれる実行が宣言の種類であることは `SyncModelRuntimeTests.InterruptScenarios_CoverEveryPointAndShape` が表明する（外す規則はテストの中で書き下ろす）。
-  - この網の行は、今のエンジンだけの印の行を除いて 4 つの転送すべてで流れる（HTTP × 実 SQL Server は夜間）。洗い替え × `unique-holder-after-taker` × 更新 × 取得の前の点の 4 行は、上限を実行の始めに固定するサーバー役（実 SQL Server）では割り込みの版が洗い替えの最初の取得に入らないので、期待の手 `WhenServerFixesCeilingOp` の固定する側の枝の中を、エンジンの宣言 `RefetchesHeldRowsInSameRun` の `WhenEngineDeclaresOp` でさらに分ける。偽のエンジン（今のエンジン＝表を空にしてから入れ、一意な値の持ち主を読み直さない）は「洗い替えの直後の端末に対象の行は無い → 次の同期で降りる（downloaded=1）」、真のエンジン（新しいエンジン＝表を空にせず、値を取る行がまだ値を持つ対象の行で保留され、上限を取り直したもう 1 回の取得が新しい版を入れる）は「洗い替えの直後の端末に対象の行の新しい内容がある → 次の同期は何も降ろさない（downloaded=0）」を表明してから、同じ後段へ進む。同期と親の前段は、持ち主の読み直し・親の解決役がキーで読み直して上限の後の版を拾うので、どのサーバー役でも同じ期待になる。
+  - Collect の行の名前は `interrupt-{点}-{形}`、ServerWins の行は `-serverwins` を付ける。ServerWins の行はサーバーの他者が別の品目を変え、取得が 1 行以上を返す点にも来るようにする。
+  - `interrupt-BeforeServerWrite-delete-recreated`・`interrupt-BeforeServerWrite-recreate-deleted`（計画した削除を送る前の作り直し）・`interrupt-*-update-blob-written-serverwins`（ServerWins の実行中の blob を書いた行の更新）・`interrupt-*-recreate-deleted-serverwins` もこの網の行。
+- 端末の書き手の洗い替えの行は 22 行。洗い替えはサーバーへ書かないので、点はサーバーへの書き込みの直前を外した 2 つ（`SyncModelScenarios.IsPossibleRefreshInterruptPoint`）。洗い替えは競合ポリシーを読まないので、ポリシーの軸を持たない。
+  - 前段ありの `Force` の洗い替え（宣言 `SyncModelScenarios.RefreshForceInterruptCells`・名前 `interrupt-{点}-{形}-refresh-force`）：同期の行と同じ 7 つの形 × 点 2 ＝ 14 行。前段の未送信があると `Force` なしの洗い替えは取得の前に断るので、割り込まれる実行は `Force` の洗い替え（blob を運ぶ）。品目 701 の編集と品目 702 の前段の後、702 への割り込みの書き込みを点に仕掛ける。701 はサーバーの行で置き換わって未送信が外れ、割り込みの書き込みで連番の進んだ 702 は前段と割り込みの書き込みの後の端末の内容（blob を含む。削除なら行が無い）のまま未送信で残る。洗い替えの結果の捨てた数は実際に捨てた 701 の 1 つだけ（`discarded-changes=1`）を表明する。
+  - 前段なしの `Force` なしの洗い替え（宣言 `SyncModelScenarios.RefreshCleanInterruptCells`・割り込みの書き込みは `SyncModelScenarios.InterruptCleanWrite`・名前 `interrupt-{点}-{update|delete|insert|delete-gone-on-server}-clean-refresh`）：4 つの書き込み × 点 2 ＝ 8 行。未送信の無い端末で洗い替えを流し、途中で端末が 702 を更新・削除するか、サーバーに無いキー 705 の品目を作るか、洗い替えの前にサーバーの他者が消しておいた 702 を消す。洗い替えは断らずに終わり（`discarded-changes=0`）、サーバーに無い 705 を消さず、サーバーにも端末にも無い 702 の未送信の削除の状態も消さない。
+  - どちらも、洗い替えの直後に途中で端末が書いた品目が端末の内容のまま未送信で残り（`Expect.Pending`・行・blob）、続く Collect の同期がその内容を競合なしに上げて未送信が無くなることを表明する。
+  - 小さい塊の端末では、この 22 行の洗い替えは 1 回で全部の道を通る（割り込みが、塊へ入るかの判定より先に未送信を書くため）。
+- サーバーの書き手の行（`SyncModelScenarios.ServerInterruptCells`）は点 2（取得の直前・取得の後で適用の前）× ポリシー 2 × 前段 3 × 割り込みの書き込み 2（更新・削除）× 実行の種類 2（同期・洗い替え）× 後段 2（次の同期・編集してから同期）× その後の失敗 2（なし・次の取得の失敗）のうち起こり得る 80 行。名前は `interrupt-server-{点}-{前段}-{書き込み}-{後段}[-fetch-fails][-serverwins][-refresh]`。
+  - 前段：`parent-after-child-selfref`（端末に無いフォルダー p とその子 c。バッチで c が p より前に来る）・`parent-after-child-cross-table`（対照：p と p の下の品目。親の表が先に降りる）・`unique-holder-after-taker`（端末のフォルダー h が名前を手放し、別のフォルダーが取り、h をもう一度更新する。バッチで値を取る行が h より前に来る）。
+  - 削除の書き込みは、サーバーの外部キー（NO ACTION）が受け付けるよう、子フォルダーを null の親へ・品目を別のフォルダーへ移してから対象の行を消す。
+  - 外す組：サーバーへの書き込みの直前の点（端末が送るものの無い形なので来ない）と、削除 × 編集してから同期（消した行は端末で編集できない）と、次の取得の失敗の窓が無い組。`SyncModelScenarios.IsPossibleServerInterrupt`。
+  - 次の取得の失敗（`ServerInterruptFault.NextFetchFails`）は、割り込みの書き込みの後でその端末に取得の失敗を仕掛け（`ArmInterruptOp` の `ThenArm`）、割り込まれた同期のバッチの大きさを 2 にする。同期は取得の後の点のバッチ（割り込みより古い写し）を取得してから、同じ表の次のバッチの取得で例外になる（`ExpectThrowOp`）。この水準は窓がある組（取得の後の点・更新・同期）にだけある：取得の前の点は割り込みの後に取得したバッチが新しい写しを持ち、削除は対象の行が残らず、洗い替えは同期と別の経路。
+    - 次の取得の失敗 × 前段 `parent-after-child-*` × 編集してから同期も起こり得ない組として外す：対象の行（フォルダー 800）は前段でサーバーに作られて実行の前の端末に無く、取得が失敗した 1 回で全部の道の実行は何も適用しないので、実行の後も端末に無く編集できない（前段 `unique-holder-after-taker` の対象の行 820 は初期データにあって前から端末に在る）。この外し方は「取得が失敗した 1 回で全部の道の実行は何も適用しない」という仕様に依り、仕様は `table:SyncEngineFixed` の行 `sync-fetch-failure-leaves-device-as-before`・`refresh-fetch-failure-leaves-device-as-before` が守る。塊を確定した後に次の取得が失敗する窓は塊ごとに確定する経路にだけあり、`table:SyncEngineFixed` の行 `chunk-failure-between-chunks-keeps-first-chunk-and-next-sync-resumes`・`chunk-failure-after-carry-keeps-resume-point-before-carried-row`・`chunk-stale-row-then-fetch-failure-then-device-edit-collect-reports-conflict`・`chunk-stale-row-then-fetch-failure-then-device-edit-serverwins-restores` が持つ。
+  - 後段の期待は期待の操作で表明する（汎用の「消失なし」は、端末の編集がサーバーの新しい内容を競合なしに上書きする形を拾えない）。取得の後の点の更新は、次の同期が内容ごと降ろす（downloaded=1）・Collect の編集は ModifiedOnServer の競合。取得の前の点は、次の同期は何も降ろさない・Collect の編集はそのまま上がる。ServerWins の編集は点に依らず捨てられてサーバーの内容に戻る。削除は次の同期の後に対象の行が端末に無い。次の取得の失敗の行は、降ろした数が前段で違うので、降ろした数を見ずに内容で見る。
+  - 書き手ごとの行の宣言（端末の書き手の同期の 35 行・洗い替えの 14 行と 8 行・サーバーの書き手の 80 行）が起こり得る組をすべて含み、行の同期がそのポリシーで流れ、サーバーの書き手の行の割り込まれる実行が宣言の種類であることは `SyncModelRuntimeTests.InterruptScenarios_CoverEveryPointAndShape` が表明する（外す規則はテストの中で書き下ろす）。
+  - この網の行は 4 つの転送すべてで流れる（HTTP × 実 SQL Server は夜間）。洗い替え × `unique-holder-after-taker` × 更新 × 取得の前の点の 4 行は、期待の手 `WhenServerFixesCeilingOp` の固定する側の枝で「洗い替えの直後の端末に対象の行の新しい内容がある → 次の同期は何も降ろさない（downloaded=0）」を表明してから、同じ後段へ進む（上限を実行の始めに固定するサーバー役では割り込みの版が洗い替えの最初の取得に入らないが、エンジンは表を空にしないので、値を取る行がまだ値を持つ対象の行で保留され、上限を取り直したもう 1 回の取得が新しい版を同じ洗い替えに入れる）。
 - 割り込みは乱数の操作の列に入れない。生成器は毎歩実際の DB を読んで操作を選ぶので、派生の乱数で割り込みを選んでも既存の種の列が変わる。入れるなら別の種の列にする。
-- mutation 実証済み（宣言 `RefetchesHeldRowsInSameRun` を逆にする：新しいエンジンを偽にすると `SyncModelSqlServerRuntimeTests.Scenario_MatchesDirect` の上の 4 行が `5/expect-rows:model_folders`・`5/expect-result` で赤）。偽の枝（今のエンジン）は、実 SQL Server の転送を今のエンジンの端末で流さないので、今は流れない。
 
-### 新しいエンジンの端末で流す同期のモデル
+### エンジンの端末
 
-- 端末 `SyncModelEngineDevice`：トリガーでローカルの変更を記録し（`SyncLocalTracking`）、`SqliteLocalRowStore` と `TrackedSyncEngine` で同期する端末。`SyncModelEngineDevice.On(世界の作り方)` が端末の作り方だけを差し替える（サーバー役・生成器・判定役は今の端末と同じ）。
-  - エンジンの宣言は、`CarriesServerWinsDecision` が真・`AppliesThroughSaveHooks` が偽・`DerivesResumePointFromLocalVersions` が偽・`RefetchesHeldRowsInSameRun` が真・`RefusesDownloadOverRowLimit` が真。
-- 決定的なシナリオの主はこの端末：直結・HTTP・実 SQL Server の Theory と HTTP × 実 SQL Server の夜間の Fact が、今のエンジンだけの印の無い行を流す（上の「決定的なシナリオと Theory」）。行の期待は新しいエンジンの答えで書き、今のエンジンが違う答えを出す行は今のエンジンの控えの理由の宣言が受ける（下の「今のエンジンの控え」）。
+- 端末 `SyncModelEngineDevice`：トリガーでローカルの変更を記録し（`SyncLocalTracking.Ensure`）、開くたびの確認（`SyncLocalTrackingGuard`）で包んだ接続ファクトリ（`ObservedSqlConnectionFactory`）から素の生成 Repository 4 つ（何にも包まない）と `SqliteLocalRowStore` を作り、4 表の `SyncTable` で組んだ `SyncEngine` で同期する端末。同期のモデルの端末はこの 1 種類で、世界の組み方の端末の作り方の既定（`SyncModelWorldOptions.CreateDevice`＝`SyncModelEngineDevice.CreateAsync`）。
+  - エンジンの宣言 `CarriesServerWinsDecision` は真。
+- 決定的なシナリオは、直結・HTTP・実 SQL Server の Theory と HTTP × 実 SQL Server の夜間の Fact がこの端末で流す（上の「決定的なシナリオと Theory」）。
 - クラス `SyncSupportAdoSqliteEngineRuntimeTests`（直結・コンテナなし）が流すもの：乱数の種・小さい塊の端末（下の節）・決まった形の行（下の節）。決定的なシナリオを 1 回で全部の道の端末で流すのは直結の Theory（`SyncModelRuntimeTests.Scenario_FailsExactlyAsListed`）。
-  - 乱数の種（`RandomSeeds_ConvergeWithoutLoss`）：今の端末の直結の乱数のテストと同じ本体（`SyncModelRuntimeTests.RunRandomSeedsAsync`）に、組 `SyncModelRandomSuite`（世界の作り方・既知の失敗の一覧・網羅しない組・空振りの守りの並び）を渡して流す。
-    - 新しい端末の組は `EngineSuite`：既知の失敗の一覧は `SyncModelKnownFailures.EngineSet`（空）、網羅しない組は範囲 `SyncModelDimensions.EngineScope` の `EngineGaps`（次元表は今の直結と同じ）と `SyncModelOutcomeDimensions.EngineGaps`。
-    - 結果の表の `EngineGaps` は、今のエンジンの解決役と段にだけある理由（`ReloadedForUniqueValue`・`RemovedBeforeDownload`・`RemovedForUniqueValue`）を、新しい端末の範囲にだけ「出ない組」として宣言する（新しいエンジンは集合の外の行をキーで読みに行かず、取得した集合の中で後回し・回転・同じ適用の削除伝搬で収束させる）。
-    - 種の指紋の記録は今の直結と共有する（指紋は生成器の設定と最初の形の中身から作り、端末に依らない）。
-    - 夜間の目印を持つ（`NightlyEngineTrait.Selected`）。種の決め方は組が持ち（`SyncModelRandomSuite.Seeds`・`WideSeeds`）、今の直結と環境変数・普段の数・開始番号が同じで、夜間の数だけ 3 分の 1（400＋広い世界 80）。種を並列に流してランナーの CPU を使い切るので、夜間の Integration のジョブ（50 分未満の目安）で同時に流れるほかのテストを遅らせない数にする（4 コアのランナーで 1,440 種が 14 分。手元では 1,440 種で 6 分半ほど＝今の端末の約 2 倍）。
-- 直結のほかの転送の乱数の種は、転送のクラス（`SyncModelTransportRuntimeTests.cs`）が同じ本体（`SyncModelSignatures.RunSeedsAsync`・種の決め方・正規化）に新しい端末の世界の作り方を渡して流す（上の「HTTP・実 SQL Server の派生」）。
+  - 乱数の種（`SyncSupportAdoSqliteEngineRuntimeTests.RandomSeeds_ConvergeWithoutLoss`）：本体 `SyncModelRuntimeTests.RunRandomSeedsAsync` に、組 `SyncModelRandomSuite`（世界の作り方・種の決め方・既知の失敗の一覧・網羅しない組・空振りの守りの並び）を渡して流す。
+    - 直結の組は `EngineSuite`：既知の失敗の一覧は `SyncModelKnownFailures.EngineSet`（空）、網羅しない組は範囲 `SyncModelDimensions.EngineScope` の `SyncModelDimensions.EngineGaps` と `SyncModelOutcomeDimensions.EngineGaps`（空）、空振りの守りは `SyncModelRuntimeTests.GuardedRunChecks` と夜間だけの `carry-edit-lost`。
+    - 種の指紋の記録は `SyncModelRuntimeTests.Seeds`・`WideSeeds` の決め方で照合する（指紋は生成器の設定と最初の形の中身から作り、端末に依らない）。
+    - 夜間の目印を持つ（`NightlyEngineTrait.Selected`）。種の決め方は組が持ち（`SyncModelRandomSuite.Seeds`・`WideSeeds`）、`SyncModelRuntimeTests.Seeds`・`WideSeeds` と環境変数・普段の数・開始番号が同じで、夜間の数だけ 3 分の 1（400＋広い世界 80＝`SyncSupportAdoSqliteEngineRuntimeTests.NightlySeedCount`・`NightlyWideSeedCount`）。種を並列に流してランナーの CPU を使い切るので、夜間の Integration のジョブ（50 分未満の目安）で同時に流れるほかのテストを遅らせない数にする（4 コアのランナーで 1,440 種が 14 分）。
+- 直結のほかの転送の乱数の種は、転送のクラス（`SyncModelTransportRuntimeTests.cs`）が本体 `SyncModelSignatures.RunSeedsAsync`（種の決め方・正規化）にエンジンの端末の世界の作り方を渡して流す（上の「HTTP・実 SQL Server の派生」）。
   - `SyncModelHttpRuntimeTests.RandomSeeds_OnlyKnownFailures`（HTTP・SQLite のサーバー役・コンテナなし）。
   - `SyncModelSqlServerRuntimeTests.RandomSeeds_OnlyKnownFailures`・`SyncModelSqlServerRuntimeTests.RandomFaultSeeds_OnlyKnownFailures`（実 SQL Server・Docker・`SqlServerSecondContainerCollection`。失敗の注入なしの組と注入の組）。`SyncSupportRemoteAdoSqlServerRuntimeTests` の同じ名前の 2 つ（HTTP × 実 SQL Server）。
   - 既知の失敗の一覧は `SyncModelEngineTransports.Known`（空で始める）。夜間の数は 100＋広い世界 20。
-- 洗い替えの振る舞いは、記録の面を読まない期待（実行の結果・例外の型・端末とサーバーの行・その後の同期が送るか）で書いた行が受け持つ。どれも今のエンジンの端末でも緑。
+- 洗い替えの振る舞いは、端末の状態の表を読まない期待（実行の結果・例外の型・端末とサーバーの行・その後の同期が送るか）で書いた行が受け持つ。
   - `refresh-pending-refused-keeps-edit-that-next-sync-sends`（未送信があると断り、編集は残って次の同期で送られる）
   - `refresh-force-discards-pending-and-next-sync-sends-nothing`・`refresh-cycle-force-replaces-pending-and-next-sync-sends-nothing`（`Force` は未送信を捨て、次の同期は何も送らない。表どうしの循環のある図でも同じ）
   - `refresh-excluding-referring-child-refuses-and-next-sync-sends-edit`（範囲の外の子が範囲の行を参照していれば断る）
@@ -543,55 +502,46 @@ NULL 許容の計算列・サーバーで NULL になった blob・一覧に載�
   - `refresh-refusal-order-outside-reference-before-pending`・`refresh-refusal-order-blob-loss-before-outside-reference`（洗い替えの拒否の順＝blob の損失 → 範囲の外からの参照 → 未送信）
   - `blob-refresh-discard-then-sync-does-not-send-empty-blob-back`・`blob-refresh-discard-empties-blob-of-row-written-after-retry`（blob を捨てる洗い替えの後、端末の blob が残らない。取り直しで書いた行も。後ろの行は、取得の途中にサーバーの他者が品目を新しいフォルダーへ移す形で、上限を固定するサーバー役では移した版が洗い替えに入らず次の同期で降りる＝`WhenServerFixesCeilingOp`）
   - `blob-refresh-discard-leaves-no-blob-on-row-changed-after-ceiling`（取得の直前にサーバーで変わった行：上限を固定するサーバー役では洗い替えに入らず次の同期で内容が降り、固定しないサーバー役では洗い替えで降りる。どちらでも端末の blob は残らない＝`WhenServerFixesCeilingOp`）
-- 保留があるときのもう 1 回の取得は、行 `fk-parent-created-between-table-fetches-arrives-in-same-sync`（全転送）が持つ：フォルダーの表の取得の後・品目の表の取得の前にサーバーの他者が新しいフォルダーとその下の品目を作り、取得の上限を固定しないサーバー役ではその 1 回の同期で両方が入って打ち切りが残らない（新しいエンジンは保留した子を取り直し、今のエンジンは親を読み直す）。固定するサーバー役では `WhenServerFixesCeilingOp` で「その同期には入らず、次の同期で入る」を表明する。
+- 保留があるときのもう 1 回の取得は、行 `fk-parent-created-between-table-fetches-arrives-in-same-sync`（全転送）が持つ：フォルダーの表の取得の後・品目の表の取得の前にサーバーの他者が新しいフォルダーとその下の品目を作り、取得の上限を固定しないサーバー役ではその 1 回の同期で両方が入って打ち切りが残らない（エンジンは保留した子を同じ実行のもう 1 回の取得で取り直す）。固定するサーバー役では `WhenServerFixesCeilingOp` で「その同期には入らず、次の同期で入る」を表明する。
 - mutation 実証済み（洗い替え：未送信の拒否を外す・`Force` で捨てない・範囲の外の参照の拒否を外す・拒否の順を入れ替える・エコーを飛ばす・サーバーに無い行を消さない・両方に無い行の状態を消さない・blob を空にしない・空にした表の確かめを外す、のそれぞれで対応する行が赤。同期：保留があるときのもう 1 回の取得を外すと `fk-parent-created-between-table-fetches-arrives-in-same-sync`、写し待ちの列を端末が書いた後も写す〔写す前と書き込みのロックの中の 2 つの確かめを両方外す〕と `blob-owed-copy-keeps-unsent-local-blob` が赤）。
-
-### 今のエンジンの控え
-
-- 今のエンジンの端末（記録のデコレータと `SyncEngine`・直結・SQLite のサーバー役）で決定的なシナリオを流すのは、控えの Fact `SyncSupportAdoSqliteCurrentEngineRuntimeTests.ScenarioLedgerDrift_MatchesRecord`（コンテナなし）だけ。`SyncModelScenarios.All` を全部流し、行ごとの結果を生成物 `sync-current-engine-scenario-ledger.md`（このフォルダ・手で直さない・eol=lf）と照合する。控えを作る部品は `SyncModelScenarioLedger`。
-  - 結果は 4 つ：`green`（違反が無い）・`known`（今のエンジンの一覧 `SyncModelKnownFailures.Set` のその行の署名の組どおりに失敗した）・`unsupported`（「流せない」で終わった）・`differs`（それ以外）。今のエンジンの端末はどの手も流せるので、`unsupported` の行があれば赤。
-  - `differs` の行は、理由の宣言 `SyncModelCurrentEngineScenarioDifferences` と 2 方向に照合する（宣言の無い `differs` の行も、`differs` でない行の宣言も赤）。載せるのは、期待を新しいエンジンの答えで書いた行で、理由には今のエンジンが違う答えを出す仕組み（未送信の行での打ち切り・洗い替えが範囲の表を全部消すこと・ダウンロードの前の段がサーバーに無い行を消すこと）を書く。
-  - 書き直しは `QUICKER_REGEN_FIXTURES` を立てて `FullyQualifiedName~ScenarioLedgerDrift`（Integration に向ける）。
-- 今のエンジンだけの印：行が守る仕組みが新しいエンジンに無い行（記録の表・受理記録・降ろし直す約束・解決役・適用が通る Save フック・外部の `ISyncTable`・一意な値の入れ替えを降ろせないこと・洗い替えが表を全部消すこと・バッチごとに確定するダウンロード ほか）は、一覧 `SyncModelCurrentEngineOnlyScenarios`（シナリオの名前 → 理由）に載せ、`SyncModelScenarios.All` が印 `SyncModelScenario.CurrentEngineOnly` を付ける。期待を書き直せば新しいエンジンでも流せる行は載せない。
-  - 印の行は新しいエンジンの端末で流す Theory から外れる（`SyncModelScenarioParts.Runs`）。控えの Fact は印の行を新しいエンジンの端末（既知の失敗の一覧 `SyncModelKnownFailures.EngineSet`）でも流し、その結果を控えの 4 列目に書く。
-  - 2 方向の照合：印の行が新しいエンジンの端末で `green`・`known` なら赤（緑になる行に印を付けると、その行が新しいエンジンの Theory から黙って外れる）。印の無い行は、直結の Theory が新しいエンジンの端末で既知の失敗の一覧どおり（空＝緑）であることを表明する。
-  - 理由は具体的に書く（`FactorInventoryGuard.IsVagueReason`）。理由には、無い根拠（`src/QuickER.Runtime.Sync/CLAUDE.md` の節か、今のエンジンにだけある型・表の名前）を書く。一覧にシナリオに無い名前があれば、`SyncModelScenarios.All` を作るときに断る。
-- 今のエンジンの乱数の種は直結だけ（`SyncModelRuntimeTests.RandomSeeds_ConvergeWithoutLoss`・組 `SyncModelRuntimeTests.DirectSuite`）。夜間の目印は対象外で、夜間も普段の数（60＋広い世界 48）で流す。今のエンジンの端末では、HTTP・実 SQL Server の決定的なシナリオも乱数の種も流さない。
 
 ### 小さい塊の端末
 
-新しいエンジンの塊ごとに確定する経路（`src/QuickER.Runtime.Sync/CLAUDE.md`「新しいエンジンの塊ごとに確定する経路」）は、エンジンの internal の値を小さくした端末で、同期のモデルをそのまま流して確かめる。
+同期のエンジンの塊ごとに確定する経路（仕組みは `src/QuickER.Runtime.Sync/CLAUDE.md`）は、エンジンの internal の値を小さくした端末で、同期のモデルをそのまま流して確かめる。
 
-- 端末：`SyncModelEngineDevice.OnSmallChunks(世界の作り方, 道の数え手)`。新しいエンジンの端末と同じ部品で、塊へ入る閾値を 2 行・塊の大きさを 2 行にする（`SmallChunkThreshold`・`SmallChunkSize`）。未送信の無い 3 行以上の取得（同期・受信だけ・洗い替え。洗い替えは `Force` で捨てる行を未送信に数えない）が塊の道を通り、未送信のある実行と小さい取得は 1 回で全部の道を通る。
+- 端末：`SyncModelEngineDevice.OnSmallChunks(世界の作り方, 道の数え手)`。エンジンの端末と同じ部品で、塊へ入る閾値を 2 行・塊の大きさを 2 行にする（`SmallChunkThreshold`・`SmallChunkSize`）。未送信の無い 3 行以上の取得（同期・受信だけ・洗い替え。洗い替えは `Force` で捨てる行を未送信に数えない）が塊の道を通り、未送信のある実行と小さい取得は 1 回で全部の道を通る。
   - 道の数え手 `SyncModelDownloadRoutes` は、エンジンの internal の口（`DownloadRouteObserved`・`CarriedRowsApplied`）につないで、道ごとの実行の数と、最後の段が持ち越した行の数を数える（スレッドをまたいで足す）。
-- 直結の Theory との照合（`SyncSupportAdoSqliteEngineRuntimeTests.SmallChunkScenarios_MatchDirect`）：直結の Theory が流す行（今のエンジンだけの印の無い行＝`SyncModelScenarioParts.Runs`）を小さい塊の端末で流し（`SyncModelScenarioLedger.RunAsync`・既知の失敗の一覧 `SyncModelKnownFailures.EngineSet`）、`green`・`known` でない行を、塊の道で結果の違う行とする。直結の Theory は同じ行が 1 回で全部の道の端末で一覧どおり（空＝緑）であることを表明するので、塊の道の結果が 1 回で全部の道と同じなら違う行は無い。
+- 直結の Theory との照合（`SyncSupportAdoSqliteEngineRuntimeTests.SmallChunkScenarios_MatchDirect`）：直結の Theory が流す行（直結の転送を宣言した全部の行）を小さい塊の端末で流し（`SyncModelScenarioLedger.RunAsync`・既知の失敗の一覧 `SyncModelKnownFailures.EngineSet`。結果は `green`・`known`・`differs` の 3 つ）、`green`・`known` でない行を、塊の道で結果の違う行とする。直結の Theory は同じ行が 1 回で全部の道の端末で一覧どおり（空＝緑）であることを表明するので、塊の道の結果が 1 回で全部の道と同じなら違う行は無い。
   - 違う行は、理由の宣言 `SyncModelSmallChunkScenarioDifferences` と 2 方向に照合する（宣言の無い違う行も、宣言があるのに直結の実行と同じ結果の行も赤）。理由には、塊の経路が違う答えを出す仕組み（削除の段が塊より前・キーを行より先に取る順・塊ごとの確定）を書く。今の宣言は 1 行（`chunk-delete-stage-parent-gone-after-next-sync`＝削除の段で残した親が次の同期まで端末に残る）。
   - 空振りの守り：塊の道を通った実行のある行が 0 行なら赤。印 `SyncModelScenario.CarriesAcrossChunks` のある行は、持ち越しが 1 行以上起きなければ赤。
-- 乱数の種（`SyncSupportAdoSqliteEngineRuntimeTests.SmallChunkRandomSeeds_ConvergeWithoutLoss`）：新しい端末の組と同じ本体に、組 `SmallChunkSuite`（端末の作り方と夜間の数だけが違う）を渡す。生成器・次元表・作らない形の宣言・種の指紋の記録は今の直結と共有する（新しい生成器の部分を持たない）。
-  - 普段の数は今の直結と同じ（60＋広い世界 48）。夜間の数も普段の数と同じにする（夜間に深くしない）。
+- 乱数の種（`SyncSupportAdoSqliteEngineRuntimeTests.SmallChunkRandomSeeds_ConvergeWithoutLoss`）：直結の組 `EngineSuite` と同じ本体に、組 `SmallChunkSuite`（端末の作り方・夜間の数・夜間だけの空振りの守りだけが違う）を渡す。生成器・次元表・作らない形の宣言・種の指紋の記録は直結の組と共有する（新しい生成器の部分を持たない）。
+  - 普段の数は直結の組と同じ（60＋広い世界 48）。夜間の数も普段の数と同じにする（夜間に深くしない）。
     - 理由：夜間の Integration のジョブは目安の 50 分を超えていて（上限 60 分）、この組の種は並列に流れてランナーを使い切るので、足すとジョブの上限に届きうる。塊の経路の形は、普段の CI で直結の Theory との照合が全行を流す。
-    - 上げる条件：夜間のジョブの実測が目安の内へ戻ったら、夜間の数を 240＋広い世界 48 へ上げる（手元で 102 秒）。
+    - 上げる条件：夜間のジョブの実測が目安の内へ戻ったら、夜間の数を普段の 4 倍（240＋広い世界は普段と同じ 48）へ上げる。
   - 既定の種の数のとき、道 Single と Chunked がどちらも 1 回以上起きたことを `CoverageGuard` で表明する（Refused は乱数の種では起きず、決まった形の行 `chunk-download-route-cells` が持つ）。
-  - 夜間だけの空振りの守り（`NightlyGuardedRunChecks`＝戻せなかった行の決定の後の編集の照合）は、この組は持たない。その照合が起きるのは未送信の行がある実行だけで、未送信のある実行は小さい塊の端末でも 1 回で全部の道を通る。守りは新しい端末の組が持つ。
+  - 夜間だけの空振りの守り（`NightlyGuardedRunChecks`＝戻せなかった行の決定の後の編集の照合）は、この組は持たない。その照合が起きるのは未送信の行がある実行だけで、未送信のある実行は小さい塊の端末でも 1 回で全部の道を通る。守りは直結の組が持つ。
 - 塊をまたぐ形の決定的なシナリオ（`SyncModelScenarios.Engine.LargeDownload.cs`・全転送。小さい塊の端末で形の両端が別の塊に入るよう、詰め物の行と版の順を決めてある）：
   - `chunk-selfref-parent-in-later-chunk`（子の版が親より古い）・`chunk-cross-table-cycle-both-new`（フォルダーが品目をピン留めし、品目はそのフォルダーの下）・`chunk-selfref-cycle-across-chunks`（親子の循環）・`chunk-unique-swap-across-chunks`（一意な値の入れ替え）・`chunk-taker-before-releaser`（後ろの塊の行が手放す値を前の塊の行が取る）。この 5 行は印 `CarriesAcrossChunks` を持つ。
   - `chunk-delete-stage-parent-gone-after-next-sync`：端末に親と子があり、サーバーで子を別の親へ付け替えてから親を消す。1 回で全部の道はその同期で親が消え、塊の道は次の同期で消える（行は「最初の同期の直後に無い」と「2 回目の同期の後に無い」の両方を表明し、前者の違いを宣言が受ける）。
-  - 行どうしの循環の 2 行と一意な値の入れ替えの 1 行は、今のエンジンでは降ろせない（docs の既知の割り切り）。今のエンジンの既知の失敗の一覧（`SyncModelKnownFailures.Set`。今のエンジンの控えで `known`）に、docs の文を名指しした受け入れの項目として署名ごとに載せてある。新しいエンジンの端末では緑（直結の Theory と小さい塊の端末の照合）。その署名のうち、行の期待の手の違反と分類できない静止化の失敗は、種の正規形の項目を作らない（乱数の種で出たら赤のまま）。
+  - どの行も、直結の Theory（1 回で全部の道）と小さい塊の端末の照合（塊の道）の両方で、`chunk-delete-stage-parent-gone-after-next-sync` の宣言した違いを除いて緑。
 - 流していないもの：小さい塊の端末の転送（HTTP・実 SQL Server）。塊の経路は取得した行の数え方と適用だけで決まり、転送に依らない。塊をまたぐ形の行そのものは全転送で流れる。
 
-### 新しいエンジンの決まった形の行
+### 同期のエンジンの決まった形の行
 
-- 同期のモデルの決定的なシナリオでは書けない、新しいエンジン（`TrackedSyncEngine`）だけで確かめる形は、表「新しいエンジンの決まった形の行」（`SyncEngineFixedRows`・影響の地図の名前 `table:SyncEngineFixed`）に置き、`SyncSupportAdoSqliteEngineRuntimeTests.FixedRow_BehavesAsExpected` が 1 行ずつ流す（コンテナなし）。
-  - 端末とサーバー役は `SyncEngineFixedHarness`：端末は `SyncModelEngineDevice` と同じ部品（`SyncLocalTracking.Ensure`・開くたびの確認で包んだ接続ファクトリ・`SqliteLocalRowStore`・4 表の `TrackedSyncTable`）で組み、接続文字列の `Default Timeout` を 1 秒にし、フォルダーのリポジトリに Save フックの口を持つ。サーバー役は同期のモデルの SQLite の代役（`SyncModelServer`）。
+- 同期のモデルの決定的なシナリオでは書けない、同期のエンジン（`SyncEngine`）の形は、表「同期のエンジンの決まった形の行」（`SyncEngineFixedRows`・`SyncEngineFixedRows.StaleEntity.cs`・影響の地図の名前 `table:SyncEngineFixed`）に置き、`SyncSupportAdoSqliteEngineRuntimeTests.FixedRow_BehavesAsExpected` が 1 行ずつ流す（コンテナなし）。行は 105 本。
+  - 端末とサーバー役は `SyncEngineFixedHarness`：端末は `SyncModelEngineDevice` と同じ部品（`SyncLocalTracking.Ensure`・開くたびの確認で包んだ接続ファクトリ・`SqliteLocalRowStore`・4 表の `SyncTable`）で組み、接続文字列の `Default Timeout` を 1 秒にし、フォルダーのリポジトリに Save フックの口を持つ。サーバー役は同期のモデルの SQLite の代役（`SyncModelServer`）。
   - 降ろす行の上限の行は 2 本。どちらも、上限の小さい洗い替えを流し、最初のページを取った後の点（`AfterServerFetchBeforeApply`）で端末へ記録つきの書き込みを 1 つ流す。
     - `refresh-over-row-limit-with-change-written-during-fetch-is-refused`：未送信の無い端末の `Force` なしの洗い替え。途中で新しい行を書くと、洗い替えは `SyncDownloadTooLargeException`（取得した行数・上限・表ごとの未送信の数を表明）で断り、端末は途中で書いた行が足されただけで、サーバー・再開点・前からある行の状態は変わらない。
     - `refresh-force-over-row-limit-with-discarded-key-rewritten-during-fetch-is-refused`：未送信の行がある端末の `Force` の洗い替え。途中でその行を書き直す（連番が進む）と、洗い替えは同じ例外で断り、行は書き直した内容で未送信のまま残る（書き直さなければ断られないことは、決定的なシナリオ `refresh-force-over-row-limit-discards-unsent-and-is-not-refused` が持つ）。
-    - 洗い替えの途中の端末の書き込みは、同期のモデルの決定的なシナリオには置けない。同期のモデルの割り込みは、洗い替えの間は端末の書き手の割り込みを起こさない（`SyncModelFaults.Refreshing`。今のエンジンの端末は洗い替えの間ローカルの書き込みのロックを持ち、端末の書き込みが待ち続けるため。サーバーの書き手の割り込みは起こす）。新しいエンジンは取得の間ロックを持たないので、この 2 本は決まった形の行の端末で、取得の途中に端末へ直接書く。上限を超えて未送信がある同期・`Force` の洗い替え・上限ちょうどは、決定的なシナリオ（`dl-row-limit-*`・`refresh-force-over-row-limit-discards-unsent-and-is-not-refused`・全転送）が持つ。
-  - 塊ごとに確定する経路の行は 6 本（`chunk-*`）。行の中でエンジンの internal の値（閾値・塊の大きさ）を小さくし、差分ソースを包む `ObservedSyncServerSource`（行とキーの取得を前後で観測し、何回目の呼び出しかを数える。`SyncEngineFixedHarness.CreateEngine(observe)`）で、当たった時点の端末の状態を控えて、実行の後に表明する。
+    - この 2 本は降ろす行の上限を小さくした洗い替えで流す（同期のモデルの割り込みの網の洗い替えの行は上限を製品の既定のまま渡す）。上限を超えて未送信がある同期・`Force` の洗い替え・上限ちょうどは、決定的なシナリオ（`dl-row-limit-*`・`refresh-force-over-row-limit-discards-unsent-and-is-not-refused`・全転送）が持つ。
+  - 塊ごとに確定する経路の行は 10 本（`chunk-*`。洗い替えの `chunk-refresh-*` は別に数える）。行の中でエンジンの internal の値（閾値・塊の大きさ）を小さくし、差分ソースを包む `ObservedSyncServerSource`（行とキーの取得を前後で観測し、何回目の呼び出しかを数える。`SyncEngineFixedHarness.CreateEngine(observe)`）で、当たった時点の端末の状態を控えて、実行の後に表明する。
     - `chunk-failure-between-chunks-keeps-first-chunk-and-next-sync-resumes`：2 ページ目の取得の前で失敗させる。その時点で最初の塊の行が端末にあり、再開点がその塊の最後の行の版と一致する。同期は例外で終わり、次の同期は続きだけを取得してそろう。
     - `chunk-failure-after-carry-keeps-resume-point-before-carried-row`：最初の塊で子が保留（親が後ろの塊）になり、後ろの塊を書いた後で失敗させる。再開点は最初に持ち越した行の手前で止まり（後ろの塊の版まで進まない）、次の同期で持ち越していた行が入ってそろう。
     - `chunk-unsent-edit-between-chunks-kept-then-serverwins-restores`・`chunk-unsent-edit-between-chunks-kept-then-localwins-uploads`：最初の塊のコミットの後（その時点の端末の行で表明）に、まだ書かれていない行を端末で編集する。その実行の後、編集した行はローカルの内容のまま未送信で残り、ほかの行は降りている。続く ServerWins の同期はサーバーの内容に戻し、LocalWins の同期はローカルの内容をサーバーへ上げる。
     - `chunk-row-gone-after-keys-stays-until-next-sync`：入口の後、後ろの表のキーの取得がその表の行の取得より前だったことを呼び出しの順で表明し、その間にサーバーで消えた行が、その実行の後も端末に残って次の同期で消える。
+    - `chunk-failure-then-device-deletes-committed-row-next-sync-sends-delete`：塊の間で落ちた同期が端末に残した最初の塊の行を端末で記録つきで消すと、次の同期がその削除をサーバーへ送り（競合なし）、その後の同期でも行は端末に戻らない。
+    - `chunk-stale-row-then-fetch-failure-then-device-edit-collect-reports-conflict`・`chunk-stale-row-then-fetch-failure-then-device-edit-serverwins-restores`：取得の後・適用の前にサーバーで書き直された行が古い写しのまま塊で確定し、次の取得で同期が落ちた後に端末がその行を編集すると、Collect の同期は ModifiedOnServer を報告してサーバーの新しい内容を上書きせず（編集は未送信のまま残る）、ServerWins の同期は編集を捨てて端末の行をサーバーの新しい内容に戻す。
+    - `chunk-apply-refused-local-write-keeps-committed-chunks-and-next-sync-resumes`：2 つ目の塊の適用の書き込みを端末のトリガーが断ると、同期は例外で終わり、先に確定した最初の塊の行だけが端末にあり、再開点はその塊の最後の行の版で止まる。断りを外した次の同期は続きだけを取得してそろう。
     - `chunk-download-route-cells`：道の決め方の枠（閾値以下・閾値を超え上限以下・上限を超える × 未送信なし・あり、と、上限が閾値以下の設定の 2 枠）を流し、観測した道（Single・Chunked・Refused）と、断る枠が何も適用しないことを表明する。洗い替えの枠（閾値を超えて未送信なし → Chunked・`Force` で捨てる行だけ → Chunked・閾値以下 → Single）も持つ。
   - 洗い替えの塊の経路の行は 10 本（`chunk-refresh-*`）。
     - `chunk-refresh-{plain|discard-blobs|force}-failure-then-{sync|refresh}` の 6 行（1 つの関数が洗い替えの種類 × 次の手から作る）：フォルダーの表の 2 ページ目の取得の前で洗い替えを落とす。その時点で、削除の段が済んでいる（サーバーに無かった行が端末に無い）・フォルダーの再開点が確定した塊の最後の行の版・品目の再開点が null（まだ届いていない表）・blob を捨てる行は全行の blob が空で写し待ちなし・`Force` の行は置き換え済みの行がサーバーの内容で未送信なし、まだの行が端末の内容で未送信、を表明する。次の手が同期なら、続きだけを取得してそろい、`Force` の残りの未送信がサーバーへ上がる。次の手が洗い替えの流し直しなら、そろって未送信が残らない。
@@ -601,10 +551,18 @@ NULL 許容の計算列・サーバーで NULL になった blob・一覧に載�
     - `chunk-refresh-force-discard-blobs-empties-blob-of-discard-changed-after-ceiling`：同じ準備で、取得の上限を洗い替えの始めに固定し、その直後にサーバーの他者が捨てる行を書き直す（その行は洗い替えの取得に入らない。取得した品目の行の数で表明する）。洗い替えの後、その行の blob も空で、未送信も写し待ちも無い。続く blob を運ばない同期はサーバーの内容を降ろし、blob は空のまま。
       - 代役のサーバー役は取得の上限を持たないので、この行は `SyncEngineFixedHarness.CreateEngine` の上限の関数で上限を作る。関数はサーバー役の版を 1 つ採って返す（`SyncModelServer.TakeVersion`。その後の書き込みの版はどれもこれより大きい）。
   - 置けなかった捨てる行の行は 1 本（`refresh-force-discard-blobs-discard-held-back-is-not-left-unsent-with-empty-blob`・1 回で全部の道）：端末が blob と code を記録つきで書いた品目のサーバーの code を、`Force` かつ blob を捨てる洗い替えの品目の最初の取得の前に、端末の別の品目が記録つきで取る（洗い替えが捨てない未送信なので、サーバーの行を置けない）。洗い替えの後、その品目は未送信のまま blob も端末で書いた内容のまま。同じ洗い替えで、置き換えた捨てる行と未送信の無い行の blob は空になり、洗い替えの間に書かれた未送信の行の blob は残る（1 回で全部の道のこの 3 つを見る行はほかに無い）。端末が題名だけをもう一度書いてから流す blob を運ぶ同期の後、サーバーの blob は空でない（元の値か端末で書いた値）。
-  - 未送信の行を外す条件の形の行は 1 本（`unsent-rows-condition-reads-state-table-once`）：製品の条件（`TrackedSyncEngine.NotUnsentCondition`）を品目の表に掛けた文の実行計画（`SyncEngineFixedHarness.QueryPlanAsync`＝`EXPLAIN QUERY PLAN`）に、表の行ごとに流し直す副問い合わせ（`CORRELATED`）が無いことを見る。対照として、行ごとに行の状態の表を引く文の計画には `CORRELATED` が出ることを同じ行で見る（表明が空振りでない）。条件の文字列はテストへ写さず、製品の関数から取る。行が少ないテストでは、この形の退行は結果にも時間にも出ない（10 万行の表で初めて数分かかる）。
+  - 未送信の行を外す条件の形の行は 1 本（`unsent-rows-condition-reads-state-table-once`）：製品の条件（`SyncEngine.NotUnsentCondition`）を品目の表に掛けた文の実行計画（`SyncEngineFixedHarness.QueryPlanAsync`＝`EXPLAIN QUERY PLAN`）に、表の行ごとに流し直す副問い合わせ（`CORRELATED`）が無いことを見る。対照として、行ごとに行の状態の表を引く文の計画には `CORRELATED` が出ることを同じ行で見る（表明が空振りでない）。条件の文字列はテストへ写さず、製品の関数から取る。行が少ないテストでは、この形の退行は結果にも時間にも出ない（10 万行の表で初めて数分かかる）。
     - 同じ条件で記録した送る行だけが残ることは、トリガーの記録の表（`SyncTriggerRecordingRows`）の全行に共通の表明（`SyncTriggerHarness.CountRowsKeptAsUnsentAsync`）が、キーの格納の型（整数・テキスト・実数・blob）ごとに見る。
-  - エンジンの行は 10 本：同じ DB の 2 本の実行の直列化（1 本目をサーバー役の待ちの点で止め、2 本目がサーバー役に来る順序を `SyncModelFaults.ObservePoint` で記録する。表明は順序で行う）・保存フックの中の同期（保存の書き込みのロックを待って SQLITE_BUSY で失敗し、行の状態の表・端末・サーバーに途中の状態を残さず、実行のロックを手放す）・空にした表（3 つの入口が `SyncLocalTableEmptiedException` で断り何も変えない）・引数の検査（取得の大きさ 0 以下・降ろす行の上限 0 以下・同期しない型の除外。同期・送信だけ・受信だけ・洗い替えの 4 つの入口）・生の SQL で主キーを変えた行の blob が届く（主キーの変更はトリガーに記録され、新しいキーは挿入として全列を送る）・一意な値の回転が端末の blob を保つ・サーバーへの書き込みの後に送信の決着が失敗した後の同期（docs の既知の制限のとおり、次の Collect は自分が書いた行を相手に ModifiedOnServer を報告し続け、LocalWins で収束する）・洗い替えの取得の失敗は端末・未送信・行の状態の表を洗い替えの前のまま残す（今のエンジンは表を空にしてから流し込むので、同じ形を同期のモデルの決定的なシナリオには置けない）・洗い替えの直後の同期と同期の直後の同期がサーバーから 1 行も取得しない（再開点を書かなくても、取り直した行はエコーとして書かれず内容に出ないので、`SyncModelFaults.ObservePoint` で取得が 1 行以上を返した後の点が来ないことを見る。対照としてサーバーの他者が変えた後の同期では点が来る）・端末が作って消したサーバーが知らないキーの未送信の行と同じキーでサーバーの他者が行を作ると、受信だけの実行がサーバーの行を端末に入れる（同期の送信の段はその記録を送らずに片付けるので、受信の段まで未送信が残るのは受信だけの実行のとき。今のエンジンはその実行では降ろさないので、同期のモデルの決定的なシナリオには置けない）。
-  - 記録しない書き込みの API（`SyncLocalTracking.WriteUntrackedAsync`）の行は 9 本（`untracked-write-*`）：関数がプールの接続を閉じると、トランザクションとロックがプールに残り（別の接続の書き込みが SQLITE_BUSY になることで、その形が起きていることを確かめる）、同じプールの次の接続を開くと開くたびの確認が巻き戻す（この行だけ、製品の接続ファクトリを確認で包んだ行の中のファクトリを使う。開く処理が流す文を製品のものだけにするため＝端末の接続ファクトリは、開くたびにテストのジャーナルの設定の PRAGMA も流す。接続文字列を変えて、端末のほかの接続とプールを分ける）／書いた行は記録されず前からある記録・連番・印は変わらない／プールの接続で関数が例外を投げた後・取り消された後に何も残らず、渡した接続・同じプールの次の接続がトランザクションの外にあり、プールしない別の接続（待ち 1 秒）が書けて記録される／流れている間、別の接続の読み取りは待たずにコミットの前の内容を読み、書き込みはコミットまで進まない（順序で見る）／関数が生成の Repository で書くと SQLITE_BUSY で失敗して全体が巻き戻る／トランザクションの中の接続と入れ子の呼び出しを断り、利用者のトランザクションに触らない／開いていない接続・関数の中で閉じた接続・状態の表に行の無い DB を断る／コミットされて残った印があっても断らずに流れ、印を 0 に戻す。
+  - エンジンの行は 13 本：同じ DB の 2 本の実行の直列化（1 本目をサーバー役の待ちの点で止め、2 本目がサーバー役に来る順序を `SyncModelFaults.ObservePoint` で記録する。表明は順序で行う）・保存フックの中の同期（保存の書き込みのロックを待って SQLITE_BUSY で失敗し、行の状態の表・端末・サーバーに途中の状態を残さず、実行のロックを手放す）・空にした表（3 つの入口が `SyncLocalTableEmptiedException` で断り何も変えない）・引数の検査（取得の大きさ 0 以下・降ろす行の上限 0 以下・同期しない型の除外。同期・送信だけ・受信だけ・洗い替えの 4 つの入口）・生の SQL で主キーを変えた行の blob が届く（主キーの変更はトリガーに記録され、新しいキーは挿入として全列を送る）・一意な値の回転が端末の blob を保つ・サーバーへの書き込みの後に送信の決着が失敗した後の同期（docs の既知の制限のとおり、次の Collect は自分が書いた行を相手に ModifiedOnServer を報告し続け、LocalWins で収束する）・洗い替えの取得の失敗は端末・未送信・行の状態の表を洗い替えの前のまま残す（`refresh-fetch-failure-leaves-device-as-before`）・1 回で全部の道の同期が 1 ページ目を取得した後の取得の失敗で終わると、端末・未送信・行の状態の表・再開点を同期の前のまま残す（`sync-fetch-failure-leaves-device-as-before`。割り込みの網が、次の取得の失敗 × 前段 `parent-after-child-*` × 編集してから同期の組を起こり得ないとして外す根拠の仕様）・1 回で全部の道の同期と `Force` の洗い替えの適用の書き込みを端末のトリガーが断ると、例外で終わって適用は何も残さず、断りを外した次の同期でそろう（`apply-refused-local-write-leaves-device-as-before-then-next-sync-settles`・`refresh-apply-refused-local-write-leaves-device-as-before`。同期は先に通る送信の段が決着させた行を除く）・洗い替えの直後の同期と同期の直後の同期がサーバーから 1 行も取得しない（`SyncModelFaults.ObservePoint` で取得が 1 行以上を返した後の点が来ないことを見る。対照としてサーバーの他者が変えた後の同期では点が来る）・端末が作って消したサーバーが知らないキーの未送信の行と同じキーでサーバーの他者が行を作ると、受信だけの実行がサーバーの行を端末に入れる（同期の送信の段はその記録を送らずに片付けるので、受信の段まで未送信が残るのは受信だけの実行のとき）。
+  - 古い読みの保存の行は 18 本（`stale-entity-*`・`SyncEngineFixedRows.StaleEntity.cs`）。同期が他者の内容を降ろす前に読んだ実体を、降ろした後に SQLite の Repository で保存する（Repository の UPDATE は版を照合せず、版の列を普通の列として書くので、端末の行の版の列が古い版へ戻る）。版で守る送信の段は、端末の行が持つ版が、エンジンがその行へ最後に入れた他者の内容の版より古ければ、その版を元の版にして送り、サーバーの版の照合が ModifiedOnServer を返す。端末自身が上げた版・同じ版の書き直し・強制の上書きの後は、他者の内容に数えない。
+    - 降ろした後の古い実体の保存 × ポリシー 4 本：Collect は ModifiedOnServer を報告して上書きせず、行は未送信のまま残り次の Collect でも報告する（対照：降ろす前に保存した古い読みの編集も ModifiedOnServer）／ServerWins は捨てて（DiscardedByServerWins）端末の行をサーバーの内容とサーバーの版に戻す／LocalWins は上書きで上げ、その後に同じ古い実体をもう一度保存した Collect は競合なしに上がる／後勝ちは見分けずに上書きする。
+    - 他者の内容を入れる適用の経路ごとの 3 本（`stale-entity-saved-after-{chunked-download|refresh-brought-other-content|serverwins-put-back-other-content}-collect-reports-modified-on-server`＝塊ごとに確定する取得・洗い替え・ServerWins の戻し）：どれも Collect が ModifiedOnServer を報告する。
+    - 偽の競合にならない形 4 本：自分が上げた後の保存（`stale-entity-saved-after-own-upload-is-not-a-conflict`）・自分の 2 回の上げの間に読んだ実体・自分が上げた版を洗い替えが同じ版で書き直した後・自分が上げた行の次の編集を ServerWins が同じ版で戻した後。
+    - 広く見分ける形 2 本：他者の内容の後に自分が上げても、他者の内容より前に読んだ実体の保存は ModifiedOnServer（自分の後の書き込みで他者の内容の記録を忘れない）／送信の決着が失敗した後に ServerWins がサーバーの行（自分の内容）で戻した後の保存も ModifiedOnServer（決着の無い版は他者の内容に数える）。
+    - 生 SQL の更新が続いた行 1 本（`stale-entity-saved-then-raw-sql-update-collect-reports-modified-on-server`）：版の列を書かない生の SQL の UPDATE が続いても、行は古い版を持ったままなので ModifiedOnServer。
+    - 見分けない形 2 本（今の振る舞いの固定）：古い実体の MarkRemoved のグラフ保存とキーの DeleteAsync は、基準の版で守った削除がそのまま通ってサーバーの行が消える（`stale-entity-delete-after-download-is-not-distinguished-and-deletes-server-row`）／版を持たない実体（端末で作って保存した実体）の保存は競合なしに上がって他者の内容を上書きする（`stale-entity-without-version-saved-after-download-is-not-distinguished-and-uploads`）。
+    - 値オブジェクトの版の列 1 本（SyncVoFixture の端末・`stale-entity-saved-after-download-value-object-version-collect-reports-modified-on-server`）と、版の新旧の比べ方の行 1 本（`stale-entity-version-order-reads-versions-as-big-endian-numbers`＝版を big-endian の符号なし整数として読む：先頭の 0 のバイトは数えず、残りが短いほうが古く、同じ長さならバイトの辞書式。同じ値は古くない。サーバー役の版はどれも 8 バイトなので、長さの枝と先頭の 0 は同期を流す行からは見えない）。
+  - 記録しない書き込みの API（`SyncLocalTracking.WriteUntrackedAsync`）の行は 9 本（`untracked-write-*`）：関数がプールの接続を閉じると、トランザクションとロックがプールに残り（別の接続の書き込みが SQLITE_BUSY になることで、その形が起きていることを確かめる）、同じプールの次の接続を開くと開くたびの確認が巻き戻す（この行だけ、製品の接続ファクトリを確認で包んだ行の中のファクトリを使う。開く処理が流す文を製品のものだけにするため＝端末の接続ファクトリは、開くたびにテストの DB の設定（`SqliteLightJournal`）の PRAGMA も流す。接続文字列を変えて、端末のほかの接続とプールを分ける）／書いた行は記録されず前からある記録・連番・印は変わらない／プールの接続で関数が例外を投げた後・取り消された後に何も残らず、渡した接続・同じプールの次の接続がトランザクションの外にあり、プールしない別の接続（待ち 1 秒）が書けて記録される／流れている間、別の接続の読み取りは待たずにコミットの前の内容を読み、書き込みはコミットまで進まない（順序で見る）／関数が生成の Repository で書くと SQLITE_BUSY で失敗して全体が巻き戻る／トランザクションの中の接続と入れ子の呼び出しを断り、利用者のトランザクションに触らない／開いていない接続・関数の中で閉じた接続・状態の表に行の無い DB を断る／コミットされて残った印があっても断らずに流れ、印を 0 に戻す。
     - 「トランザクションが残らない」は、渡した接続で `BEGIN IMMEDIATE` が通ることと、同じ接続ファクトリの次の接続（同じプール）で同じことと、接続文字列の違うプールしない接続の書き込みが通ることの 3 つで見る（1 つだけだと、同じプールの接続が残ったトランザクションの中で書いて通ってしまう）。
     - `SyncEngineFixedHarness.ExecuteUntrackedAsync` も同じ API で流す。
   - 観測の口 `SyncModelFaults.ObservePoint` は既定で null で、同期のモデルの結果を変えない。
@@ -624,17 +582,22 @@ NULL 許容の計算列・サーバーで NULL になった blob・一覧に載�
     - `refresh-unlisted-referring-table-refuses-while-present-locally`：記述子を写して品目の表からの参照を `LocalReferences` から `UnlistedReferencingTableNames` へ移したエンジンの洗い替えは、品目の行が無くても表が在るだけで `SyncRefreshScopeException` で断り、端末と行の状態の表を変えない。対照として、参照が一覧に載るエンジンと、端末に無い表の名前を一覧に載せないエンジンは通る（同期のモデルの図にこの外部キーが無いので、ハーネスのまま記述子を写して組む）。
     - SyncFixture の端末（`SyncFixtureEngineDevice`・サーバー役 `SyncFixtureTestServer`）：`sync-fixture-blob-cleared-on-server-is-cleared-locally`（サーバーで NULL にした blob は、blob を運ぶ同期で端末でも NULL になる）・`sync-fixture-nullable-computed-column-downloads-and-stays-null`（サーバーで値を持つ NULL 許容の計算列のある行を降ろせ、端末の計算列は NULL のまま）。
     - SyncVoFixture の端末（`SyncVoFixtureEngineDevice`・サーバー役 `SyncVoFixtureTestServer`）：`sync-vo-new-row-with-excluded-not-null-blob-downloads`（NOT NULL の除外 blob を持つサーバーの新しい行を blob を運ばない同期が降ろし、端末の blob は空の値）・`sync-vo-local-insert-without-version-uploads`（版の列が空の端末の新しい行が上がる）・`sync-vo-server-version-written-back-through-value-object`（サーバーが採番した版が値オブジェクトの版の列へ書き戻り、往復が定常になる）。
-    - 端末を組む口は `SyncEngineFixtureDevices.cs`：端末の DB は同期のトリガーの端末（`SyncTriggerHarness`）で作り、`SyncLocalTracking.Ensure` でトリガーと状態の表を張り、開くたびの確認で包んだ接続ファクトリから `SqliteLocalRowStore` とリポジトリを作って `TrackedSyncTable` でエンジンを組む（リポジトリは記録のデコレータで包まない）。サーバー役は呼び出し側が差分ソースで渡す（SQLite の代役・実 SQL Server の直結・HTTP のどれでもよい）。同じ口を、端末を新しいエンジンへ差し替えた 4 つのテスト（上の「SyncRuntimeTestsBase に残したもの」）も使う。
+    - 端末を組む口は `SyncEngineFixtureDevices.cs`：端末の DB は同期のトリガーの端末（`SyncTriggerHarness`）で作り、`SyncLocalTracking.Ensure` でトリガーと状態の表を張り、開くたびの確認で包んだ接続ファクトリから `SqliteLocalRowStore` とリポジトリを作って `SyncTable` でエンジンを組む（リポジトリは何にも包まない）。サーバー役は呼び出し側が差分ソースで渡す（SQLite の代役・実 SQL Server の直結・HTTP のどれでもよい）。同じ口を、上の「差分ソースの HTTP と実 SQL Server の固有のテスト」の端末も使う。
 - mutation 実証済み（実行のロックを外す・空にした表の確かめを外す・回転で blob を戻さない・挿入した行の blob の列を全部にしない・洗い替えが再開点を書かない・同期が再開点を書かない・洗い替えの取得の大きさの検査を外す・ローカルに無くサーバーが知らない未送信の行にもローカルを残す・降ろす行の上限の検査を外す・洗い替えのときは上限を超えて未送信があっても断らない・洗い替えが捨てる行を連番を見ずにキーだけで未送信から外す、のそれぞれで対応する行が赤。塊ごとに確定する経路：再開点を持ち越し中の行の先へ進める・閾値の時点の未送信を無視する・入口の後ろの表のキーを取らない・塊の計画で行の状態を読まない、のそれぞれで対応する `chunk-*` の行が赤。洗い替えの塊の経路：削除の段で再開点を戻さない・塊で捨てる行を置き換えない・削除の段の blob を空にする処理を外す・最後の段で取得が持ってこなかった捨てる行を片付けない・削除の段で捨てる行の blob も空にする・置き換えの時点で blob を空にしない・最後の段で取得が持ってこなかった捨てる行の blob を空にしない、のそれぞれで対応する `chunk-refresh-*` の行が赤。記録しない書き込みの API：失敗の出口で巻き戻さない・巻き戻しを呼び出し側の取り消しのトークンで流す・印を立てない・印を戻さずにコミットする・トランザクションの中の接続を名指しで断らない・関数の中で閉じた接続を確かめない・状態の表の行を確かめない・開くたびの確認がプールに残ったトランザクションを巻き戻さない、のそれぞれで対応する行が赤。進まない差分ソースの守りを版あり・版なしで 1 つずつ外すと、対応する 2 行が赤。未送信の一覧と捨てる口：印を立てない・連番を確かめずに立てる・型を渡す版が全部の表に立てる・一覧がエンジンの表でない行も返す・一覧の捨てる印をいつも偽にする・一覧を実行のロックの中へ戻す・捨てる口から実行のロックを外す、のそれぞれで対応する行が赤。ServerWins が戻す行の版を、戻す書き込みの前に端末の前の版へ差し替えると、`sync-vo-serverwins-restores-row-with-server-version` だけが赤。実行の接続：実行の終わりに閉じない・未送信の一覧が実行の接続を借りる・送信の決着をコミットしない・実行の中の 1 か所を開き直す形へ戻す、のそれぞれで対応する行が赤）。
 
 ### 同期のトリガーのテスト
 
 - ローカルの変更の記録（`SyncLocalTracking`）と開くたびの確認（`SyncLocalTrackingGuard`）は、`SyncSupportAdoSqliteTriggerRuntimeTests`（Theory 2 本・コンテナなし）が 2 つの行の表を 1 行ずつ流して確かめる。仕組みの正本は `src/QuickER.Runtime.Sync/CLAUDE.md`「ローカルの変更の記録（SyncLocalTracking）」「開くたびの確認（SyncLocalTrackingGuard）」。
   - 行の表は「同期のトリガーの記録」（`SyncTriggerRecordingRows`・影響の地図の名前 `table:SyncTriggerRecording`）と「同期のトリガーの確認」（`SyncTriggerGuardRows`・`table:SyncTriggerGuard`）。端末の組み立ては `SyncTriggerHarness`（SyncModelFixture・SyncFixture・SyncVoFixture の 3 つのフィクスチャの SQLite の側）。
-  - 行の数は記録の表が 54 行・確認の表が 38 行。
+  - 行の数は記録の表が 55 行・確認の表が 48 行（うち DI の登録の行 `di-*` が 11 行）。
+  - 確認の表の DI の登録の行（`SyncTriggerGuardDiRows.cs`）は、生成の `AddGeneratedSyncEngine` を SyncFixture の SQLite の端末で確かめる。行の手 `Open` の中でサービスの登録を組み（プロバイダはスコープを検査する）、そのコンテナで開いた接続・書き込み・エンジンの実行を表明する（行のガードは使わないので回数の増え方は 0 で、Repository の書き込みと速い道の共通の表明は掛けない。DB のファイルの共通の表明は、登録が接続を開いてトリガーを張る行だけに掛ける）。
+    - 登録が接続ファクトリを包む：keyed の登録では keyed の接続ファクトリが確認つきの包みになり、keyed の Repository の書き込みと生 SQL の書き込みがどちらも行の状態の表に残る（同じコンテナのサーバーの側の登録は包まない＝`di-keyed-registration-records-repository-writes`）。キーなしの登録も同じ（`di-unkeyed-registration-records-repository-writes`）。Repository の登録の後にインスタンスで登録し直した接続ファクトリは、そのインスタンスを内側にして包まれ、シングルトンのままどのスコープでも同じ包みが返る（`di-instance-registered-connection-factory-is-wrapped`）。
+    - 除外：`excludeFromSync` に渡した表にはトリガーを張らず、その表への書き込みは記録されない（`di-excluded-table-gets-no-trigger-and-is-not-recorded`）。除外した表の行が範囲の表の行を参照していると、DI から引いたエンジンの洗い替えは `SyncRefreshScopeException` で断る（`di-excluded-table-rows-referring-to-scope-refuse-refresh`）。
+    - 登録の断り：同期する型でない除外（`di-unknown-exclusion-is-refused`）と全部の除外（`di-excluding-everything-is-refused`）は `ArgumentException`、ローカルの接続ファクトリをそのキーで登録する前の呼び出しはキーを名指しした `InvalidOperationException`（`di-no-local-connection-factory-is-refused`）、`AddGeneratedSyncEngine` の後で同じキーの接続ファクトリを登録し直したコンテナからエンジンを引くと名指しの `InvalidOperationException`（`di-connection-factory-registered-after-sync-engine-is-refused`）。
+    - 業務の表が 1 つも無い DB では、包んだ接続ファクトリの最初の接続で状態の表だけができ、次に開く接続からトリガーが在って書き込みが記録される（`di-tables-created-on-first-connection-are-recorded-from-next-connection`）。DI から引いたエンジンの同期でローカルの新しい行が上がりサーバーの新しい行が降り、除外した表のサーバーの行は降りず、行を飛ばすローカルの Save フックがあっても降りた行は入りフックは呼ばれない（`di-sync-through-registered-engine-uploads-and-downloads`）。
   - 記録の表には、グラフ保存が DB から消した行だけを削除として記録する行（`graph-save-removed-parent-with-new-children-records-only-deleted-rows`＝消す親の下のキーの無い新しい子と、キーを持つ新しい版なしの子は記録に無い）と、トリガーを張らない親の表のリポジトリのグラフ保存が同期する子だけを記録する行（`graph-save-through-untracked-parent-records-only-tracked-child`）がある。
   - 記録の表には、行ごとの状態の表のエンジンだけが書く 4 列（`base_version`・`known`・`sw_seq`・`blob_owed`）を、更新・削除して入れ直す・主キーの変更（古いキー）・無制限バイナリ列の書き込みの後も保つ行（`engine-columns-kept-by-*`）がある。
-  - 確認の表には、エンジンの列が足りない状態の表へ列を足して未送信の行を保つ行（`row-table-without-engine-columns-gets-them-and-keeps-unsent-rows`）と、再開点の表（`quicker_sync_table`）だけを落としたときに 2 段目で足りないと答えて作り直す行（`anchor-table-dropped-is-recreated`）がある。
+  - 確認の表には、再開点の表（`quicker_sync_table`）だけを落としたときに 2 段目で足りないと答えて作り直す行（`anchor-table-dropped-is-recreated`）がある。
   - 確認の表には、コミットされて残った適用中の印の行が 6 本ある（`applying-flag-*`）：速い道・2 段目の後・張り直しの後のどれでも、その開く処理が印を 0 に戻す（`applying-flag-left-set-is-cleared-on-fast-path-open`・`-after-full-check`・`-after-repair`）／書き込みのロックを取れなければ接続を閉じて断り、後で開けば戻す／読み取り専用の接続は断る／開いたままのトランザクションの中の印は、開く処理を待たせない（`applying-flag-inside-open-transaction-does-not-block-open`）。
     - 戻す 3 行は、行のガードで 1 回だけ開いた直後に、包んでいない接続で印を読む（行の手 `Open` を差し替える）。共通の表明（その後の Repository の書き込みが記録される）より後で読むと、その書き込みの接続が速い道で印を戻してしまい、2 段目・張り直しの後に戻さない壊し方が緑のまま通る。
 - 記録の表の共通の表明
@@ -646,5 +609,5 @@ NULL 許容の計算列・サーバーで NULL になった blob・一覧に載�
   - 成功するとき：トリガーが `TriggersFor` と一致し状態の表に 1 行・その後の書き込みが記録に残る・もう一度開くと速い道。
 - 行に固めていないもの：同時に開く 2 つの接続の回数（範囲で期待する）。
 - 観測どおりに固めたもの：カスケードの記録の順（孫の削除 → 子の削除 → 子の NULL 化 → 親の削除）・`VACUUM` の後は 2 段目に入る・`Data Source=:memory:` は開くたびに別の空の DB になる・同期する表の名前を変えるとトリガーが変えた後の名前の表に付け替わり、古い表の名前で記録し続ける。
-- 生成の行：`CodegenCaseTests` の行 `exec-sync-dotted-table-name-local-tracking-refuses-attached-database`・`exec-sync-quoted-names-local-tracking-records-on-sqlite`。分割の Runtime 系ファイルの型の集合の行 `relation-runtime-type-set-split-multi-dialect` は、機能で出し分ける固定の部品（HTTP・同期）を有効にした構成で照らす。
+- 生成の行：`CodegenCaseTests` の行 `diag-sync-schema-qualified-table-excluded-with-warning`・`exec-sync-quoted-names-local-tracking-records-on-sqlite`。分割の Runtime 系ファイルの型の集合の行 `relation-runtime-type-set-split-multi-dialect` は、機能で出し分ける固定の部品（HTTP・同期）を有効にした構成で照らす。
 - mutation 実証済み（記録：適用中の印の条件を外す・連番を進めない・主キーを変える更新の古いキーを削除として記録しない・挿入し直しで無制限バイナリ列の名前を付け直さない／確認：速い道が DB ごとの印を見ない・失敗のときに接続を閉じない・読むだけの確かめが比べない・覚える鍵に定義のハッシュを入れない・張る前に列を確かめない・残った適用中の印を戻さない・印を速い道でしか戻さない・印を戻す文を開くたびに流す）。

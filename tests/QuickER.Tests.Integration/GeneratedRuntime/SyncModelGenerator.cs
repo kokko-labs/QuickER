@@ -488,9 +488,7 @@ internal sealed class SyncModelGenerator
         if (Faults && _random.NextDouble() < 0.12)
         {
             var device = PickDevice();
-            var kinds = Enum.GetValues<ModelFaultKind>()
-                .Where(kind => kind != ModelFaultKind.ApplySkip)
-                .ToArray();
+            var kinds = Enum.GetValues<ModelFaultKind>();
 
             return [new ArmFaultOp(device, kinds[_random.Next(kinds.Length)])];
         }

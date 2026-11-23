@@ -101,14 +101,9 @@ internal static partial class SyncModelScenarios
                     PlainOnly(D1, ModelSyncKind.Upload, policy: SyncConflictPolicy.ServerWins),
                     Expect.Result(D1).Contains("uploaded=0", "discarded=1").Absent("conflict *"),
                     Expect.Rows(D1, F).Contains("2 parent=null name=server-x"),
-                    // 再開点をミラー版から導くエンジンは、戻した行のミラー版を据え置く。再開点を表ごとに別に持つエンジンは、戻した
-                    // 行の版の列をサーバーの版にする（どちらでも、続くダウンロードが戻した行より前の版のフォルダー 1 を降ろす）
-                    new WhenEngineDeclaresOp(
-                        D1,
-                        EngineDeclaration.DerivesResumePointFromLocalVersions,
-                        [Expect.Mirror(D1, F).Contains("key=2 mirror=other before=same")],
-                        [Expect.Mirror(D1, F).Contains("key=2 mirror=server before=changed")]
-                    ),
+                    // エンジンは再開点を表ごとに別に持ち、戻した行の版の列をサーバーの版にする（続くダウンロードが戻した行より前の
+                    // 版のフォルダー 1 を降ろす）
+                    Expect.Mirror(D1, F).Contains("key=2 mirror=server before=changed"),
                     PlainOnly(D1, ModelSyncKind.Download, policy: SyncConflictPolicy.ServerWins),
                     Expect.Result(D1).Contains("downloaded=1"),
                     Expect
@@ -162,79 +157,6 @@ internal static partial class SyncModelScenarios
                         .Absent("conflict *"),
                 ]
             ),
-            Moved(
-                "replay-unlanded-delete-entry-is-discarded",
-                [.. Seed(1, "alice", 11, "widget")],
-                [
-                    new DeleteFolderOp(D1, Direct, 1) { ExpectFailure = true },
-                    Expect.Journal(D1).Empty(),
-                    new RecordJournalOp(D1, F, "1", SyncJournalOperation.Delete),
-                    Expect.Rows(D1, F).Contains("1 *"),
-                    Expect.Journal(D1).Exact($"{F} key=1 op=Delete *"),
-                    Plain(D1),
-                    Expect.Result(D1).Contains("uploaded=0", "discarded=1").Absent("conflict *"),
-                    Expect.Rows(SV, F).Contains("1 *"),
-                    Expect.Rows(D1, F).Contains("1 *"),
-                    Expect.Journal(D1).Empty(),
-                ]
-            ),
-            // 同じ形を外部の ISyncTable の代役で：最新の記録で計画する表でも、着地しなかった削除の記録は 1 回で捨てる
-            // （行が残り、計画の後に書かれた記録も無い削除の記録を残すと、毎回同じ削除を計画して行を見つけ続ける）
-            Moved(
-                "replay-unlanded-delete-entry-is-discarded-external-table",
-                [.. Seed(1, "alice", 11, "widget")],
-                [
-                    new DeleteFolderOp(D1, Direct, 1) { ExpectFailure = true },
-                    new RecordJournalOp(D1, F, "1", SyncJournalOperation.Delete),
-                    Expect.Journal(D1).Exact($"{F} key=1 op=Delete *"),
-                    Plain(D1),
-                    Expect.Result(D1).Contains("uploaded=0", "discarded=1").Absent("conflict *"),
-                    Expect.Rows(SV, F).Contains("1 *"),
-                    Expect.Journal(D1).Empty(),
-                ]
-            ) with
-            {
-                ExternalTables = [D1],
-            },
-            // P5-2 の S1 を外部の ISyncTable の代役で：計画した削除を送る前に同じキーで作り直すと、削除の記録（版つき）は
-            // 作り直しの記録と一緒に残り、次の回が版つきの更新として送る（捨てると挿入として送って偽の DuplicateOnServer）
-            Moved(
-                "replay-recreated-pending-delete-is-sent-as-update-external-table",
-                [Folder(SV, 700), Item(SV, 701, folder: 700), Item(SV, 702, folder: 700)],
-                [
-                    new UpdateItemOp(D1, Direct, 701, 700, null, "c-701", "a-edited"),
-                    new DeleteItemOp(D1, Direct, 702),
-                    new ArmInterruptOp(
-                        D1,
-                        ModelInterruptPoint.BeforeServerWrite,
-                        new AddItemOp(
-                            D1,
-                            Direct,
-                            702,
-                            700,
-                            null,
-                            "c-702",
-                            "b-recreated",
-                            "0A0B0702"
-                        )
-                    ),
-                    Plain(D1),
-                    Expect
-                        .Journal(D1)
-                        .Count("*", 2)
-                        .Single($"{I} key=702 op=Delete ver=set * age=old")
-                        .Single($"{I} key=702 op=Upsert * age=new"),
-                    Plain(D1),
-                    Expect.Result(D1).Absent("conflict *"),
-                    Expect.Journal(D1).Empty(),
-                    Expect
-                        .Rows(SV, I)
-                        .Contains("702 folder=700 label=null code=c-702 title=b-recreated"),
-                ]
-            ) with
-            {
-                ExternalTables = [D1],
-            },
             Moved(
                 "ul-settles-more-journal-entries-than-one-in-clause",
                 [],
@@ -385,19 +307,6 @@ internal static partial class SyncModelScenarios
                         .Single($"conflict {F} *")
                         .Absent("truncation *"),
                     Expect.Rows(D1, F).Contains("1 parent=null name=local-edit", "2 *"),
-                    Expect.Rows(D1, I).Contains("12 *"),
-                ]
-            ),
-            Moved(
-                "conflict-discarded-lets-next-run-catch-up",
-                [.. Seed(1, "alice", 11, "widget")],
-                [
-                    .. ConflictWithNewerServerRows(),
-                    Plain(D1),
-                    new ClearJournalOp(D1, F),
-                    Plain(D1),
-                    Expect.Result(D1).Absent("conflict *", "truncation *"),
-                    Expect.Rows(D1, F).Contains("1 parent=null name=server-edit", "2 *"),
                     Expect.Rows(D1, I).Contains("12 *"),
                 ]
             ),

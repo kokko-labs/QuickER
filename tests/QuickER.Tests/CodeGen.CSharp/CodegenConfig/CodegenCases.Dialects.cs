@@ -1,3 +1,4 @@
+using System.Collections;
 using QuickER.CodeGen.CSharp;
 using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Dialects;
@@ -890,6 +891,73 @@ internal static partial class CodegenCases
                     ),
                     1
                 )
+            ),
+            new(
+                "diag-sync-schema-qualified-table-excluded-with-warning",
+                null,
+                "名前がスキーマ修飾の表は同期の対象から外れ、Warning で名指しされる。同期の表の Info・記述子・参照元（LocalReferences・UnlistedReferencingTableNames）に載らず、"
+                    + "サーバーの側の名前の一覧には残り、記述子は別の DB の名前を持たない。生成物はコンパイルでき、警告は出ない",
+                new CodegenCase(
+                    Dialects_SyncSchemaQualifiedDiagram,
+                    SyncFixtureDefinition.Options,
+                    DialectNames.SqlServer,
+                    DiagnosticExpectation
+                        .CountOf(
+                            ExpectedDiagnostic.WarningMentioning(
+                                nameof(Strings.CodeGen_Warning_SyncSchemaQualifiedTables),
+                                "dbo.sync_notes",
+                                "dbo.marker_refs",
+                                "audit.sync_log"
+                            ),
+                            1
+                        )
+                        .Without(
+                            ExpectedDiagnostic.InfoMentioning(
+                                nameof(Strings.CodeGen_Info_SyncSupportTables),
+                                "dbo.sync_notes"
+                            ),
+                            ExpectedDiagnostic.InfoMentioning(
+                                nameof(Strings.CodeGen_Info_SyncSupportTables),
+                                "dbo.marker_refs"
+                            ),
+                            ExpectedDiagnostic.InfoMentioning(
+                                nameof(Strings.CodeGen_Info_SyncSupportTables),
+                                "audit.sync_log"
+                            )
+                        ),
+                    FileRules: DialectsGenerated,
+                    Exec: [Dialects_SyncSchemaQualifiedExcluded()]
+                )
+            ),
+            DialectRow(
+                "diag-sync-only-schema-qualified-tables-is-error",
+                "同期できる（主キーが 1 列の）テーブルがスキーマ修飾のものだけの図は、同期支援の生成時エラーになる",
+                Dialects_SyncOnlySchemaQualifiedDiagram,
+                SyncFixtureDefinition.Options,
+                DiagnosticExpectation.CountOf(
+                    ExpectedDiagnostic.Error(
+                        nameof(Strings.CodeGen_Error_SyncSupportRequiresEligibleTables)
+                    ),
+                    1
+                )
+            ),
+            DialectRow(
+                "diag-sync-schema-qualified-table-without-sync-support-no-warning",
+                "同期を生成しない構成では、スキーマ修飾の表の Warning を出さない",
+                Dialects_SyncSchemaQualifiedDiagram,
+                SyncFixtureDefinition.Options with
+                {
+                    GenerateSyncSupport = false,
+                    GenerateRemoteServices = false,
+                },
+                DiagnosticExpectation
+                    .Contains()
+                    .Without(
+                        ExpectedDiagnostic.WarningAnyItems(
+                            nameof(Strings.CodeGen_Warning_SyncSchemaQualifiedTables)
+                        )
+                    ),
+                DialectsGenerated
             ),
             DialectRow(
                 "diag-sync-off-allows-no-eligible-table",
@@ -2495,6 +2563,183 @@ internal static partial class CodegenCases
 
         return diagram;
     }
+
+    /// <summary>
+    /// スキーマ修飾の名前の表を足した同期の図（<c>dbo.sync_notes</c>＝<c>sync_orders</c> を単一列の外部キーで参照する子、
+    /// <c>dbo.marker_refs</c>＝<c>sync_markers</c> の一意制約の列を参照する子、<c>audit.sync_log</c>＝どの表とも関係のない表）
+    /// </summary>
+    private static ErDiagram Dialects_SyncSchemaQualifiedDiagram()
+    {
+        var diagram = SyncFixtureDefinition.Build();
+        var marker = diagram.Entities.Single(entity => entity.TableName == "sync_markers");
+        var markerCode = marker.Columns.Single(column => column.Name == "code");
+
+        diagram.Entities.Single(entity => entity.TableName == "sync_notes").TableName =
+            "dbo.sync_notes";
+
+        var refCode = new Column
+        {
+            Id = Guid.NewGuid(),
+            Name = "marker_code",
+            DataType = "nvarchar(20)",
+            IsNullable = true,
+        };
+        var markerRefs = new Entity
+        {
+            Id = Guid.NewGuid(),
+            TableName = "dbo.marker_refs",
+            Columns =
+            {
+                new Column
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "ref_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                refCode,
+            },
+        };
+        diagram.Entities.Add(markerRefs);
+        diagram.Relationships.Add(
+            new Relationship
+            {
+                Id = Guid.NewGuid(),
+                SourceEntityId = marker.Id,
+                TargetEntityId = markerRefs.Id,
+                Type = RelationshipType.OneToMany,
+                ColumnPairs = { new RelationshipColumnPair(markerCode.Id, refCode.Id) },
+            }
+        );
+
+        diagram.Entities.Add(
+            new Entity
+            {
+                Id = Guid.NewGuid(),
+                TableName = "audit.sync_log",
+                Columns =
+                {
+                    new Column
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = "log_id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                        IsNullable = false,
+                    },
+                },
+            }
+        );
+
+        return diagram;
+    }
+
+    /// <summary>全テーブルの名前をスキーマ修飾にした同期の図（同期できるテーブルが 0 件になる）</summary>
+    private static ErDiagram Dialects_SyncOnlySchemaQualifiedDiagram()
+    {
+        var diagram = SyncFixtureDefinition.Build();
+
+        foreach (var entity in diagram.Entities)
+        {
+            entity.TableName = "dbo." + entity.TableName;
+        }
+
+        return diagram;
+    }
+
+    /// <summary>
+    /// スキーマ修飾の表が同期の記述子にも参照元（<c>LocalReferences</c>・<c>UnlistedReferencingTableNames</c>）にも載らず、
+    /// 記述子の型が別の DB の名前のメンバーを持たず、
+    /// <c>LocalTableName</c> が表の名前そのものであることを、生成物の記述子で確かめる
+    /// </summary>
+    private static ExecCheck Dialects_SyncSchemaQualifiedExcluded() =>
+        new(
+            "schema-qualified-tables-are-not-sync-tables-or-local-references",
+            assembly =>
+            {
+                var problems = new List<string>();
+                var descriptors = QueryText_SyncDescriptors(assembly);
+                var tableNames = descriptors
+                    .Select(item => (string)ProbeKit.Get(item.Descriptor, "TableName")!)
+                    .Order(StringComparer.Ordinal)
+                    .ToList();
+                var expectedTables = new[] { "sync_markers", "sync_order_lines", "sync_orders" };
+
+                if (!tableNames.SequenceEqual(expectedTables))
+                {
+                    problems.Add(
+                        $"記述子の表が [{string.Join(", ", tableNames)}]（期待 [{string.Join(", ", expectedTables)}]）"
+                    );
+                }
+
+                foreach (var item in descriptors)
+                {
+                    if (item.Descriptor.GetType().GetProperty("LocalDatabaseName") is not null)
+                    {
+                        problems.Add(
+                            $"{item.Name} の記述子の型が LocalDatabaseName というメンバーを持つ"
+                        );
+                    }
+
+                    var tableName = (string)ProbeKit.Get(item.Descriptor, "TableName")!;
+                    var localTableName = (string)ProbeKit.Get(item.Descriptor, "LocalTableName")!;
+
+                    if (localTableName != tableName)
+                    {
+                        problems.Add(
+                            $"{item.Name} の LocalTableName が '{localTableName}'（期待 '{tableName}'）"
+                        );
+                    }
+                }
+
+                IReadOnlyList<string> LocalReferenceTables(object descriptor) =>
+                    ((IEnumerable)ProbeKit.Get(descriptor, "LocalReferences")!)
+                        .Cast<object>()
+                        .Select(reference => (string)ProbeKit.Get(reference, "TableName")!)
+                        .ToList();
+
+                object Find(string tableName) =>
+                    descriptors
+                        .Single(item =>
+                            (string)ProbeKit.Get(item.Descriptor, "TableName")! == tableName
+                        )
+                        .Descriptor;
+
+                void Expect(string label, IReadOnlyList<string> actual, params string[] expected)
+                {
+                    if (!actual.SequenceEqual(expected))
+                    {
+                        problems.Add(
+                            $"{label} が [{string.Join(", ", actual)}]（期待 [{string.Join(", ", expected)}]）"
+                        );
+                    }
+                }
+
+                if (descriptors.Count == expectedTables.Length)
+                {
+                    var order = Find("sync_orders");
+                    var marker = Find("sync_markers");
+
+                    Expect(
+                        "sync_orders の LocalReferences",
+                        LocalReferenceTables(order),
+                        "sync_order_lines"
+                    );
+                    Expect(
+                        "sync_orders の UnlistedReferencingTableNames",
+                        QueryText_Strings(order, "UnlistedReferencingTableNames")
+                    );
+                    Expect("sync_markers の LocalReferences", LocalReferenceTables(marker));
+                    Expect(
+                        "sync_markers の UnlistedReferencingTableNames",
+                        QueryText_Strings(marker, "UnlistedReferencingTableNames")
+                    );
+                }
+
+                return problems;
+            }
+        );
 
     // ---- マルチターゲットの図・オプション ----
 

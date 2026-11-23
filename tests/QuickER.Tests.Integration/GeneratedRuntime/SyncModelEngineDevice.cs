@@ -17,27 +17,17 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <para>
 /// 組み立て：殻（<see cref="SyncModelDevice.OpenAsync"/>）→ 同期する 4 表に <c>SyncLocalTracking.Ensure</c> でトリガーと状態の表を
 /// 張る → 開くたびの確認（<c>SyncLocalTrackingGuard</c>）で包んだ接続ファクトリ（<c>ObservedSqlConnectionFactory</c>）へ殻を
-/// 載せ替える → そのファクトリで素の生成 Repository 4 つ（記録のデコレータで包まない。殻の Save フックの登録簿は渡す）と
+/// 載せ替える → そのファクトリで素の生成 Repository 4 つ（何にも包まない。殻の Save フックの登録簿は渡す）と
 /// <c>SqliteLocalRowStore</c> を作る → <see cref="SyncModelDevice.Install"/>。
 /// </para>
 /// <para>
-/// エンジンの面（<see cref="EngineModelDeviceSync"/>）は、4 表の <c>TrackedSyncTable</c>（記述子 <c>GeneratedSyncTables.*</c>・
-/// 端末の注文の差分ソース <c>request.Server</c> と blob の面・<c>SqliteLocalRowStore</c>）で組んだ <c>TrackedSyncEngine</c> を呼ぶ。外部の <c>ISyncTable</c>
-/// の代役で包む端末（<see cref="SyncModelDeviceRequest.ExternalTables"/>）は受け持たず、「流せない」
-/// （<see cref="SyncModelDevice.Unsupported"/>）で断る。
+/// エンジンの面（<see cref="EngineModelDeviceSync"/>）は、4 表の <c>SyncTable</c>（記述子 <c>GeneratedSyncTables.*</c>・
+/// 端末の注文の差分ソース <c>request.Server</c> と blob の面・<c>SqliteLocalRowStore</c>）で組んだ <c>SyncEngine</c> を呼ぶ。
+/// 世界の組み方（<see cref="SyncModelWorldOptions.CreateDevice"/>）の既定の端末の作り方は <see cref="CreateAsync(SyncModelDeviceRequest, CancellationToken)"/>。
 /// </para>
 /// </remarks>
 internal static class SyncModelEngineDevice
 {
-    /// <summary>世界の組み方の端末の作り方を、この端末の作り方へ差し替える（名前に <c>+engine</c> を足す）</summary>
-    /// <param name="options">元の組み方（サーバー役・転送経路はそのまま）</param>
-    public static SyncModelWorldOptions On(SyncModelWorldOptions options) =>
-        options with
-        {
-            CreateDevice = CreateAsync,
-            Name = options.Name + "+engine",
-        };
-
     /// <summary>小さい塊の端末の、塊へ入る閾値（取得した行がこれを超えたら塊の経路を考える）</summary>
     public const int SmallChunkThreshold = 2;
 
@@ -110,17 +100,9 @@ internal static class SyncModelEngineDevice
     private static async Task<SyncModelDevice> CreateAsync(
         SyncModelDeviceRequest request,
         CancellationToken ct,
-        Action<TrackedSyncEngine>? configure
+        Action<SyncEngine>? configure
     )
     {
-        if (request.ExternalTables)
-        {
-            throw SyncModelDevice.Unsupported(
-                nameof(SyncModelDeviceRequest.ExternalTables),
-                "engine"
-            );
-        }
-
         var device = await SyncModelDevice.OpenAsync(request.Actor, request.Faults, ct);
 
         try
@@ -140,23 +122,23 @@ internal static class SyncModelEngineDevice
             var rowStore = new SqliteLocalRowStore(factory);
             var state = new EngineModelDeviceSyncState(factory, rowStore);
             var server = request.Server;
-            var engine = new TrackedSyncEngine([
-                new TrackedSyncTable<ModelFolderEntity, int>(
+            var engine = new SyncEngine([
+                new SyncTable<ModelFolderEntity, int>(
                     GeneratedSyncTables.ModelFolder,
                     server.FolderSource,
                     rowStore
                 ),
-                new TrackedSyncTable<ModelLabelEntity, string>(
+                new SyncTable<ModelLabelEntity, string>(
                     GeneratedSyncTables.ModelLabel,
                     server.LabelSource,
                     rowStore
                 ),
-                new TrackedSyncTable<ModelItemEntity, int>(
+                new SyncTable<ModelItemEntity, int>(
                     GeneratedSyncTables.ModelItem,
                     server.ItemSource,
                     rowStore
                 ),
-                new TrackedSyncTable<ModelEventEntity, DateTime>(
+                new SyncTable<ModelEventEntity, DateTime>(
                     GeneratedSyncTables.ModelEvent,
                     server.EventSource,
                     rowStore
@@ -196,7 +178,7 @@ internal static class SyncModelEngineDevice
 }
 
 /// <summary>
-/// 新しいエンジンの取得ごとの道（<c>TrackedSyncDownloadRoute</c>＝1 回で全部・塊・断る）を数える入れ物。小さい塊の端末
+/// 新しいエンジンの取得ごとの道（<c>SyncDownloadRoute</c>＝1 回で全部・塊・断る）を数える入れ物。小さい塊の端末
 /// （<see cref="SyncModelEngineDevice.OnSmallChunks"/>）のエンジンの観測の口へつなぐ。並列に流れる世界から呼ばれてもよい
 /// </summary>
 internal sealed class SyncModelDownloadRoutes
@@ -225,19 +207,19 @@ internal sealed class SyncModelDownloadRoutes
 
     /// <summary>取得 1 回の道を数える（エンジンの観測の口へ渡す形）</summary>
     /// <param name="route">決まった道</param>
-    public void Note(TrackedSyncDownloadRoute route)
+    public void Note(SyncDownloadRoute route)
     {
         switch (route)
         {
-            case TrackedSyncDownloadRoute.Single:
+            case SyncDownloadRoute.Single:
                 Interlocked.Increment(ref _single);
                 break;
 
-            case TrackedSyncDownloadRoute.Chunked:
+            case SyncDownloadRoute.Chunked:
                 Interlocked.Increment(ref _chunked);
                 break;
 
-            case TrackedSyncDownloadRoute.Refused:
+            case SyncDownloadRoute.Refused:
                 Interlocked.Increment(ref _refused);
                 break;
 
@@ -255,12 +237,12 @@ internal sealed class SyncModelDownloadRoutes
 }
 
 /// <summary>
-/// 新しいエンジンの端末のエンジンの面。<c>TrackedSyncEngine</c> を呼び、結果を <see cref="ModelSyncOutcome"/> へ写す
-/// （<see cref="ProductModelDeviceSync"/> と同じ形）。エンジンの例外はそのまま通す。
+/// 新しいエンジンの端末のエンジンの面。<c>SyncEngine</c> を呼び、結果を <see cref="ModelSyncOutcome"/> へ写す。
+/// エンジンの例外はそのまま通す。
 /// </summary>
 /// <param name="engine">端末のエンジン</param>
 /// <param name="rows">端末のローカルの行を読み書きする口（エンジンが使う）</param>
-internal sealed class EngineModelDeviceSync(TrackedSyncEngine engine, ILocalRowStore rows)
+internal sealed class EngineModelDeviceSync(SyncEngine engine, ILocalRowStore rows)
     : IModelDeviceSync
 {
     /// <summary>端末のローカルの行を読み書きする口</summary>
@@ -268,22 +250,6 @@ internal sealed class EngineModelDeviceSync(TrackedSyncEngine engine, ILocalRowS
 
     /// <summary>新しいエンジンは、ServerWins の実行が戻せなかった行の決定を後の実行へ持ち越す</summary>
     public bool CarriesServerWinsDecision => true;
-
-    /// <summary>新しいエンジンの適用は、ローカルの Save フックを呼ばない（ローカルの行の口で書く）</summary>
-    public bool AppliesThroughSaveHooks => false;
-
-    /// <summary>新しいエンジンは、再開点を状態の表（表ごとの再開点）に持ち、ローカルの行の版の列から導かない</summary>
-    public bool DerivesResumePointFromLocalVersions => false;
-
-    /// <summary>
-    /// 新しいエンジンは、同期と洗い替えの取得で保留した行があれば、上限を取り直してもう 1 回だけ取得する（同じ実行の中）
-    /// </summary>
-    public bool RefetchesHeldRowsInSameRun => true;
-
-    /// <summary>
-    /// 新しいエンジンは、1 回の取得が降ろす行が上限を超え、範囲の表に未送信の変更があれば、何も適用せずに断る
-    /// </summary>
-    public bool RefusesDownloadOverRowLimit => true;
 
     public async Task<ModelSyncOutcome> RunAsync(
         ModelSyncKind kind,
@@ -355,7 +321,7 @@ internal sealed class EngineModelDeviceSync(TrackedSyncEngine engine, ILocalRowS
 /// </para>
 /// <para>
 /// 未送信を外す口（<see cref="ClearPendingAsync"/>）は、未送信の印・削除の印・書いた blob の列を初めの値へ戻し、エンジンの列
-/// （<c>base_version</c>・<c>known</c>・<c>sw_seq</c>・<c>blob_owed</c>）と変更の連番は消さない。
+/// （<c>base_version</c>・<c>known</c>・<c>sw_seq</c>・<c>blob_owed</c>・<c>applied_version</c>）と変更の連番は消さない。
 /// </para>
 /// </remarks>
 /// <param name="factory">端末の接続ファクトリ（開くたびの確認つき）</param>

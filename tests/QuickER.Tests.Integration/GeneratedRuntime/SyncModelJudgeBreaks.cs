@@ -4,7 +4,6 @@ using System.Data.Common;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Data.Sqlite;
 using QuickER.Tests.GeneratedSyncModelFixture;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -163,18 +162,6 @@ internal sealed class SyncModelJudgeBreakSync(
 
     public bool CarriesServerWinsDecision => carriesServerWinsDecision;
 
-    /// <summary>包んだエンジンの宣言を引き継ぐ（包みは適用の書き方を変えない）</summary>
-    public bool AppliesThroughSaveHooks => inner.AppliesThroughSaveHooks;
-
-    /// <summary>包んだエンジンの宣言を引き継ぐ（包みは再開点の持ち方を変えない）</summary>
-    public bool DerivesResumePointFromLocalVersions => inner.DerivesResumePointFromLocalVersions;
-
-    /// <summary>包んだエンジンの宣言を引き継ぐ（包みは取得の仕方を変えない）</summary>
-    public bool RefetchesHeldRowsInSameRun => inner.RefetchesHeldRowsInSameRun;
-
-    /// <summary>包んだエンジンの宣言を引き継ぐ（包みは降ろす行の上限の扱いを変えない）</summary>
-    public bool RefusesDownloadOverRowLimit => inner.RefusesDownloadOverRowLimit;
-
     public async Task<ModelSyncOutcome> RunAsync(
         ModelSyncKind kind,
         SyncOptions options,
@@ -189,7 +176,7 @@ internal sealed class SyncModelJudgeBreakSync(
         {
             if (brk.Kind == JudgeBreakKind.WriteLocalToServer)
             {
-                captured[brk.FolderId] = await device.RawFolders.GetByIdAsync(brk.FolderId, ct);
+                captured[brk.FolderId] = await device.Folders.GetByIdAsync(brk.FolderId, ct);
             }
 
             if (brk.Kind == JudgeBreakKind.RestoreFromServer)
@@ -244,7 +231,7 @@ internal sealed class SyncModelJudgeBreakSync(
             .Select(b => new SyncConflict(
                 ModelTables.Folders,
                 ModelDbState.Key(b.FolderId),
-                SyncJournalOperation.Upsert,
+                SyncOperation.Upsert,
                 SyncConflictReason.UniqueValueTakenOnServer,
                 null,
                 null
@@ -254,7 +241,7 @@ internal sealed class SyncModelJudgeBreakSync(
                     .Select(b => new SyncConflict(
                         ModelTables.Folders,
                         ModelDbState.Key(b.FolderId),
-                        SyncJournalOperation.Delete,
+                        SyncOperation.Delete,
                         SyncConflictReason.DeleteRefusedOnServer,
                         null,
                         null
@@ -285,44 +272,25 @@ internal sealed class SyncModelJudgeBreakSync(
 
         await device.WriteUntrackedAsync(
             connection =>
-                connection is not null
-                    ? current is null
-                        ? ExecuteOnAsync(
-                            connection,
-                            "DELETE FROM model_folders WHERE folder_id = @id",
-                            [("@id", brk.FolderId)],
-                            ct
-                        )
-                        : ExecuteOnAsync(
-                            connection,
-                            "UPDATE model_folders SET parent_id = @parent, name = @name, pinned_item_id = @pinned "
-                                + "WHERE folder_id = @id",
-                            [
-                                ("@id", brk.FolderId),
-                                ("@parent", current.ParentId),
-                                ("@name", current.Name),
-                                ("@pinned", current.PinnedItemId),
-                            ],
-                            ct
-                        )
-                    : current is null
-                        ? device.Sql.ExecuteSqlAsync(
-                            "DELETE FROM model_folders WHERE folder_id = @id",
-                            new { id = brk.FolderId },
-                            ct
-                        )
-                        : device.Sql.ExecuteSqlAsync(
-                            "UPDATE model_folders SET parent_id = @parent, name = @name, pinned_item_id = @pinned "
-                                + "WHERE folder_id = @id",
-                            new
-                            {
-                                id = brk.FolderId,
-                                parent = current.ParentId,
-                                name = current.Name,
-                                pinned = current.PinnedItemId,
-                            },
-                            ct
-                        ),
+                current is null
+                    ? ExecuteOnAsync(
+                        connection,
+                        "DELETE FROM model_folders WHERE folder_id = @id",
+                        [("@id", brk.FolderId)],
+                        ct
+                    )
+                    : ExecuteOnAsync(
+                        connection,
+                        "UPDATE model_folders SET parent_id = @parent, name = @name, pinned_item_id = @pinned "
+                            + "WHERE folder_id = @id",
+                        [
+                            ("@id", brk.FolderId),
+                            ("@parent", current.ParentId),
+                            ("@name", current.Name),
+                            ("@pinned", current.PinnedItemId),
+                        ],
+                        ct
+                    ),
             ct
         );
 
@@ -340,31 +308,18 @@ internal sealed class SyncModelJudgeBreakSync(
 
         await device.WriteUntrackedAsync(
             connection =>
-                connection is not null
-                    ? ExecuteOnAsync(
-                        connection,
-                        "INSERT INTO model_folders (folder_id, parent_id, name, pinned_item_id) "
-                            + "VALUES (@id, @parent, @name, @pinned)",
-                        [
-                            ("@id", brk.FolderId),
-                            ("@parent", current.ParentId),
-                            ("@name", current.Name),
-                            ("@pinned", current.PinnedItemId),
-                        ],
-                        ct
-                    )
-                    : device.Sql.ExecuteSqlAsync(
-                        "INSERT INTO model_folders (folder_id, parent_id, name, pinned_item_id) "
-                            + "VALUES (@id, @parent, @name, @pinned)",
-                        new
-                        {
-                            id = brk.FolderId,
-                            parent = current.ParentId,
-                            name = current.Name,
-                            pinned = current.PinnedItemId,
-                        },
-                        ct
-                    ),
+                ExecuteOnAsync(
+                    connection,
+                    "INSERT INTO model_folders (folder_id, parent_id, name, pinned_item_id) "
+                        + "VALUES (@id, @parent, @name, @pinned)",
+                    [
+                        ("@id", brk.FolderId),
+                        ("@parent", current.ParentId),
+                        ("@name", current.Name),
+                        ("@pinned", current.PinnedItemId),
+                    ],
+                    ct
+                ),
             ct
         );
 
@@ -373,33 +328,15 @@ internal sealed class SyncModelJudgeBreakSync(
 
     /// <summary>
     /// 端末のローカル DB へ、外部キーの検査を切った接続で文を順に流す。記録しない書き込みの口
-    /// （<see cref="SyncModelDevice.WriteUntrackedAsync"/>）を通すので、文が書いた行は端末の記録に残らない。口が接続を渡さない
-    /// 端末では、専用の接続（プールしない）を自分で開く
+    /// （<see cref="SyncModelDevice.WriteUntrackedAsync"/>）を通すので、文が書いた行は端末の記録に残らない
     /// </summary>
     private Task WriteWithoutForeignKeysAsync(JudgeBreak brk, CancellationToken ct) =>
         device.WriteUntrackedAsync(
             async connection =>
             {
-                if (connection is not null)
-                {
-                    foreach (var sql in brk.Statements)
-                    {
-                        await ExecuteOnAsync(connection, sql, [], ct);
-                    }
-
-                    return;
-                }
-
-                await using var own = new SqliteConnection(
-                    SyncModelRun.WithoutForeignKeys(device.ConnectionString)
-                );
-                await own.OpenAsync(ct);
-
                 foreach (var sql in brk.Statements)
                 {
-                    await using var command = own.CreateCommand();
-                    command.CommandText = sql;
-                    await command.ExecuteNonQueryAsync(ct);
+                    await ExecuteOnAsync(connection, sql, [], ct);
                 }
             },
             ct,

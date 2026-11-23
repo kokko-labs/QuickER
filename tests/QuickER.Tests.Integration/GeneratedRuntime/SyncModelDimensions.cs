@@ -16,16 +16,13 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 乱数を引かない（種の指紋は変わらない）。操作は実行の前に観測する（同じ歩の前の操作が失敗して実行されなかった操作も数える）。
 /// </para>
 /// <para>
-/// 網羅しない組の照合は、直結のクラスの乱数の種を既定の数で流したときだけ行う（範囲 <see cref="DirectScope"/>）。
+/// 網羅しない組の照合は、直結・新しいエンジンの端末の乱数の種を既定の数で流したときだけ行う（範囲 <see cref="EngineScope"/>）。
 /// HTTP・SQL Server の派生は種の数が少なく（既定 10）、SQL Server は失敗の注入の組を流さないので、観測と要約だけにする
 /// （転送経路は、後の区切りで行列の軸として守る）。
 /// </para>
 /// </remarks>
 internal static class SyncModelDimensions
 {
-    /// <summary>網羅しない組の照合の範囲（直結の乱数の種）</summary>
-    public const string DirectScope = "direct";
-
     /// <summary>網羅しない組の照合の範囲（直結・新しいエンジンの端末の乱数の種）</summary>
     public const string EngineScope = "engine";
 
@@ -300,11 +297,10 @@ internal static class SyncModelDimensions
                     FaultKind,
                     [
                         .. Enum.GetValues<ModelFaultKind>()
-                            .Where(kind => kind != ModelFaultKind.ApplySkip)
                             .Select(kind => new Level(kind.ToString())),
                         new Level(NotFault),
                     ],
-                    "仕掛けた失敗の種類（ApplySkip は乱数に混ぜない＝決定的なシナリオだけが使うので水準にしない。失敗の仕掛けでない操作は not-fault）"
+                    "仕掛けた失敗の種類（失敗の仕掛けでない操作は not-fault）"
                 ),
                 new Factor(
                     KeyOrigin,
@@ -335,13 +331,7 @@ internal static class SyncModelDimensions
             IsValid
         );
 
-    /// <summary>網羅しない組の一覧（範囲は <see cref="DirectScope"/> だけ）</summary>
-    public static CoverageGapSet Gaps { get; } = GapsFor(DirectScope);
-
-    /// <summary>
-    /// 新しいエンジンの端末の乱数の種の網羅しない組の一覧（範囲は <see cref="EngineScope"/> だけ。次元表は生成器の操作を数える
-    /// ので、項目は直結と同じ）
-    /// </summary>
+    /// <summary>新しいエンジンの端末の乱数の種の網羅しない組の一覧（範囲は <see cref="EngineScope"/> だけ）</summary>
     public static CoverageGapSet EngineGaps { get; } = GapsFor(EngineScope);
 
     /// <summary>網羅しない組の一覧を、照合の範囲を付けて作る</summary>
@@ -432,7 +422,7 @@ internal static class SyncModelDimensions
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelTransportRuntimeTests.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelTransports.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelWorld.cs",
-                "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportAdoSqliteCurrentEngineRuntimeTests.cs",
+                "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportAdoSqliteEngineRuntimeTests.cs",
             ],
             [
                 "src/QuickER.Runtime.Sync",
@@ -686,7 +676,7 @@ internal static class SyncModelDimensions
             }
         }
 
-        // サーバーの他者は端末でない（同期エンジン・ジャーナル・保存のフックを持たない）ので、同期の呼び出しも失敗の仕掛けも
+        // サーバーの他者は端末でない（同期エンジン・記録のトリガー・保存のフックを持たない）ので、同期の呼び出しも失敗の仕掛けも
         // 受け取らない
         if (
             family is not null

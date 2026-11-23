@@ -2784,17 +2784,23 @@ internal static partial class CodegenCases
                 code:
                 [
                     Type(
-                        "JournalingRepositoryBase<TEntity, TKey>",
+                        "SyncEngine",
                         file: "Runtime.Sync.g.cs",
                         kind: "class",
-                        modifiers: "public abstract"
+                        modifiers: "public sealed"
                     ),
-                    NoTypes(
-                        "Runtime.Sync.g.cs に宣言された Journaling で始まる sealed な型",
-                        type =>
-                            ColumnText_DeclaredIn(type, "Runtime.Sync.g.cs")
-                            && type.IsSealed
-                            && type.Name.StartsWith("Journaling", StringComparison.Ordinal)
+                    Type(
+                        "SyncTable<TEntity, TKey>",
+                        file: "Runtime.Sync.g.cs",
+                        kind: "class",
+                        modifiers: "public sealed"
+                    ),
+                    // 表ごとの記述子は生成側（Repositories.Sync.g.cs）に置く
+                    Type(
+                        "GeneratedSyncTables",
+                        file: "Repositories.Sync.g.cs",
+                        kind: "class",
+                        modifiers: "public static"
                     ),
                     NoTypes(
                         "Runtime.Sync.g.cs に宣言され、AddGeneratedSyncSupport を持つ",
@@ -2806,13 +2812,13 @@ internal static partial class CodegenCases
                     NoUsing("Runtime.Sync.g.cs", "Microsoft.Extensions.DependencyInjection"),
                     NoReferencesTo("Runtime.Sync.g.cs", "Microsoft.Extensions.DependencyInjection"),
                     NoTypes(
-                        "Repositories.Sync.g.cs に宣言された SyncEngine・SyncJournal で始まるクラス",
+                        "Repositories.Sync.g.cs に宣言された SyncEngine・SyncTable で始まるクラス",
                         type =>
                             ColumnText_DeclaredIn(type, "Repositories.Sync.g.cs")
                             && type.TypeKind == TypeKind.Class
                             && (
                                 type.Name.StartsWith("SyncEngine", StringComparison.Ordinal)
-                                || type.Name.StartsWith("SyncJournal", StringComparison.Ordinal)
+                                || type.Name.StartsWith("SyncTable", StringComparison.Ordinal)
                             )
                     ),
                 ]
@@ -3495,6 +3501,16 @@ internal static partial class CodegenCases
                                 "AddKeyedSingleton<ISqlConnectionFactory>",
                                 count: 1
                             ),
+                            // 接続ファクトリは閉包の変数でなく keyed の登録から引く（SQL 実行器の登録と per-entity 登録の 2 か所）。
+                            // 作るのは非 keyed の版と keyed の版の登録する 1 回ずつで、SQL 実行器は引数が変数でなく解決した値の式（?）で作る
+                            Calls(
+                                extensions,
+                                method,
+                                "GetRequiredKeyedService<ISqlConnectionFactory>",
+                                count: 2
+                            ),
+                            Creates(extensions, method, "SqlConnectionFactory", count: 2),
+                            Creates(extensions, method, "SqlExecutor", arguments: ["?"], count: 1),
                             // keyed の per-entity 登録は共有のローカル関数へ畳まれ、各エンティティは契約とコンストラクタだけを渡す
                             Calls(
                                 extensions,
@@ -3825,6 +3841,285 @@ internal static partial class CodegenCases
         );
 
     /// <summary>
+    /// keyed の <c>AddGeneratedSqliteRepositories(キー, 接続文字列)</c> の後に同じキーで <c>ISqlConnectionFactory</c> を登録し直すと、
+    /// keyed の <c>ISqlExecutor</c> と keyed の Repository は登録し直した接続ファクトリの DB を読む
+    /// （最初の接続文字列の DB は空のまま・登録し直した先の DB だけが 1 行を持つ）
+    /// </summary>
+    private static ExecCheck ColumnText_KeyedRepositoriesUseFactoryRegisteredLater() =>
+        new(
+            "keyed-repositories-use-connection-factory-registered-later",
+            assembly =>
+            {
+                var problems = new List<string>();
+                using var folder = new QuickER.Tests.TestSupport.TestTempFolder();
+
+                string Connection(string file) =>
+                    new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+                    {
+                        DataSource = System.IO.Path.Combine(folder.Path, file),
+                        Pooling = false,
+                    }.ToString();
+
+                var firstConnectionString = Connection("first.db");
+                var laterConnectionString = Connection("later.db");
+
+                // 登録し直す先の DB だけに表と 1 行を置く
+                using (
+                    var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+                        laterConnectionString
+                    )
+                )
+                {
+                    connection.Open();
+                    using var command = connection.CreateCommand();
+                    command.CommandText =
+                        new QuickER.Provider.Sqlite.SqliteDdlGenerator().Build(
+                            ColumnText_SqliteSampleDiagram()
+                        )
+                        + "INSERT INTO customers (customer_id, name, created_at) VALUES (1, 'later', '2024-01-01 00:00:00');";
+                    command.ExecuteNonQuery();
+                }
+
+                const string key = "keyed-later";
+                var services = ProbeKit.Services(
+                    assembly,
+                    "AddGeneratedSqliteRepositories",
+                    key,
+                    firstConnectionString
+                );
+                services.Add(
+                    ServiceDescriptor.KeyedSingleton(
+                        ProbeKit.Type(assembly, "ISqlConnectionFactory"),
+                        key,
+                        ProbeKit.Create(
+                            ProbeKit.Type(assembly, "SqlConnectionFactory"),
+                            laterConnectionString
+                        )
+                    )
+                );
+
+                using var provider = ColumnText_Provider(services);
+                using var scope = provider.CreateScope();
+
+                try
+                {
+                    var executor = scope.ServiceProvider.GetRequiredKeyedService(
+                        ProbeKit.Type(assembly, "ISqlExecutor"),
+                        key
+                    );
+                    var count = ProbeKit.Await(
+                        executor
+                            .GetType()
+                            .GetMethod("ExecuteScalarSqlAsync")!
+                            .MakeGenericMethod(typeof(long))
+                            .Invoke(
+                                executor,
+                                ["SELECT COUNT(*) FROM customers", null, CancellationToken.None]
+                            )
+                    );
+
+                    if (!Equals(count, 1L))
+                    {
+                        problems.Add(
+                            $"keyed の ISqlExecutor が登録し直した DB の行を数えない（{count}）"
+                        );
+                    }
+                }
+                catch (Exception ex) when (ex is not TargetInvocationException)
+                {
+                    problems.Add(
+                        $"keyed の ISqlExecutor が登録し直した DB を使わない（{ex.GetType().Name}: {ex.Message}）"
+                    );
+                }
+
+                try
+                {
+                    var repository = scope.ServiceProvider.GetRequiredKeyedService(
+                        ProbeKit.Type(assembly, "ICustomerRepository"),
+                        key
+                    );
+                    var customer = ProbeKit.Await(
+                        ProbeKit.Call(repository, "GetByIdAsync", 1, CancellationToken.None)
+                    );
+
+                    if (customer is null)
+                    {
+                        problems.Add("keyed の Repository が登録し直した DB の行を読めない");
+                    }
+                }
+                catch (Exception ex) when (ex is not TargetInvocationException)
+                {
+                    problems.Add(
+                        $"keyed の Repository が登録し直した DB を使わない（{ex.GetType().Name}: {ex.Message}）"
+                    );
+                }
+
+                return problems;
+            }
+        );
+
+    /// <summary>
+    /// SQLite の <c>SqlExecutor.ExecuteSqlBatchAsync</c>（<c>ISqlBatchExecutor</c>）を、プールする接続文字列のファイルの DB で動かす。
+    /// (a) 2 文目が失敗するバッチは例外になり、1 文目の書き込みも残らない。全部の文が通るバッチは全部の書き込みを残す。
+    /// (b) 失敗の後、プールへ戻った接続がトランザクション（書き込みのロック）を持っていない：待ち時間を 1 秒にした別の接続の書き込みが通り、
+    /// 同じ接続ファクトリの次の接続（プールから戻った同じ接続になりうる）で <c>BEGIN IMMEDIATE</c> が通る
+    /// </summary>
+    private static ExecCheck ColumnText_SqliteBatchExecutorRollsBack() =>
+        new(
+            "sqlite-batch-executor-rolls-back-and-leaves-no-transaction",
+            assembly =>
+            {
+                var problems = new List<string>();
+                using var folder = new QuickER.Tests.TestSupport.TestTempFolder();
+                var path = System.IO.Path.Combine(folder.Path, "batch.db");
+
+                // 接続ファクトリはプールする接続文字列（既定の Pooling）で作る
+                var factory = ProbeKit.Create(
+                    ProbeKit.Type(assembly, "SqlConnectionFactory"),
+                    new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+                    {
+                        DataSource = path,
+                    }.ToString()
+                );
+                var executor = ProbeKit.Create(ProbeKit.Type(assembly, "SqlExecutor"), factory);
+
+                // 照合と別の書き手は、プールしない・待ち時間 1 秒の接続
+                var otherConnectionString = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+                {
+                    DataSource = path,
+                    Pooling = false,
+                    DefaultTimeout = 1,
+                }.ToString();
+
+                long Count(string table)
+                {
+                    using var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+                        otherConnectionString
+                    );
+                    connection.Open();
+                    using var command = connection.CreateCommand();
+                    command.CommandText = $"SELECT COUNT(*) FROM {table}";
+                    return (long)command.ExecuteScalar()!;
+                }
+
+                void Run(string sql)
+                {
+                    using var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+                        otherConnectionString
+                    );
+                    connection.Open();
+                    using var command = connection.CreateCommand();
+                    command.CommandText = sql;
+                    command.ExecuteNonQuery();
+                }
+
+                IReadOnlyList<int> Batch(params string[] statements) =>
+                    (IReadOnlyList<int>)
+                        ProbeKit.Await(
+                            ProbeKit.Call(
+                                executor,
+                                "ExecuteSqlBatchAsync",
+                                (IReadOnlyList<string>)statements,
+                                CancellationToken.None
+                            )
+                        )!;
+
+                try
+                {
+                    Run(
+                        "CREATE TABLE batch_items (id INTEGER PRIMARY KEY); CREATE TABLE other_items (id INTEGER PRIMARY KEY);"
+                    );
+
+                    // 対照：全部の文が通るバッチは全部の書き込みを残し、文ごとの行数を順に返す
+                    var affected = Batch(
+                        "INSERT INTO batch_items (id) VALUES (1)",
+                        "INSERT INTO batch_items (id) VALUES (2), (3)"
+                    );
+
+                    if (string.Join(",", affected) != "1,2" || Count("batch_items") != 3)
+                    {
+                        problems.Add(
+                            $"全部の文が通るバッチの結果が {string.Join(",", affected)}・{Count("batch_items")} 行（期待 1,2・3 行）"
+                        );
+                    }
+
+                    // (a) 2 文目が存在しない表への INSERT のバッチは例外になり、1 文目の行も残らない
+                    var failed = false;
+
+                    try
+                    {
+                        Batch(
+                            "INSERT INTO batch_items (id) VALUES (10)",
+                            "INSERT INTO missing_table (id) VALUES (11)"
+                        );
+                    }
+                    catch (Microsoft.Data.Sqlite.SqliteException)
+                    {
+                        failed = true;
+                    }
+
+                    if (!failed)
+                    {
+                        problems.Add("2 文目が失敗するバッチが例外にならない");
+                    }
+
+                    if (Count("batch_items") != 3)
+                    {
+                        problems.Add(
+                            $"失敗したバッチの 1 文目の書き込みが残った（{Count("batch_items")} 行・期待 3 行）"
+                        );
+                    }
+
+                    // (b) 失敗の後、別の接続の書き込みが database is locked にならずに通る
+                    try
+                    {
+                        Run("INSERT INTO other_items (id) VALUES (1)");
+                    }
+                    catch (Microsoft.Data.Sqlite.SqliteException ex)
+                    {
+                        problems.Add(
+                            $"失敗したバッチの後、別の接続の書き込みが断られた（{ex.SqliteErrorCode}: {ex.Message}）"
+                        );
+                    }
+
+                    // (b) 同じ接続ファクトリの次の接続で BEGIN IMMEDIATE が通る（残ったトランザクションの中だと断られる）
+                    using (
+                        var next = (Microsoft.Data.Sqlite.SqliteConnection)
+                            ProbeKit.Call(factory, "CreateConnection")!
+                    )
+                    {
+                        next.Open();
+
+                        try
+                        {
+                            using var begin = next.CreateCommand();
+                            begin.CommandText = "BEGIN IMMEDIATE";
+                            begin.ExecuteNonQuery();
+                            using var rollback = next.CreateCommand();
+                            rollback.CommandText = "ROLLBACK";
+                            rollback.ExecuteNonQuery();
+                        }
+                        catch (Microsoft.Data.Sqlite.SqliteException ex)
+                        {
+                            problems.Add(
+                                $"失敗したバッチの後、接続ファクトリの次の接続で BEGIN IMMEDIATE が断られた（{ex.SqliteErrorCode}: {ex.Message}）"
+                            );
+                        }
+                    }
+                }
+                finally
+                {
+                    // プールした接続がファイルを掴んだままだと一時フォルダを消せない
+                    using var pooled = (Microsoft.Data.Sqlite.SqliteConnection)
+                        ProbeKit.Call(factory, "CreateConnection")!;
+                    Microsoft.Data.Sqlite.SqliteConnection.ClearPool(pooled);
+                }
+
+                return problems;
+            }
+        );
+
+    /// <summary>
     /// 生成物の接続ファクトリ（<c>SqlConnectionFactory</c>）で開いた接続の <c>PRAGMA foreign_keys</c> と <c>PRAGMA busy_timeout</c> を、接続文字列ごとに読む
     /// （<c>Foreign Keys</c> を書かなければ 1・明示の False は 0・True は 1。busy_timeout は <c>Default Timeout</c>（秒）のミリ秒）
     /// </summary>
@@ -3878,6 +4173,24 @@ internal static partial class CodegenCases
 
     private static IEnumerable<ScenarioRow<CodegenCase>> ColumnText_SqliteDialectRows() =>
         [
+            ColumnTextRow(
+                "exec-keyed-repositories-use-connection-factory-registered-later",
+                SqliteDialectClass,
+                "KeyedRepositories_UseConnectionFactoryRegisteredLater（keyed の登録の後に同じキーで ISqlConnectionFactory を登録し直すと、keyed の ISqlExecutor と Repository が登録し直した接続ファクトリの DB を使う）",
+                ColumnText_SqliteSampleDiagram,
+                ColumnText_SqliteDialectOptions(),
+                typeDialect: DialectNames.Sqlite,
+                exec: [ColumnText_KeyedRepositoriesUseFactoryRegisteredLater()]
+            ),
+            ColumnTextRow(
+                "exec-sqlite-batch-executor-rolls-back-and-leaves-no-transaction",
+                SqliteDialectClass,
+                "SqliteBatchExecutor_RollsBackAndLeavesNoTransaction（SQLite の SqlExecutor.ExecuteSqlBatchAsync は、途中の文が失敗すると前の文の書き込みも残さず、プールへ戻した接続にトランザクションを残さない。全部の文が通るバッチは全部の書き込みを残す）",
+                ColumnText_SqliteSampleDiagram,
+                ColumnText_SqliteDialectOptions(),
+                typeDialect: DialectNames.Sqlite,
+                exec: [ColumnText_SqliteBatchExecutorRollsBack()]
+            ),
             ColumnTextRow(
                 "code-sqlite-dialect-emits-sqlite-runtime",
                 SqliteDialectClass,

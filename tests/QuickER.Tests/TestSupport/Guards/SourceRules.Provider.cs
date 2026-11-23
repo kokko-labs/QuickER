@@ -689,13 +689,13 @@ internal static partial class SourceRules
                 )
             ) with
             {
-                // CREATE TABLE の名前を読めていること（いまは補助の表が 7 つ。読み方を誤ると何も拾わずに緑になる）
+                // CREATE TABLE の名前を読めていること（いまは補助の表が 3 つ。読み方を誤ると何も拾わずに緑になる）
                 Floor = new(
                     GuardFinder.File(
                         GuardReader.Text,
                         file => FindSyncTemplateCreates(file, onlyNonAuxiliary: false, "TABLE")
                     ),
-                    7,
+                    3,
                     "同期のテンプレートの CREATE TABLE の文"
                 ),
             },
@@ -721,32 +721,13 @@ internal static partial class SourceRules
                     "同期のテンプレートの CREATE TRIGGER の文"
                 ),
             },
-            // 新しい同期のエンジンが「まだ持たない部分」として投げる決まった書式の例外は、エンジンを組み上げた後には 1 つも残さない
-            // （残ると、利用者の実行がテストの土台向けの例外で終わる）。生成テンプレートと、そこから再生成した同期のランタイムの
-            // 両方を読む（コメントの中の綴りも数える）
-            SourceRule.Forbid(
-                "sync-engine-pending-markers-in-templates",
-                "生成テンプレートに、同期のエンジンのまだ持たない部分の例外の書式（QUICKER-SYNC-PENDING）を置かない",
-                SourceScope.Under("src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime", ".scriban"),
-                GuardFinder.File(GuardReader.Text, FindSyncEnginePendingMarkers)
-            ) with
-            {
-                // 部品 11 本を読んでいること
-                MinimumFiles = 11,
-            },
-            SourceRule.Forbid(
-                "sync-engine-pending-markers-in-runtime",
-                "同期のランタイムのパッケージ用ソースに、同期のエンジンのまだ持たない部分の例外の書式（QUICKER-SYNC-PENDING）を置かない",
-                SourceScope.Files("src", SyncRuntimePackageSource),
-                GuardFinder.File(GuardReader.Text, FindSyncEnginePendingMarkers)
-            ),
-            // 新しい同期のエンジン（TrackedSyncEngine）が専用の接続を開くのは、実行の入口（RunExclusiveAsync＝実行の本体はその接続を
+            // 同期のエンジン（SyncEngine）が専用の接続を開くのは、実行の入口（RunExclusiveAsync＝実行の本体はその接続を
             // RunConnection で借りる）と未送信の一覧（GetPendingChangesAsync＝実行のロックの外で読む）の 2 か所だけで、接続を作るのは
             // 開くメソッド（OpenDedicatedAsync）の中の 1 か所だけ。3 か所目を足すと、1 回の実行が開く接続がその分だけ増え、開くたびの
             // 確認と PRAGMA が実行の中で繰り返される
             SourceRule.Require(
                 "sync-dedicated-connection-openers",
-                "新しい同期のエンジンが専用の接続を開くのは実行の入口と未送信の一覧の 2 か所、作るのは開くメソッドの中の 1 か所だけ",
+                "同期のエンジンが専用の接続を開くのは実行の入口と未送信の一覧の 2 か所、作るのは開くメソッドの中の 1 か所だけ",
                 SourceScope.Files("src", SyncTemplateFile),
                 GuardFinder.File(GuardReader.Text, FindSyncDedicatedConnectionOpeners),
                 new GuardKnown(
@@ -886,26 +867,8 @@ internal static partial class SourceRules
     private const string SyncTemplateFile =
         "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban";
 
-    /// <summary>同期のランタイムのパッケージ用ソース（テンプレートから再生成する）</summary>
-    private const string SyncRuntimePackageSource = "src/QuickER.Runtime.Sync/Runtime.Sync.g.cs";
-
-    /// <summary>同期のエンジンのまだ持たない部分の例外の書式（番号と部分が続く形も含めて 1 つの出現）</summary>
-    private static readonly Regex SyncEnginePendingMarker = new(
-        @"QUICKER-SYNC-PENDING[:0-9A-Za-z_]*",
-        RegexOptions.CultureInvariant
-    );
-
-    /// <summary>同期のエンジンのまだ持たない部分の例外の書式の出現（何かは書式の綴り）</summary>
-    private static IEnumerable<GuardFinding> FindSyncEnginePendingMarkers(GuardFile file)
-    {
-        foreach (Match match in SyncEnginePendingMarker.Matches(file.Text))
-        {
-            yield return new GuardFinding(match.Value, file.LineAt(match.Index));
-        }
-    }
-
     /// <summary>
-    /// 新しい同期のエンジンの専用の接続を開くメソッドの呼び出し（宣言の <c>OpenDedicatedAsync(CancellationToken …</c> は拾わない）と、
+    /// 同期のエンジンの専用の接続を開くメソッドの呼び出し（宣言の <c>OpenDedicatedAsync(CancellationToken …</c> は拾わない）と、
     /// 専用の接続を作る呼び出し（XmlDoc の <c>cref</c> のように括弧の続かない綴りは拾わない）
     /// </summary>
     private static readonly Regex SyncDedicatedConnectionOpener = new(

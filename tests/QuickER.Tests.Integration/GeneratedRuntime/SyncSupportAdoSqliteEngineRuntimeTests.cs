@@ -30,7 +30,7 @@ public sealed class SyncSupportAdoSqliteEngineRuntimeTests(ITestOutputHelper out
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>
-    /// 夜間の既定の種の数（今の端末の直結の <see cref="SyncModelRuntimeTests.NightlySeedCount"/> の 3 分の 1）。種を並列に流して
+    /// 夜間の既定の種の数（<see cref="SyncModelRuntimeTests.NightlySeedCount"/> の 3 分の 1）。種を並列に流して
     /// ランナーの CPU を使い切るので、夜間の Integration のジョブ（50 分未満の目安）で同時に流れるほかのテストを遅らせない数にする
     /// （4 コアのランナーで、広い世界の種と合わせて 1,440 種が 14 分）
     /// </summary>
@@ -40,14 +40,14 @@ public sealed class SyncSupportAdoSqliteEngineRuntimeTests(ITestOutputHelper out
     public const int NightlyWideSeedCount = 80;
 
     /// <summary>
-    /// 乱数の種の決め方。今の端末の直結（<see cref="SyncModelRuntimeTests.Seeds"/>）と環境変数・普段の数・開始番号が同じで、
+    /// 乱数の種の決め方。<see cref="SyncModelRuntimeTests.Seeds"/> と環境変数・普段の数・開始番号が同じで、
     /// 夜間の数だけ <see cref="NightlySeedCount"/>
     /// </summary>
     public static SeedSettings Seeds { get; } =
         SyncModelRandomSuite.WithNightlyCount(SyncModelRuntimeTests.Seeds, NightlySeedCount);
 
     /// <summary>
-    /// 広い世界の種の決め方。今の端末の直結（<see cref="SyncModelRuntimeTests.WideSeeds"/>）と夜間の数だけが違う
+    /// 広い世界の種の決め方。<see cref="SyncModelRuntimeTests.WideSeeds"/> と夜間の数だけが違う
     /// （<see cref="NightlyWideSeedCount"/>）
     /// </summary>
     public static SeedSettings WideSeeds { get; } =
@@ -57,14 +57,13 @@ public sealed class SyncSupportAdoSqliteEngineRuntimeTests(ITestOutputHelper out
         );
 
     /// <summary>
-    /// 直結・新しいエンジンの端末（<see cref="SyncModelEngineDevice"/>）で乱数の種を流すときの組。次元表・生成器は今の端末の
-    /// 直結の組と同じで、夜間の種の数（<see cref="Seeds"/>・<see cref="WideSeeds"/>）と、既知の失敗の一覧と網羅しない組の
-    /// 範囲を別に持つ
+    /// 直結・新しいエンジンの端末（<see cref="SyncModelEngineDevice"/>）で乱数の種を流すときの組（夜間の種の数は
+    /// <see cref="Seeds"/>・<see cref="WideSeeds"/>）
     /// </summary>
     internal static SyncModelRandomSuite EngineSuite { get; } =
         new(
             "SyncModelEngine",
-            SyncModelEngineDevice.On(SyncModelWorldOptions.Direct),
+            SyncModelWorldOptions.Direct,
             Seeds,
             WideSeeds,
             SyncModelKnownFailures.EngineSet,
@@ -97,7 +96,7 @@ public sealed class SyncSupportAdoSqliteEngineRuntimeTests(ITestOutputHelper out
     /// どちらも 1 回以上）で受ける。
     /// <para>
     /// 夜間の種の数は普段の数と同じにする（夜間に深くしない）。夜間の Integration のジョブは目安の時間を超えていて、この組の
-    /// 種は並列に流れてランナーを使い切るので、足すとジョブの上限に届きうる。塊の経路の形は、普段の CI で控えとの照合
+    /// 種は並列に流れてランナーを使い切るので、足すとジョブの上限に届きうる。塊の経路の形は、普段の CI で直結の Theory との照合
     /// （<see cref="SmallChunkScenarios_MatchDirect"/>）が全行を流す。夜間のジョブの実測が目安の内へ戻ったら、夜間の数を
     /// 普段の 4 倍（広い世界は普段と同じ）へ上げる
     /// </para>
@@ -150,7 +149,7 @@ public sealed class SyncSupportAdoSqliteEngineRuntimeTests(ITestOutputHelper out
     }
 
     [Fact(
-        DisplayName = "[Sync/新しいエンジン] 小さい塊の端末で流した決定的なシナリオは、控えと同じ結果（違う行は理由の宣言どおり）"
+        DisplayName = "[Sync/新しいエンジン] 小さい塊の端末で流した決定的なシナリオは、直結の Theory と同じ結果（違う行は理由の宣言どおり）"
     )]
     public async Task SmallChunkScenarios_MatchDirect()
     {
@@ -159,11 +158,9 @@ public sealed class SyncSupportAdoSqliteEngineRuntimeTests(ITestOutputHelper out
             (string Outcome, string Detail, long Chunked, long Carried)
         >(StringComparer.Ordinal);
 
-        // 直結の Theory が流す行（今のエンジンだけの印の無い行）を、小さい塊の端末で流す
+        // 直結の Theory が流す行を、小さい塊の端末で流す
         await Parallel.ForEachAsync(
-            SyncModelScenarios.All.Where(scenario =>
-                SyncModelScenarioParts.Runs(scenario, SyncModelTransport.Direct)
-            ),
+            SyncModelScenarios.All.Where(scenario => scenario.RunsOn(SyncModelTransport.Direct)),
             new ParallelOptions
             {
                 MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 8),

@@ -17,23 +17,23 @@ SQLite 方言エンジン（QuickER 版 Repository の ADO 実装）の固定コ
 - 同じファクトリは、接続を開くたびに（プールから戻った接続も含めて）`PRAGMA busy_timeout` を、接続文字列の `Default Timeout`×1000 ms に合わせる（`ApplyBusyTimeout`＝`StateChange` で Open を見る）。
   - `Default Timeout=0` はプロバイダの意味では上限なしなので、`int.MaxValue` に合わせる（SQLite の 0 は「待たない」なので素通しにしない）。
   - Microsoft.Data.Sqlite はロックで待つやり直しを、各文の最初の step（`NextResult`）でしか行わない。`Read()` の後続の step ではやり直さないので、自動コミットの `INSERT` / `UPDATE` / `DELETE` … `RETURNING` は確定の step で、別の接続が読み取り（共有のロック）を持っているだけで即座に「database is locked」になる（ジャーナルの方式に依らない。失敗した文は戻る）。
-  - 同期のジャーナルの記録（`SyncJournal.RecordManyAsync` の `RETURNING id`）と、生 SQL のメソッドへ渡した RETURNING がこの形になる。
+  - 生 SQL のメソッドへ渡した RETURNING がこの形になる。
   - 効く範囲を生 SQL の実行器に絞らない。busy timeout は接続に残る設定で、プールから戻った接続を次に使う経路へ持ち越されるので、絞ると効くかどうかが接続の巡り合わせで決まる。
   - SQLite が待つ間は CancellationToken を見ない。自前の接続ファクトリには効かない。後から流した PRAGMA が勝つ（docs/code-generation に明記）。
 - EF Core 版 Repository も同じ待ちを持つ（公開の `SqliteBusyTimeoutInterceptor`）。詳細は `src/QuickER.Runtime.EntityFrameworkCore/CLAUDE.md`。
-- ガード：`BusyTimeoutDefaultAdoSqliteRuntimeTests`（既定・`Default Timeout=5`・`0`・プールから戻った接続）、`SyncRuntimeTestsBase` の `JournaledWrite_WaitsForReaderOnAnotherConnection` / `RawSqlReturning_WaitsForReaderOnAnotherConnection`（別の接続の読み取りを持ったまま書き込みが待ち、読み取りの後に成功する。直結と HTTP）、`SqliteRepositoryDialectTests`（生成テキスト）。mutation 実証済み。
+- ガード：`BusyTimeoutDefaultAdoSqliteRuntimeTests`（既定・`Default Timeout=5`・`0`・プールから戻った接続）、`BusyTimeoutDefaultAdoSqliteRuntimeTests.RawSqlReturning_WaitsForReaderOnAnotherConnection`（別の接続の読み取りを持ったまま生 SQL の RETURNING が待ち、読み取りの後に成功する）、`SqliteRepositoryDialectTests`（生成テキスト）。mutation 実証済み。
 
 ### 接続ファクトリを包む型（ObservedSqlConnectionFactory）
 
 - `ObservedSqlConnectionFactory` は、内側の `ISqlConnectionFactory` が返す接続の `StateChange` にハンドラを足して返す、同期を知らない汎用の包み。ハンドラは内側が自分で足した購読（上の `busy_timeout`）の後に走り、接続を開く間にハンドラが投げた例外は `Open` から出る。
-  - 同期の開くたびの確認（`SyncLocalTrackingGuard`）は `new ObservedSqlConnectionFactory(inner, new SyncLocalTrackingGuard(tables).OnStateChange)` の形で使う（→ `src/QuickER.Runtime.Sync/CLAUDE.md`「開くたびの確認（SyncLocalTrackingGuard）」）。
+  - 同期の開くたびの確認（`SyncLocalTrackingGuard`）は `new ObservedSqlConnectionFactory(inner, new SyncLocalTrackingGuard(tables).OnStateChange)` の形で使う。生成の `AddGeneratedSyncEngine` が、ローカルの接続ファクトリの登録をこの形の包みに置き換える（→ `src/QuickER.Runtime.Sync/CLAUDE.md`「開くたびの確認（SyncLocalTrackingGuard）」「生成と DI」）。
 - 置き場の理由：ドライバの型（`SqliteConnection`）を名指しするコードは SQLite のエンジンの側に置く。同期の固定のエンジンは ADO のドライバに依存せず、パッケージ参照の形の生成コードは ADO のドライバを直接参照しないため。
 - 出す条件は `sync_support || runtime_package_export`（同期を生成する構成か、パッケージ用ソース）。同期を使わない構成の生成物には出ない。
 - ガード：`SyncSupportAdoSqliteTriggerRuntimeTests` が流す `table:SyncTriggerGuard`（行 `busy-timeout-is-set-before-the-check`・`custom-connection-factory-is-wrapped`）、パッケージ参照の形の生成の行 `compile-package-sync-support-*`。
 
 ## ローカルの行を読み書きする口（SqliteLocalRowStore）
 
-- Core の契約 `ILocalRowStore`（→ `src/QuickER.Runtime/CLAUDE.md`「接続を指定して行を読み書きする契約（ILocalRowStore）」）の SQLite の実装。同期のエンジンがローカルの行を読み書きする。ドライバの型（`SqliteConnection`・`SqliteException`）を名指しするので SQLite のエンジンの側に置く（`ObservedSqlConnectionFactory` と同じ理由）。
+- Core の契約 `ILocalRowStore`（→ `src/QuickER.Runtime/CLAUDE.md`「接続を指定して行を読み書きする契約（ILocalRowStore）」）の SQLite の実装。同期のエンジンがローカルの行を読み書きする（生成の `AddGeneratedSyncEngine` が、包んだ接続ファクトリでこれを作ってエンジンを組む）。ドライバの型（`SqliteConnection`・`SqliteException`）を名指しするので SQLite のエンジンの側に置く（`ObservedSqlConnectionFactory` と同じ理由）。
 - エンジン用の接続（`CreateDedicatedConnection`）は、接続ファクトリが返した開く前の接続の接続文字列を `Pooling=False` に書き換えて作る。
   - ファクトリを通すので、ファクトリが `StateChange` に足した購読（`busy_timeout`・`ObservedSqlConnectionFactory` の開くたびの確認）が効く。ファクトリの外で作ると効かない。
   - プールしないので、閉じるとファイルを放す。
@@ -49,10 +49,12 @@ SQLite 方言エンジン（QuickER 版 Repository の ADO 実装）の固定コ
 
 ## 複数の文を 1 つのトランザクションで流す口（ISqlBatchExecutor）
 
-- SQLite の `SqlExecutor` だけが Core の公開の口 `ISqlBatchExecutor.ExecuteSqlBatchAsync` を実装する（`_04_RepositoryContractCore.scriban` の `repository_dialect == "sqlite"` の分岐）。1 つの接続で `BeginTransactionAsync` → 文ごとに `ExecuteNonQueryAsync` → `CommitAsync`。どれかの文かコミットが失敗したら `SqlTransactions.RollbackQuietlyAsync` と `await using` で巻き戻してから接続を返す。
-- 生の `BEGIN … COMMIT` を 1 本の文字列で流すと、失敗したときトランザクションが開いたまま接続がプールへ返る（Microsoft.Data.Sqlite はプールへ返す接続を巻き戻さない）。次にその接続を引いた呼び出しがトランザクションの中で動き、別の接続の書き込みは locked になる。口はこれを避けるためにある。
-- 使うのは同期の洗い替えの、表どうしの循環のある範囲の全消しだけ（→ `src/QuickER.Runtime.Sync/CLAUDE.md`「洗い替え」）。パラメータは持たない。
-- ガード：`refresh-failed-wipe-in-a-foreign-key-cycle-deletes-nothing`（巻き戻しを外す壊し方で赤）・`refresh-empties-tables-in-a-foreign-key-cycle`。公開 API 面は `QuickER.Runtime.approved.txt`・`QuickER.Runtime.Sqlite.approved.txt`。
+- 利用者向けの口。SQLite の `SqlExecutor` だけが Core の公開の口 `ISqlBatchExecutor.ExecuteSqlBatchAsync` を実装する（`_04_RepositoryContractCore.scriban` の `repository_dialect == "sqlite"` の分岐。包んだ実行器は呼び出しを自分で転送しない限り実装しない）。
+- 複数の文を、1 つの接続の 1 つのトランザクションで順に流す：プロバイダのトランザクション（`BeginTransactionAsync`）を張り、文ごとに `ExecuteNonQueryAsync` → `CommitAsync`。全部通ればコミットして文ごとの影響行数を返し、どれかの文かコミット（遅延した外部キーの検査など）が失敗したら `SqlTransactions.RollbackQuietlyAsync` で全部を巻き戻してから投げ直し、`await using` で接続を返す。文の並びが空なら `ArgumentException`。パラメータは持たない（決まった文のための口）。
+- 生の `BEGIN … COMMIT` を `ExecuteSqlAsync` に渡す形にしない：失敗したときトランザクションが開いたまま接続がプールへ返る（Microsoft.Data.Sqlite はプールへ返す接続を巻き戻さない）。
+- 壊すと：生の `BEGIN … COMMIT` で流して巻き戻さないと、失敗の後に接続がトランザクションとロックを持ったままプールへ戻り、ほかの接続の書き込みが `database is locked` になり、次にその接続を引いた呼び出しがそのトランザクションの中で動く。catch で巻き戻さずにコミットすると、途中の文の失敗で前の文の書き込みが残る。
+- catch の明示の巻き戻し（`SqlTransactions.RollbackQuietlyAsync`）は、トランザクションの失敗経路はこの関数だけを呼ぶという規則（`src/QuickER.Runtime/CLAUDE.md`「トランザクション失敗経路」）を保つために残す。外しても、今の Microsoft.Data.Sqlite では `await using` の破棄と接続を閉じる処理がトランザクションを巻き戻すので、下の行は赤にならない。
+- ガード：`CodegenCaseTests` の行 `exec-sqlite-batch-executor-rolls-back-and-leaves-no-transaction`（途中の文が失敗すると前の文の書き込みも残らず、プールへ戻した接続にトランザクションが残らない。全部の文が通るバッチは全部の書き込みを残す。赤になる壊し方：生の `BEGIN … COMMIT` で流して巻き戻さない・catch で巻き戻さずにコミットする）。公開 API 面は `QuickER.Runtime.approved.txt`・`QuickER.Runtime.Sqlite.approved.txt`。
 
 ## INSERT コマンドの使い回し
 

@@ -10,8 +10,8 @@ namespace QuickER.Tests.GeneratedSyncFixture;
 /// <remarks>
 /// 同期支援（<c>GenerateSyncSupport</c>）× マルチターゲット（<c>["sqlserver","sqlite"]</c>）×
 /// リモートサービス（<c>GenerateRemoteServices</c>）× 親子 2 テーブルの生成物を固定する。守る対象は
-/// 「同期記述子の SQL が方言ごとに正しくクォートされること」「ジャーナル記録デコレータが全書き込み入口を
-/// 覆うこと」「DI が FK 順（親→子）でテーブルを登録すること」「同期専用エンドポイントが RemoteServer 側へ
+/// 「同期記述子の SQL が方言ごとに正しくクォートされること」「同期エンジンと差分ソースが表ごとに
+/// 組み立てられること」「DI が FK 順（親→子）でテーブルを登録すること」「同期専用エンドポイントが RemoteServer 側へ
 /// 張られること」のテキスト。
 /// 再生成手順は <see cref="FixtureDriftHarness"/> の docstring と失敗メッセージを参照。
 /// </remarks>

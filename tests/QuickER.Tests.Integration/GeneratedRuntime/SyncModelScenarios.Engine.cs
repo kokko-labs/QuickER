@@ -93,9 +93,9 @@ internal static partial class SyncModelScenarios
                 [Plain(D1), Expect.Result(D1).Contains("downloaded=0", "uploaded=0")]
             ),
             // 端末 1 の変更が端末 2 と端末 3 へ違う順で届く（3 台目があって初めて起きる順序）。端末 1 は UploadAsync だけで
-            // 上げて受理記録を残す。端末 2 は端末 1 の版を降ろしてから編集して上げ、端末 3 は端末 1 の版を見ずに端末 2 の版だけを
-            // 降ろす。端末 1 は、自分の受理記録のキーに来た端末 2 の版（端末 1 の版を元にした別の書き込み）を自分のエコーと
-            // みなさずに降ろし、端末 3 は端末 2 の版を元にした編集を競合なしに上げる
+            // 上げる（行の状態の基準の版は自分が上げた版）。端末 2 は端末 1 の版を降ろしてから編集して上げ、端末 3 は端末 1 の版を
+            // 見ずに端末 2 の版だけを降ろす。端末 1 は、自分が上げたキーに来た端末 2 の版（端末 1 の版を元にした別の書き込み）を
+            // 自分のエコーとみなさずに降ろし、端末 3 は端末 2 の版を元にした編集を競合なしに上げる
             Moved(
                 "three-devices-change-reaches-the-other-two-in-different-orders",
                 [.. Seed(1, "alice", 11, "widget")],
@@ -282,38 +282,26 @@ internal static partial class SyncModelScenarios
                     Expect.Mirror(D1, F).Contains("key=1 mirror=server"),
                 ]
             ),
-            // 同期の外で（記録させずに）空にされた表：再開点をミラー版から導くエンジンは、空の表の再開点が先頭へ戻るので全部を
-            // 降ろし直す。再開点を表ごとに別に持つエンジンは、何も送らず何も降ろさずに、表を名指しして洗い替えを促す例外で断る
+            // 同期の外で（記録させずに）空にされた表：エンジンは何も送らず何も降ろさずに、表を名指しして洗い替えを促す例外で断る
             Moved(
                 "dl-table-emptied-outside-sync",
                 [.. Seed(1, "alice", 11, "widget")],
                 [
                     new LocalSqlOp(D1, $"DELETE FROM {ModelTables.Events}") { Untracked = true },
                     Rename(D1, 1, "alice-local"),
-                    new WhenEngineDeclaresOp(
-                        D1,
-                        EngineDeclaration.DerivesResumePointFromLocalVersions,
-                        [
-                            Plain(D1),
-                            Expect.Result(D1).Contains("uploaded=1"),
-                            Expect.Rows(D1, ModelTables.Events).Contains("* item=999 memo=tail"),
-                        ],
-                        [
-                            new ExpectThrowOp(D1),
-                            Plain(D1),
-                            Expect
-                                .Result(D1)
-                                .Contains(
-                                    $"exception SyncLocalTableEmptiedException: *{ModelTables.Events}*RefreshAsync*"
-                                ),
-                            Expect.Rows(D1, ModelTables.Events).Count("*", 0),
-                            Expect.Rows(SV, F).Contains("1 parent=null name=alice"),
-                            // 例外が促すとおり洗い替えで作り直すと、空にされた表の行が戻る（端末の未送信の編集は洗い替えの
-                            // 拒否の規則に従う）
-                            RefreshAll(D1, force: true),
-                            Expect.Rows(D1, ModelTables.Events).Contains("* item=999 memo=tail"),
-                        ]
-                    ),
+                    new ExpectThrowOp(D1),
+                    Plain(D1),
+                    Expect
+                        .Result(D1)
+                        .Contains(
+                            $"exception SyncLocalTableEmptiedException: *{ModelTables.Events}*RefreshAsync*"
+                        ),
+                    Expect.Rows(D1, ModelTables.Events).Count("*", 0),
+                    Expect.Rows(SV, F).Contains("1 parent=null name=alice"),
+                    // 例外が促すとおり洗い替えで作り直すと、空にされた表の行が戻る（端末の未送信の編集は洗い替えの
+                    // 拒否の規則に従う）
+                    RefreshAll(D1, force: true),
+                    Expect.Rows(D1, ModelTables.Events).Contains("* item=999 memo=tail"),
                 ]
             ),
             Moved(
@@ -324,18 +312,6 @@ internal static partial class SyncModelScenarios
                     Plain(D1),
                     Expect.Result(D1).Absent("conflict *"),
                     Expect.Rows(SV, I).Absent("11 *"),
-                ]
-            ),
-            Moved(
-                "ul-stale-journal-entry-is-discarded",
-                [],
-                [
-                    new RecordJournalOp(D1, F, "99", SyncJournalOperation.Upsert),
-                    Expect.Pending(D1).Exact($"{F} key=99 row=gone"),
-                    Plain(D1),
-                    Expect.Result(D1).Contains("uploaded=0").Absent("conflict *"),
-                    Expect.Rows(SV, F).Absent("99 *"),
-                    Expect.Pending(D1).Empty(),
                 ]
             ),
             // [Sync/再生]
@@ -391,7 +367,7 @@ internal static partial class SyncModelScenarios
                     Expect.Pending(D1).Empty(),
                 ]
             ),
-            // [Sync/ack]
+            // [Sync/エコーと送信の決着]（行 Id の ack は名前だけ残す）
             Moved(
                 "ack-truncated-echo-then-edit-is-not-a-false-modified-conflict",
                 [.. Seed(1, "alice", 11, "widget"), Folder(SV, 3, name: "carol")],
@@ -489,14 +465,8 @@ internal static partial class SyncModelScenarios
                     new DeleteItemOp(D1, Direct, 11),
                     Plain(D1, policy: SyncConflictPolicy.ServerWins),
                     Expect.Rows(D1, I).Contains("11 folder=1 label=null code=c-11 title=widget"),
-                    // 再開点をミラー版から導くエンジンは、戻した行のミラー版を書かない。再開点を表ごとに別に持つエンジンは、戻した
-                    // 行の版の列をサーバーの版にする
-                    new WhenEngineDeclaresOp(
-                        D1,
-                        EngineDeclaration.DerivesResumePointFromLocalVersions,
-                        [Expect.Mirror(D1, I).Contains("key=11 mirror=null")],
-                        [Expect.Mirror(D1, I).Contains("key=11 mirror=server")]
-                    ),
+                    // エンジンは再開点を表ごとに別に持ち、戻した行の版の列をサーバーの版にする
+                    Expect.Mirror(D1, I).Contains("key=11 mirror=server"),
                     new UpdateItemOp(D1, Direct, 11, 1, null, "c-11", "widget-2"),
                     Plain(D1),
                     Expect.Result(D1).Contains("uploaded=1").Absent("conflict *"),

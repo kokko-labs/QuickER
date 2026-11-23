@@ -32,7 +32,7 @@
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelTransportRuntimeTests.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelTransports.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelWorld.cs",
-        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportAdoSqliteCurrentEngineRuntimeTests.cs"
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportAdoSqliteEngineRuntimeTests.cs"
       ],
       "covers": [
         "src/QuickER.Runtime.Sync",
@@ -417,10 +417,12 @@
     },
     {
       "name": "SyncTriggerGuard",
-      "title": "同期のトリガーの確認の表（包んだ接続ファクトリで開いて使う DB に外から何かが起きた後、次に開いた接続で確認のガードが何をするか）",
+      "title": "同期のトリガーの確認の表（包んだ接続ファクトリで開いて使う DB に外から何かが起きた後、次に開いた接続で確認のガードが何をするかと、生成された DI の登録 AddGeneratedSyncEngine が接続ファクトリを確認つきで包んで新しいエンジンを組むこと）",
       "sourceFiles": [
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncTriggerGuardRows.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncTriggerGuardDiRows.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncTriggerHarness.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncEngineFixtureDevices.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportAdoSqliteTriggerRuntimeTests.cs"
       ],
       "covers": [

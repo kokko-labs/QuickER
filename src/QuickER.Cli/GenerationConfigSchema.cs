@@ -206,7 +206,7 @@ public static class GenerationConfigSchema
             "boolean",
             false,
             "Data access",
-            "Generate the bidirectional sync support (engine, per-table descriptors, journaling decorators, direct differential sources, DI) for a server (SQL Server) plus local (SQLite) setup. Requires GenerateRepositories, exactly those two RepositoryDialects, and at least one table with a single primary-key column (a rowversion column makes that table incremental; tables without one sync last-write-wins)."
+            "Generate the bidirectional sync support (engine, per-table descriptors, direct differential sources, DI) for a server (SQL Server) plus local (SQLite) setup; triggers on the synced local tables record local changes. Requires GenerateRepositories, exactly those two RepositoryDialects, and at least one table with a single primary-key column (a rowversion column makes that table incremental; tables without one sync last-write-wins)."
         ),
         // リモート対応
         new(

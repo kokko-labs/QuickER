@@ -128,6 +128,11 @@ internal sealed partial class CSharpGenerationModelBuilder
             // 同期対象テーブルは「行バージョン列を持ち Repository 契約が生成されるテーブル」で、FK トポロジカル順に並べる
             // （ダウンロードの適用は親→子・削除は子→親でなければ FK 制約に触れるため、順序そのものが生成物の一部）
             SyncTables = syncTables,
+            SyncSchemaQualifiedTableNames = ListSyncSchemaQualifiedTableNames(
+                diagram,
+                options,
+                repositoryClasses
+            ),
             // グラフ取得糖衣（IncludeGraph）は保存側と同じカスケード閉包を Include ツリーへ写すため、
             // 同じナビゲーション解決結果から静的に組み立てる（オプションなし・契約が出る構成で常時生成）
             IncludeGraphExtensions = BuildIncludeGraphExtensions(
@@ -545,7 +550,6 @@ internal sealed partial class CSharpGenerationModelBuilder
             QueryRemoteClientBlock = queryBlocks.RemoteClientBlock,
             QueryRemoteServerBlock = queryBlocks.RemoteServerBlock,
             QueryRemoteServerRecordsBlock = queryBlocks.RemoteServerRecordsBlock,
-            QueryDelegationBlock = queryBlocks.DelegationBlock,
             BinaryStreamContractBlock = binaryStreamBlocks.ContractBlock,
             BinaryStreamThinImplBlock = binaryStreamBlocks.ThinImplBlock,
             BinaryStreamEfImplBlock = binaryStreamBlocks.EfImplBlock,

@@ -802,9 +802,9 @@ CREATE INDEX ix_upper ON ""Äpfel"" (upper_only);
     /// 取り込むことを検証する
     /// </summary>
     /// <remarks>
-    /// 扱いの表の C7c（取込＝告知しない除外）を固定する。補助の表は生成テンプレートが作る 4 表の文の写しで、
-    /// <c>quicker_sync_journal</c> の AUTOINCREMENT も告げない（外した表の列は読まない）。前置きは SQLite の名前の規則と
-    /// 同じく ASCII の大文字小文字を無視して見る（大文字の混ざった名前の表も外す）。
+    /// 扱いの表の C7c（取込＝告知しない除外）を固定する。補助の表は生成テンプレートの <c>SyncLocalTracking</c> が作る 3 表の
+    /// 文の写しと、大文字の混ざった名前の表 1 つ。大文字の表の AUTOINCREMENT も告げない（外した表の列は読まない）。前置きは
+    /// SQLite の名前の規則と同じく ASCII の大文字小文字を無視して見る（大文字の混ざった名前の表も外す）。
     /// </remarks>
     [Fact(
         DisplayName = "SQLite の内部表（sqlite_sequence）と双方向同期の補助の表は取り込まず告知もせず、補助のトリガーは補助オブジェクトとして取り込む"
@@ -816,13 +816,12 @@ CREATE INDEX ix_upper ON ""Äpfel"" (upper_only);
         await db.ApplyDdlAsync(
             @"
 CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS quicker_sync_journal (id INTEGER PRIMARY KEY AUTOINCREMENT, table_name TEXT NOT NULL, key_text TEXT NOT NULL, operation TEXT NOT NULL, original_row_version BLOB NULL, unbounded_binary_columns TEXT NULL, recorded_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS quicker_sync_ack (table_name TEXT NOT NULL, key_text TEXT NOT NULL, server_row_version BLOB NOT NULL, PRIMARY KEY (table_name, key_text));
-CREATE TABLE IF NOT EXISTS quicker_sync_blob_pending (table_name TEXT NOT NULL, key_text TEXT NOT NULL, column_name TEXT NOT NULL, PRIMARY KEY (table_name, key_text, column_name));
-CREATE TABLE IF NOT EXISTS quicker_sync_row_pending (table_name TEXT NOT NULL, key_text TEXT NOT NULL, PRIMARY KEY (table_name, key_text));
-CREATE TABLE QUICKER_SYNC_Upper (k TEXT NULL);
-CREATE TRIGGER quicker_sync_trg_items_insert AFTER INSERT ON items BEGIN
-  INSERT INTO quicker_sync_journal (table_name, key_text, operation, recorded_at) VALUES ('items', NEW.id, 'insert', 't');
+CREATE TABLE IF NOT EXISTS quicker_sync_state (id INTEGER PRIMARY KEY CHECK (id = 1), format INTEGER NOT NULL, db_id TEXT NOT NULL, applying INTEGER NOT NULL, next_seq INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS quicker_sync_row (table_name TEXT NOT NULL, ""key"", dirty INTEGER NOT NULL, deleted INTEGER NOT NULL, blob_columns TEXT NOT NULL DEFAULT '', change_seq INTEGER NOT NULL, base_version BLOB NULL, known INTEGER NOT NULL DEFAULT 0, sw_seq INTEGER NULL, blob_owed TEXT NOT NULL DEFAULT '', applied_version BLOB NULL, PRIMARY KEY (table_name, ""key""));
+CREATE TABLE IF NOT EXISTS quicker_sync_table (table_name TEXT NOT NULL PRIMARY KEY, anchor BLOB NULL);
+CREATE TABLE QUICKER_SYNC_Upper (id INTEGER PRIMARY KEY AUTOINCREMENT, k TEXT NULL);
+CREATE TRIGGER quicker_sync_trg_items_ai AFTER INSERT ON items BEGIN
+  INSERT INTO quicker_sync_row (table_name, ""key"", dirty, deleted, change_seq) VALUES ('items', NEW.id, 1, 0, 1);
 END;
 ",
             Ct
@@ -841,7 +840,7 @@ END;
         // 利用者の表に張った補助のトリガーは外さない
         result
             .AuxiliaryObjects.Should()
-            .ContainSingle(a => a.Name == "quicker_sync_trg_items_insert")
+            .ContainSingle(a => a.Name == "quicker_sync_trg_items_ai")
             .Which.Should()
             .Match<SchemaAuxiliaryObject>(a =>
                 a.Kind == SchemaAuxiliaryObjectKind.Trigger && a.TableName == "items"
