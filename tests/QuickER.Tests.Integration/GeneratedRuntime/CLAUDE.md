@@ -509,7 +509,7 @@
 
 同期のエンジンの塊ごとに確定する経路（仕組みは `src/QuickER.Runtime.Sync/CLAUDE.md`）は、エンジンの internal の値を小さくした端末で、同期のモデルをそのまま流して確かめる。
 
-- 端末：`SyncModelEngineDevice.OnSmallChunks(世界の作り方, 道の数え手)`。エンジンの端末と同じ部品で、塊へ入る閾値を 2 行・塊の大きさを 2 行にする（`SmallChunkThreshold`・`SmallChunkSize`）。未送信の無い 3 行以上の取得（同期・受信だけ・洗い替え。洗い替えは `Force` で捨てる行を未送信に数えない）が塊の道を通り、未送信のある実行と小さい取得は 1 回で全部の道を通る。
+- 端末：`SyncModelEngineDevice.OnSmallChunks(世界の作り方, 道の数え手)`。エンジンの端末と同じ部品で、塊へ入る閾値を 2 行・塊の大きさを 2 行にする（`SmallChunkThreshold`・`SmallChunkSize`）。塊の経路のトランザクションの間の隙間（`ChunkWriteGap`）は 0 にする（2 行の塊はトランザクションが多く、隙間を置くと照合が長くなる。隙間は結果を変えず、決まった形の行 `chunk-write-transactions-leave-gap-for-other-writers` が見る）。未送信の無い 3 行以上の取得（同期・受信だけ・洗い替え。洗い替えは `Force` で捨てる行を未送信に数えない）が塊の道を通り、未送信のある実行と小さい取得は 1 回で全部の道を通る。
   - 道の数え手 `SyncModelDownloadRoutes` は、エンジンの internal の口（`DownloadRouteObserved`・`CarriedRowsApplied`）につないで、道ごとの実行の数と、最後の段が持ち越した行の数を数える（スレッドをまたいで足す）。
 - 直結の Theory との照合（`SyncSupportAdoSqliteEngineRuntimeTests.SmallChunkScenarios_MatchDirect`）：直結の Theory が流す行（直結の転送を宣言した全部の行）を小さい塊の端末で流し（`SyncModelScenarioLedger.RunAsync`・既知の失敗の一覧 `SyncModelKnownFailures.EngineSet`。結果は `green`・`known`・`differs` の 3 つ）、`green`・`known` でない行を、塊の道で結果の違う行とする。直結の Theory は同じ行が 1 回で全部の道の端末で一覧どおり（空＝緑）であることを表明するので、塊の道の結果が 1 回で全部の道と同じなら違う行は無い。
   - 違う行は、理由の宣言 `SyncModelSmallChunkScenarioDifferences` と 2 方向に照合する（宣言の無い違う行も、宣言があるのに直結の実行と同じ結果の行も赤）。理由には、塊の経路が違う答えを出す仕組み（削除の段が塊より前・キーを行より先に取る順・塊ごとの確定）を書く。今の宣言は 1 行（`chunk-delete-stage-parent-gone-after-next-sync`＝削除の段で残した親が次の同期まで端末に残る）。
@@ -528,13 +528,13 @@
 
 ### 同期のエンジンの決まった形の行
 
-- 同期のモデルの決定的なシナリオでは書けない、同期のエンジン（`SyncEngine`）の形は、表「同期のエンジンの決まった形の行」（`SyncEngineFixedRows`・`SyncEngineFixedRows.StaleEntity.cs`・影響の地図の名前 `table:SyncEngineFixed`）に置き、`SyncSupportAdoSqliteEngineRuntimeTests.FixedRow_BehavesAsExpected` が 1 行ずつ流す（コンテナなし）。行は 105 本。
+- 同期のモデルの決定的なシナリオでは書けない、同期のエンジン（`SyncEngine`）の形は、表「同期のエンジンの決まった形の行」（`SyncEngineFixedRows`・`SyncEngineFixedRows.StaleEntity.cs`・影響の地図の名前 `table:SyncEngineFixed`）に置き、`SyncSupportAdoSqliteEngineRuntimeTests.FixedRow_BehavesAsExpected` が 1 行ずつ流す（コンテナなし）。行は 106 本。
   - 端末とサーバー役は `SyncEngineFixedHarness`：端末は `SyncModelEngineDevice` と同じ部品（`SyncLocalTracking.Ensure`・開くたびの確認で包んだ接続ファクトリ・`SqliteLocalRowStore`・4 表の `SyncTable`）で組み、接続文字列の `Default Timeout` を 1 秒にし、フォルダーのリポジトリに Save フックの口を持つ。サーバー役は同期のモデルの SQLite の代役（`SyncModelServer`）。
   - 降ろす行の上限の行は 2 本。どちらも、上限の小さい洗い替えを流し、最初のページを取った後の点（`AfterServerFetchBeforeApply`）で端末へ記録つきの書き込みを 1 つ流す。
     - `refresh-over-row-limit-with-change-written-during-fetch-is-refused`：未送信の無い端末の `Force` なしの洗い替え。途中で新しい行を書くと、洗い替えは `SyncDownloadTooLargeException`（取得した行数・上限・表ごとの未送信の数を表明）で断り、端末は途中で書いた行が足されただけで、サーバー・再開点・前からある行の状態は変わらない。
     - `refresh-force-over-row-limit-with-discarded-key-rewritten-during-fetch-is-refused`：未送信の行がある端末の `Force` の洗い替え。途中でその行を書き直す（連番が進む）と、洗い替えは同じ例外で断り、行は書き直した内容で未送信のまま残る（書き直さなければ断られないことは、決定的なシナリオ `refresh-force-over-row-limit-discards-unsent-and-is-not-refused` が持つ）。
     - この 2 本は降ろす行の上限を小さくした洗い替えで流す（同期のモデルの割り込みの網の洗い替えの行は上限を製品の既定のまま渡す）。上限を超えて未送信がある同期・`Force` の洗い替え・上限ちょうどは、決定的なシナリオ（`dl-row-limit-*`・`refresh-force-over-row-limit-discards-unsent-and-is-not-refused`・全転送）が持つ。
-  - 塊ごとに確定する経路の行は 10 本（`chunk-*`。洗い替えの `chunk-refresh-*` は別に数える）。行の中でエンジンの internal の値（閾値・塊の大きさ）を小さくし、差分ソースを包む `ObservedSyncServerSource`（行とキーの取得を前後で観測し、何回目の呼び出しかを数える。`SyncEngineFixedHarness.CreateEngine(observe)`）で、当たった時点の端末の状態を控えて、実行の後に表明する。
+  - 塊ごとに確定する経路の行は 11 本（`chunk-*`。洗い替えの `chunk-refresh-*` は別に数える）。行の中でエンジンの internal の値（閾値・塊の大きさ）を小さくし、差分ソースを包む `ObservedSyncServerSource`（行とキーの取得を前後で観測し、何回目の呼び出しかを数える。`SyncEngineFixedHarness.CreateEngine(observe)`）で、当たった時点の端末の状態を控えて、実行の後に表明する。
     - `chunk-failure-between-chunks-keeps-first-chunk-and-next-sync-resumes`：2 ページ目の取得の前で失敗させる。その時点で最初の塊の行が端末にあり、再開点がその塊の最後の行の版と一致する。同期は例外で終わり、次の同期は続きだけを取得してそろう。
     - `chunk-failure-after-carry-keeps-resume-point-before-carried-row`：最初の塊で子が保留（親が後ろの塊）になり、後ろの塊を書いた後で失敗させる。再開点は最初に持ち越した行の手前で止まり（後ろの塊の版まで進まない）、次の同期で持ち越していた行が入ってそろう。
     - `chunk-unsent-edit-between-chunks-kept-then-serverwins-restores`・`chunk-unsent-edit-between-chunks-kept-then-localwins-uploads`：最初の塊のコミットの後（その時点の端末の行で表明）に、まだ書かれていない行を端末で編集する。その実行の後、編集した行はローカルの内容のまま未送信で残り、ほかの行は降りている。続く ServerWins の同期はサーバーの内容に戻し、LocalWins の同期はローカルの内容をサーバーへ上げる。
@@ -543,6 +543,7 @@
     - `chunk-stale-row-then-fetch-failure-then-device-edit-collect-reports-conflict`・`chunk-stale-row-then-fetch-failure-then-device-edit-serverwins-restores`：取得の後・適用の前にサーバーで書き直された行が古い写しのまま塊で確定し、次の取得で同期が落ちた後に端末がその行を編集すると、Collect の同期は ModifiedOnServer を報告してサーバーの新しい内容を上書きせず（編集は未送信のまま残る）、ServerWins の同期は編集を捨てて端末の行をサーバーの新しい内容に戻す。
     - `chunk-apply-refused-local-write-keeps-committed-chunks-and-next-sync-resumes`：2 つ目の塊の適用の書き込みを端末のトリガーが断ると、同期は例外で終わり、先に確定した最初の塊の行だけが端末にあり、再開点はその塊の最後の行の版で止まる。断りを外した次の同期は続きだけを取得してそろう。
     - `chunk-download-route-cells`：道の決め方の枠（閾値以下・閾値を超え上限以下・上限を超える × 未送信なし・あり、と、上限が閾値以下の設定の 2 枠）を流し、観測した道（Single・Chunked・Refused）と、断る枠が何も適用しないことを表明する。洗い替えの枠（閾値を超えて未送信なし → Chunked・`Force` で捨てる行だけ → Chunked・閾値以下 → Single）も持つ。
+    - `chunk-write-transactions-leave-gap-for-other-writers`：塊の経路のトランザクションの間の隙間（`ChunkWriteGap`）。形（同期・`Force` の洗い替え）× 時計（止まった時計・時刻を読むたびに隙間ぶん進む時計・隙間 0）ごとに別の端末で、閾値と塊の大きさを 2 行にしたエンジンで、サーバーのフォルダー（取得の順に 11〔親は 10〕・1・2・3・10）を流す。同期（空の端末）は最初の塊が 11 を持ち越して最後の段で書き、洗い替え（端末は 10 を持つ）は持ち越さない（持ち越しの数を `CarriedRowsApplied` で見る）。時計は偽の `TimeProvider`（`RecordingTimeProvider`＝頼まれた待ちの長さを覚えてすぐに発火する）で、時間は表明しない。止まった時計では待ちが塊の経路のトランザクションの数（同期は削除の段 1・塊 3・最後の段 1、洗い替えは最後の段なし）− 1 回で、どれも既定の 170 ms。ほかの 2 つの時計では待たない。結果（端末・サーバー・行の状態の表と再開点の表。DB ごとの印を持つ `quicker_sync_state` は除く）は 3 つの時計で同じ。既定の閾値（2 万行）と隙間（170 ms）の値も表明する。
   - 洗い替えの塊の経路の行は 10 本（`chunk-refresh-*`）。
     - `chunk-refresh-{plain|discard-blobs|force}-failure-then-{sync|refresh}` の 6 行（1 つの関数が洗い替えの種類 × 次の手から作る）：フォルダーの表の 2 ページ目の取得の前で洗い替えを落とす。その時点で、削除の段が済んでいる（サーバーに無かった行が端末に無い）・フォルダーの再開点が確定した塊の最後の行の版・品目の再開点が null（まだ届いていない表）・blob を捨てる行は全行の blob が空で写し待ちなし・`Force` の行は置き換え済みの行がサーバーの内容で未送信なし、まだの行が端末の内容で未送信、を表明する。次の手が同期なら、続きだけを取得してそろい、`Force` の残りの未送信がサーバーへ上がる。次の手が洗い替えの流し直しなら、そろって未送信が残らない。
     - `chunk-refresh-force-discard-gone-after-keys-only-loses-change`：品目のキーを取った後・行を取る前に、サーバーが捨てる行を消す。洗い替えの後に未送信が無く、その行は端末に残り、次の同期が何も送らずに消してそろう。

@@ -49,6 +49,7 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **A download no longer stops a table at an unsent row** — An unsent row keeps the device's content while the rows after it come down, and `SyncResult.Truncations` now lists only the rows that could not be placed because of a foreign key or a unique value
 - **Rows whose unique values were swapped or rotated now come down in one sync** — They used to need a refresh, or a sync with a temporary value in between
 - **A refresh now replaces the rows of a table instead of emptying it first** — It removes only the rows the server no longer holds, and a refresh whose fetch fails leaves the device as it was (a large refresh is committed a chunk at a time). `SyncRefreshResult.DiscardedChanges` is the number of rows whose change was actually discarded
+- **During a large refresh or sync, other connections' local writes now wait only briefly** — A 0.4.0 refresh held the local write lock until it finished. A refresh or sync committed a chunk at a time now leaves a gap between chunks, so another connection's write waits for about one chunk (around half a second), at the cost of roughly one to two seconds more for 100,000 rows
 - **A row saved from an entity read before another writer's content came down is reported as `ModifiedOnServer` even after a change from a newer entity was sent** — 0.4.0 uploaded such a row without a conflict
 
 #### Generated code

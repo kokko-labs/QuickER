@@ -758,3 +758,58 @@ internal sealed class NonAdvancingSyncServerSource<TEntity, TKey>(
 
     public ISyncBinaryColumns<TKey>? BinaryColumns => inner.BinaryColumns;
 }
+
+/// <summary>
+/// 塊の経路のトランザクションの間の隙間（<c>SyncEngine.ChunkWriteGap</c>）を数える偽の時計。時刻は止まったままか、読むたびに決めた
+/// 長さだけ進む。待ち（タイマー）は頼まれた長さを覚えてすぐに発火する（実際には待たない）
+/// </summary>
+/// <param name="advancePerRead">時刻を読むたびに進める長さ（<see cref="TimeSpan.Zero"/> なら止まったまま）</param>
+internal sealed class RecordingTimeProvider(TimeSpan advancePerRead) : TimeProvider
+{
+    private readonly List<TimeSpan> _waits = [];
+    private long _now;
+
+    /// <summary>頼まれた待ちの長さ（頼まれた順）</summary>
+    public IReadOnlyList<TimeSpan> Waits
+    {
+        get
+        {
+            lock (_waits)
+            {
+                return [.. _waits];
+            }
+        }
+    }
+
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+    public override long GetTimestamp() => Interlocked.Add(ref _now, advancePerRead.Ticks);
+
+    public override ITimer CreateTimer(
+        TimerCallback callback,
+        object? state,
+        TimeSpan dueTime,
+        TimeSpan period
+    )
+    {
+        lock (_waits)
+        {
+            _waits.Add(dueTime);
+        }
+
+        // 呼び出し元（Task.Delay）がタイマーを受け取った後に発火させる
+        ThreadPool.QueueUserWorkItem(_ => callback(state));
+
+        return new FiredTimer();
+    }
+
+    /// <summary>発火済みのタイマー（変更・破棄は何もしない）</summary>
+    private sealed class FiredTimer : ITimer
+    {
+        public bool Change(TimeSpan dueTime, TimeSpan period) => false;
+
+        public void Dispose() { }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+}

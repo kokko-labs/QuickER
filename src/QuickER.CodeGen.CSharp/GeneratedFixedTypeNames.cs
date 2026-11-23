@@ -552,6 +552,7 @@ public static class GeneratedFixedTypeNames
             "ThreadStatic",
             "ThreadStaticAttribute",
             "TimeOnly",
+            "TimeProvider",
             "TimeSpan",
             "Timeout",
             "TransportContext",
