@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using QuickER.Tests.GeneratedSyncModelFixture;
 
@@ -98,23 +97,6 @@ internal static partial class SyncModelScenarios
                 Sync(D1, policy: SyncConflictPolicy.ServerWins, propagateDeletes: false),
                 new ExpectLocalOp(D1, ModelTables.Items, "1782", LocalHolderReferrer),
                 new ExpectLocalOp(D1, ModelTables.Folders, "1781", "parent=null name=h1781"),
-            ]
-        );
-
-        // 記録を捨ててから行を消す：記録の削除が断られた実行は、行を消さずに例外で終わる（逆の順なら行だけが消え、作り直した
-        // 行の削除の記録が残り得る）。断りを外した次の ServerWins の同期で決着する
-        yield return new(
-            "holder-referenced-by-other-table-entries-go-before-rows",
-            [],
-            [
-                .. HolderKeptByItemOps(),
-                new RefuseJournalRemovalOp(D1, ModelTables.Items, "1782", Refuse: true),
-                new ExpectThrowOp(D1),
-                Sync(D1, policy: SyncConflictPolicy.ServerWins),
-                new ExpectLocalOp(D1, ModelTables.Items, "1782", LocalHolderReferrer),
-                new RefuseJournalRemovalOp(D1, ModelTables.Items, "1782", Refuse: false),
-                Sync(D1, policy: SyncConflictPolicy.ServerWins),
-                .. ExpectHolderKeptByItemSettled(SyncLocalRowChangeReason.RemovedForUniqueValue),
             ]
         );
 
@@ -218,29 +200,6 @@ internal static partial class SyncModelScenarios
 
     /// <summary>最新の写しの子のイベントのキーのテキスト（モデルの照合の形）</summary>
     private static string CurrentChildKey => ModelTables.EventKeyText(CurrentChildAt);
-
-    /// <summary>最新の写しの子のイベントのキーのテキスト（ジャーナルの形＝<see cref="SyncResult.LocalRowChanges"/> が載せる形）</summary>
-    private static string CurrentChildJournalKey =>
-        CurrentChildAt.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff", CultureInfo.InvariantCulture);
-
-    /// <summary>端末の降ろし直す約束（quicker_sync_row_pending）の件数を確かめる</summary>
-    private static ExpectLocalSqlOp ExpectOwedRows(int count) =>
-        new(
-            D1,
-            "SELECT COUNT(*) FROM quicker_sync_row_pending",
-            count.ToString(CultureInfo.InvariantCulture)
-        );
-
-    /// <summary>端末のローカル DB の、1 つの文を断るトリガーを仕掛ける（名前と条件はシナリオの定数）</summary>
-    private static LocalSqlOp RefuseLocal(string trigger, string when) =>
-        new(
-            D1,
-            $"CREATE TRIGGER {trigger} {when} BEGIN SELECT RAISE(ABORT, 'refused by the scenario'); END"
-        );
-
-    /// <summary>仕掛けたトリガーを外す</summary>
-    private static LocalSqlOp AllowLocal(string trigger) =>
-        new(D1, $"DROP TRIGGER IF EXISTS {trigger}");
 
     /// <summary>SK-1 の形の手（持ち主 1781 を引き留める品目 1782 の下へ、サーバーの子のイベントが最新の写しとして降りる）</summary>
     /// <remarks>
@@ -379,179 +338,7 @@ internal static partial class SyncModelScenarios
                 new ExpectLocalOp(D1, ModelTables.Events, CurrentChildKey, "item=811 memo=edited"),
             ]
         );
-
-        // 約束を書いてから行を消す：約束の書き込みが断られた実行は、行を消さずに例外で終わる（逆の順なら行だけが消え、戻す
-        // 約束が無いまま残る）。断りを外した次の同期で決着する
-        yield return new(
-            "holder-referenced-by-other-table-current-child-owed-row-recorded-before-removal",
-            StaleCopyWithChildSetup(),
-            [
-                .. StaleCopyOps(),
-                RefuseLocal("sr_refuse_owed", "BEFORE INSERT ON quicker_sync_row_pending"),
-                new ExpectThrowOp(D1),
-                Sync(D1),
-                new ExpectLocalOp(
-                    D1,
-                    ModelTables.Items,
-                    "811",
-                    "folder=810 label=null code=c-811 title=t811"
-                ),
-                new ExpectLocalOp(D1, ModelTables.Events, CurrentChildKey, "item=811 memo=child"),
-                ExpectOwedRows(0),
-                AllowLocal("sr_refuse_owed"),
-                Sync(D1),
-                .. ExpectStaleCopyWithChildSettled(),
-            ]
-        );
-
-        // 約束を書いた後・行を消す前に止まった形：行と約束が残る。フォルダーの表を除外した次の同期は、イベントの表の番で
-        // 「ローカルに同じキーの行がある」により約束だけを消す。除外をやめた同期で決着する
-        yield return new(
-            "holder-referenced-by-other-table-current-child-owed-row-dropped-when-row-is-still-there",
-            StaleCopyWithChildSetup(),
-            [
-                .. StaleCopyOps(),
-                RefuseLocal(
-                    "sr_refuse_child_delete",
-                    "BEFORE DELETE ON model_events WHEN OLD.memo = 'child'"
-                ),
-                new ExpectThrowOp(D1),
-                Sync(D1),
-                new ExpectLocalOp(D1, ModelTables.Events, CurrentChildKey, "item=811 memo=child"),
-                ExpectOwedRows(1),
-                AllowLocal("sr_refuse_child_delete"),
-                Sync(D1, excluded: [ModelTables.Folders]),
-                new ExpectLocalOp(D1, ModelTables.Events, CurrentChildKey, "item=811 memo=child"),
-                ExpectOwedRows(0),
-                Sync(D1),
-                .. ExpectStaleCopyWithChildSettled(),
-            ]
-        );
-
-        // 行を消した後・読み直す前に止まった形：約束が残るので、次の同期がサーバーから読み直して戻す
-        yield return new(
-            "holder-referenced-by-other-table-current-child-owed-row-survives-failed-run",
-            StaleCopyWithChildSetup(),
-            [.. FailedReadBackOps(), Sync(D1), .. ExpectStaleCopyWithChildSettled()]
-        );
-
-        // 読み直す前にサーバーで消えた行：約束を消し、行は端末に戻らない（削除伝搬と同じ結果）
-        yield return new(
-            "holder-referenced-by-other-table-current-child-owed-row-gone-on-server",
-            StaleCopyWithChildSetup(),
-            [
-                .. FailedReadBackOps(),
-                new DeleteEventOp(SV, Direct, CurrentChildAt),
-                Sync(D1),
-                new ExpectLocalOp(D1, ModelTables.Events, CurrentChildKey, null),
-                ExpectOwedRows(0),
-            ]
-        );
-
-        // 親がそろわない約束（端末が親の品目 811 を消し、サーバーが断った未送信の削除がある）：約束は残り、イベントの表の
-        // ダウンロードは止まらず後ろの行を降ろす。静止化の ServerWins の周が削除を捨てて品目 811 を戻し、次の番で戻る
-        yield return new(
-            "holder-referenced-by-other-table-current-child-owed-row-waits-for-parent-with-unsent-delete",
-            StaleCopyWithChildSetup(),
-            [
-                .. FailedReadBackOps(),
-                new DeleteItemOp(D1, Direct, 811),
-                new AddEventOp(SV, Direct, CurrentChildAt.AddMinutes(2), 999, "after-owed"),
-                Sync(D1),
-                new ExpectLocalOp(D1, ModelTables.Events, CurrentChildKey, null),
-                ExpectOwedRows(1),
-                new ExpectLocalOp(
-                    D1,
-                    ModelTables.Events,
-                    ModelTables.EventKeyText(CurrentChildAt.AddMinutes(2)),
-                    "item=999 memo=after-owed"
-                ),
-            ]
-        );
-
-        // 端末が同じキーで行を作った：約束を消し、端末の行を上書きしない（Collect は DuplicateOnServer を報告して残す。
-        // サーバーの他者がその行を先に編集しておく＝競合の根拠。モデルはエンジンが消した行を端末の見た内容から外さない）
-        yield return new(
-            "holder-referenced-by-other-table-current-child-owed-row-key-created-on-device",
-            StaleCopyWithChildSetup(),
-            [
-                .. FailedReadBackOps(),
-                new UpdateEventOp(SV, Direct, CurrentChildAt, 811, "server-edit"),
-                new AddEventOp(D1, Direct, CurrentChildAt, 999, "device"),
-                Sync(D1),
-                new ExpectLocalOp(D1, ModelTables.Events, CurrentChildKey, "item=999 memo=device"),
-                ExpectOwedRows(0),
-            ]
-        );
-
-        // そのキーに未送信の記録が残っている（落ちたプロセスが残した削除の記録）：ダウンロードだけの実行は約束を残し、行を
-        // 戻さない。静止化のアップロードが行の無い記録を捨てた後の番で戻る
-        yield return new(
-            "holder-referenced-by-other-table-current-child-owed-row-waits-for-unsent-entry",
-            StaleCopyWithChildSetup(),
-            [
-                .. FailedReadBackOps(),
-                new RecordJournalOp(
-                    D1,
-                    ModelTables.Events,
-                    CurrentChildJournalKey,
-                    SyncJournalOperation.Delete
-                ),
-                PlainOnly(D1, ModelSyncKind.Download),
-                new ExpectLocalOp(D1, ModelTables.Events, CurrentChildKey, null),
-                ExpectOwedRows(1),
-            ]
-        );
-
-        // 洗い替えは範囲の表の約束を消し、行はほかの行と同じく洗い替えで入る
-        yield return new(
-            "holder-referenced-by-other-table-current-child-owed-row-cleared-by-refresh",
-            StaleCopyWithChildSetup(),
-            [
-                .. FailedReadBackOps(),
-                new ModelRefreshOp(D1, SyncMode.Versioned, IncludeBlobs: true),
-                new ExpectLocalOp(D1, ModelTables.Events, CurrentChildKey, "item=811 memo=child"),
-                ExpectOwedRows(0),
-            ]
-        );
-
-        // 約束の表が無い古い端末の DB：新しいジャーナルのインスタンスが最初の使用で作り、同期が決着する
-        yield return new(
-            "holder-referenced-by-other-table-current-child-legacy-local-schema",
-            StaleCopyWithChildSetup(),
-            [
-                .. StaleCopyOps(),
-                new LocalSqlOp(D1, "DROP TABLE quicker_sync_row_pending"),
-                new OpenNewJournalOp(D1),
-                Sync(D1),
-                .. ExpectStaleCopyWithChildSettled(),
-            ]
-        );
     }
-
-    /// <summary>
-    /// 新しい形で、消した子のイベントの読み直しが断られて実行が止まる手（品目 811 のサーバーの写しは入り、子のイベントは
-    /// 端末に無く、約束が 1 件残る）
-    /// </summary>
-    private static IReadOnlyList<ModelOp> FailedReadBackOps() =>
-        [
-            .. StaleCopyOps(),
-            RefuseLocal(
-                "sr_refuse_child_insert",
-                "BEFORE INSERT ON model_events WHEN NEW.memo = 'child'"
-            ),
-            new ExpectThrowOp(D1),
-            Sync(D1),
-            new ExpectLocalOp(
-                D1,
-                ModelTables.Items,
-                "811",
-                "folder=813 label=null code=c-811 title=t811"
-            ),
-            new ExpectLocalOp(D1, ModelTables.Events, CurrentChildKey, null),
-            ExpectOwedRows(1),
-            AllowLocal("sr_refuse_child_insert"),
-        ];
 
     /// <summary>古い写しの形のサーバーの手（端末 1 が初期データをそろえた後）</summary>
     private static IReadOnlyList<ModelOp> StaleCopyOps() =>

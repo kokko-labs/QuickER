@@ -49,7 +49,7 @@ internal sealed record SyncModelCoverageInput(
 /// <para>
 /// <b>決定的なシナリオ（<see cref="SyncModelScenarios"/>）との違い</b>：シナリオは指摘ごとの回帰の網で、別の Theory の行として流れ、
 /// 網羅の計数に届かない（期待の操作 ExpectLocalOp なども混ざり、種の組やモードを宣言しない）。網羅の行は、乱数の種で作れない・
-/// 欠ける組（サーバーの他者の Extras の操作・グラフ保存の失敗する書き込み・表を除外したダウンロード・同期の結果の理由）を実際に
+/// 欠ける組（サーバーの他者の Extras の操作・グラフ保存の失敗する書き込み・表を除外したダウンロード）を実際に
 /// 流すための行で、操作を 1 歩ずつ次元表（<see cref="SyncModelDimensions"/>）で、同期の結果を結果の表
 /// （<see cref="SyncModelOutcomeDimensions"/>）で数える。行は期待の操作を持たない（次元表に無い操作の型は宣言の誤りになる）。
 /// 違反は既知の失敗の一覧で外さない＝どれも新しい失敗として赤にする（行が狙った組を出さなくなったら、網羅の照合が一覧に無い欠けで赤）。
@@ -308,77 +308,6 @@ internal static class SyncModelCoverageRows
                 ),
             ]
         );
-
-        // ---- 同期の結果の理由（SyncModelOutcomeDimensions） ----
-        // RemovedBeforeDownload × LastWriteWins：端末 2 の親が端末 1 の同期で消え、端末 2 の後勝ち＋ServerWins の同期が
-        // 親の無い品目の記録を決着させ、ダウンロードの前の削除伝搬でローカルから消す（n786 の形から失敗の注入を外したもの）
-        yield return Row(
-            "removed-before-download-last-write-wins",
-            "後勝ち＋ServerWins が、親が消えた未送信の品目をダウンロードの前に消す（RemovedBeforeDownload）",
-            SyncMode.LastWriteWins,
-            SyncConflictPolicy.ServerWins,
-            extras: false,
-            faults: false,
-            [Folder(SV, 570), Folder(SV, 571), Item(SV, 572, 571, "cb1")],
-            [
-                [Item(D2, 573, 570, "cb2")],
-                [new DeleteFolderOp(D1, Direct, 570)],
-                [Sync(D1, SyncMode.LastWriteWins, SyncConflictPolicy.ServerWins)],
-                [Sync(D2, SyncMode.LastWriteWins, SyncConflictPolicy.ServerWins)],
-            ]
-        );
-
-        // ReloadedForUniqueValue × Collect / LocalWins：サーバーで品目が一意な値を手放し、別の品目がそれを取り、元の品目がもう一度
-        // 更新された（流れの順で取る側が先に来る＝n8-unique-value-moved-then-updated の形）
-        foreach (var policy in new[] { SyncConflictPolicy.Collect, SyncConflictPolicy.LocalWins })
-        {
-            yield return Row(
-                $"reloaded-for-unique-value-{policy}",
-                $"一意な値の持ち主を読み直す（ReloadedForUniqueValue）を {policy} の同期で起こす",
-                SyncMode.Versioned,
-                policy,
-                extras: false,
-                faults: false,
-                [Folder(SV, 580), Item(SV, 581, 580, "cu1")],
-                [
-                    [new UpdateItemOp(SV, Direct, 581, 580, null, "cu2", "t581")],
-                    [Item(SV, 582, 580, "cu1")],
-                    [new UpdateItemOp(SV, Direct, 581, 580, null, "cu2", "later")],
-                    [Sync(D1, SyncMode.Versioned, policy)],
-                ]
-            );
-        }
-
-        // RemovedForUniqueValue × Collect / LocalWins / LastWriteWins：未送信の無い古い写しが一意な値の持ち主を引き留める形
-        // （holder-referenced-by-other-table-stale-copy-settles）。サーバーで品目 591 を新しいフォルダー 592 へ移し、元の
-        // フォルダー 590 を消し、592 が 590 の名前を取る。送るもののある行が無いので、ポリシーに依らず古い写しを消す
-        foreach (
-            var (mode, policy) in new[]
-            {
-                (SyncMode.Versioned, SyncConflictPolicy.Collect),
-                (SyncMode.Versioned, SyncConflictPolicy.LocalWins),
-                (SyncMode.LastWriteWins, SyncConflictPolicy.Collect),
-            }
-        )
-        {
-            yield return Row(
-                $"removed-for-unique-value-{mode}-{policy}",
-                $"古い写しを消して一意な値の持ち主を消す（RemovedForUniqueValue）を {mode} / {policy} の同期で起こす",
-                mode,
-                policy,
-                extras: false,
-                faults: false,
-                [new AddFolderOp(SV, Direct, 590, null, "h590"), Item(SV, 591, 590, "cr1")],
-                [
-                    [Sync(D1, mode, policy)],
-                    [new AddFolderOp(SV, Direct, 592, null, "r592")],
-                    [new UpdateItemOp(SV, Direct, 591, 592, null, "cr1", "t591")],
-                    [new DeleteFolderOp(SV, Direct, 590)],
-                    [new UpdateFolderOp(SV, Direct, 592, null, "h590")],
-                    [Sync(D1, mode, policy)],
-                ]
-            );
-        }
     }
 
     private static ScenarioRow<SyncModelCoverageInput> Row(

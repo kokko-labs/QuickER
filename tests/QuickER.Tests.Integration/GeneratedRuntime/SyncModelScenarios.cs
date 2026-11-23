@@ -24,9 +24,6 @@ internal sealed record SyncModelScenario(
     Func<ModelDbState, string?>? Expect = null
 )
 {
-    /// <summary>表を外部の ISyncTable 実装の代役で包む端末</summary>
-    public IReadOnlyList<ModelActor> ExternalTables { get; init; } = [];
-
     /// <summary>
     /// 初期データの末尾の行（<see cref="SyncModelScenarios.Tail"/>）を足さない（空のサーバーから始める形。アンカーの順序を
     /// 確かめないシナリオだけが使う）
@@ -66,19 +63,6 @@ internal sealed record SyncModelScenario(
     /// </summary>
     public bool CarriesAcrossChunks { get; init; }
 
-    /// <summary>
-    /// 今のエンジン（記録のデコレータと <c>SyncEngine</c>）の仕組みそのものを確かめる行の印。null でなければ理由で、
-    /// 新しいエンジン（<c>TrackedSyncEngine</c>）に同じ仕組みが無い根拠（消える不変条件）。行には書かず、一覧
-    /// <see cref="SyncModelCurrentEngineOnlyScenarios"/> から <see cref="SyncModelScenarios.All"/> が付ける。
-    /// </summary>
-    /// <remarks>
-    /// 印のある行を、新しいエンジンの端末で流す転送の Theory は流さない（<see cref="SyncModelScenarioParts.Runs"/>）。印を
-    /// 付けてよいのは、新しいエンジンの端末で緑にならない行だけ（緑になる行に印を付けると、その行が黙って新しいエンジンの
-    /// 守りから外れる）。それと、理由が具体的なこと・印のある行が今のエンジンの端末で流れ続けることは、今のエンジンの控えの
-    /// Fact（<see cref="SyncSupportAdoSqliteCurrentEngineRuntimeTests.ScenarioLedgerDrift_MatchesRecord"/>）が照合する。
-    /// </remarks>
-    public string? CurrentEngineOnly { get; init; }
-
     /// <summary>この転送のテストで流すか</summary>
     public bool RunsOn(SyncModelTransport transport) =>
         Transports.Contains(SyncModelTransport.Direct)
@@ -87,17 +71,13 @@ internal sealed record SyncModelScenario(
 
     /// <summary>シナリオを流し、見つかった違反を返す</summary>
     /// <param name="ct">キャンセルトークン</param>
-    /// <param name="options">世界の組み方（既定は直結・SQLite のサーバー役。外部の ISyncTable の代役はシナリオが決める）</param>
+    /// <param name="options">世界の組み方（既定は直結・SQLite のサーバー役。端末の数はシナリオが決める）</param>
     public async Task<(IReadOnlyList<ModelFailure> Failures, IReadOnlyList<string> Log)> RunAsync(
         CancellationToken ct,
         SyncModelWorldOptions? options = null
     )
     {
-        var world = (options ?? SyncModelWorldOptions.Direct) with
-        {
-            ExternalTables = ExternalTables,
-            Devices = Devices,
-        };
+        var world = (options ?? SyncModelWorldOptions.Direct) with { Devices = Devices };
         HashSet<JudgeBreak>? fired = null;
 
         if (JudgeDevice is not null)
@@ -174,40 +154,7 @@ internal static partial class SyncModelScenarios
     ];
 
     /// <summary>すべてのシナリオ</summary>
-    public static IReadOnlyList<SyncModelScenario> All { get; } = MarkCurrentEngineOnly(Build());
-
-    /// <summary>
-    /// 今のエンジンだけの行の一覧（<see cref="SyncModelCurrentEngineOnlyScenarios"/>）に載っている行へ印を付ける。一覧にあるのに
-    /// シナリオに無い名前は、宣言の誤りとして断る（行を消した・名前を変えたのに一覧が残っている）
-    /// </summary>
-    private static IReadOnlyList<SyncModelScenario> MarkCurrentEngineOnly(
-        IReadOnlyList<SyncModelScenario> scenarios
-    )
-    {
-        var reasons = SyncModelCurrentEngineOnlyScenarios.All;
-        var names = scenarios.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
-        var missing = reasons.Keys.Where(name => !names.Contains(name)).ToList();
-
-        if (missing.Count > 0)
-        {
-            throw new InvalidOperationException(
-                "SyncModelCurrentEngineOnlyScenarios names scenarios that do not exist: "
-                    + string.Join(", ", missing.Order(StringComparer.Ordinal))
-            );
-        }
-
-        return
-        [
-            .. scenarios.Select(s =>
-                reasons.TryGetValue(s.Name, out var reason)
-                    ? s with
-                    {
-                        CurrentEngineOnly = reason,
-                    }
-                    : s
-            ),
-        ];
-    }
+    public static IReadOnlyList<SyncModelScenario> All { get; } = Build();
 
     /// <summary>名前で引く</summary>
     public static SyncModelScenario Get(string name) => All.Single(s => s.Name == name);
@@ -580,38 +527,6 @@ internal static partial class SyncModelScenarios
                         ModelTables.Items,
                         "445",
                         "folder=443 label=null code=q3 title=t445"
-                    ),
-                ]
-            ),
-            // N8: サーバーで値を入れ替えた 2 行（本当の入れ替え）は打ち切る（読み直しても解けない＝既知の割り切り）。
-            // docs が案内する抜け道（洗い替え）で両端末とも解消する。断られたバッチの書き込みは blob のコピー待ちを
-            // 残さない（残すと次の実行が、古い内容のままの行へサーバーの blob を写す）
-            new(
-                "n8-true-swap-stops",
-                [
-                    Folder(SV, 446),
-                    Item(SV, 447, folder: 446, code: "s1"),
-                    Item(SV, 448, folder: 446, code: "s2"),
-                ],
-                [
-                    new UpdateItemOp(SV, Direct, 447, 446, null, "tmp", "t447"),
-                    new UpdateItemOp(SV, Direct, 448, 446, null, "s1", "t448"),
-                    new UpdateItemOp(SV, Direct, 447, 446, null, "s2", "t447"),
-                    Sync(D1),
-                    Expect.BlobPending(D1, ModelTables.Items).Empty(),
-                    new ExpectLocalOp(
-                        D1,
-                        ModelTables.Items,
-                        "448",
-                        "folder=446 label=null code=s2 title=t448"
-                    ),
-                    new ModelRefreshOp(D1, SyncMode.LastWriteWins, true),
-                    new ModelRefreshOp(D2, SyncMode.LastWriteWins, true),
-                    new ExpectLocalOp(
-                        D1,
-                        ModelTables.Items,
-                        "448",
-                        "folder=446 label=null code=s1 title=t448"
                     ),
                 ]
             ),
@@ -1087,80 +1002,6 @@ internal static partial class SyncModelScenarios
                     Sync(D1),
                 ]
             ),
-            // #25: 以前の版が Kind つきで書いたジャーナルのキー（ローカルのオフセット）が残ったローカル DB でも、ランの前に
-            // 書き直して照合でき、オフラインの挿入が上がる
-            new(
-                "25-legacy-journal-key-text",
-                [Folder(SV, 430), Item(SV, 431, folder: 430)],
-                [
-                    new AddEventOp(
-                        D1,
-                        Direct,
-                        new DateTime(2026, 7, 1, 8, 0, 0).AddTicks(9),
-                        431,
-                        "legacy"
-                    ),
-                    new LegacyKeyTextsOp(D1, ModelTables.Events, "+09:00"),
-                    Sync(D1),
-                    new ExpectLocalOp(
-                        SV,
-                        ModelTables.Events,
-                        "2026-07-01 08:00:00.0000009",
-                        "item=431 memo=legacy"
-                    ),
-                ]
-            ),
-            // #25: 同じく受理記録のキー（Z つき）。書き直さないと、後の編集が受理記録を見つけられず偽の DuplicateOnServer になる
-            new(
-                "25-legacy-ack-key-text",
-                [Folder(SV, 432), Item(SV, 433, folder: 432)],
-                [
-                    new AddEventOp(
-                        D1,
-                        Direct,
-                        new DateTime(2026, 7, 2, 8, 0, 0).AddTicks(9),
-                        433,
-                        "legacy"
-                    ),
-                    new ModelSyncOp(
-                        D1,
-                        ModelSyncKind.Upload,
-                        SyncMode.Versioned,
-                        SyncConflictPolicy.Collect,
-                        [],
-                        true,
-                        500
-                    ),
-                    new LegacyKeyTextsOp(D1, ModelTables.Events, "Z"),
-                    new UpdateEventOp(
-                        D1,
-                        Direct,
-                        new DateTime(2026, 7, 2, 8, 0, 0).AddTicks(9),
-                        433,
-                        "edited"
-                    ),
-                    Sync(D1),
-                    new ExpectLocalOp(
-                        SV,
-                        ModelTables.Events,
-                        "2026-07-02 08:00:00.0000009",
-                        "item=433 memo=edited"
-                    ),
-                ]
-            ),
-            // 4m-E2: キーの決まっていない行の記録（書き込みの後・突き合わせの前に落ちて残ったもの）は、エンジンの読み取りが返さず、
-            // 次の実行の初めに消える（キーを読もうとして同期が止まらない）。ほかの未送信の記録は普段どおり上がる
-            new(
-                "e2-leftover-unset-key-entry",
-                [Folder(SV, 434)],
-                [
-                    Sync(D1),
-                    Item(D1, 435, folder: 434),
-                    new LeftoverUnsetKeyEntryOp(D1, ModelTables.Items),
-                    Sync(D1),
-                    new ExpectNoUnsetKeyEntryOp(D1),
-                ]
-            ),
             // #25: 同じ形で Kind=Local
             new(
                 "25-datetime-key-local",
@@ -1299,25 +1140,6 @@ internal static partial class SyncModelScenarios
                     Sync(D1, policy: SyncConflictPolicy.LocalWins),
                 ]
             ),
-            // #26: 外部の ISyncTable 実装には未送信のキーが渡らず、競合を報告した行のローカルの編集が上書きされる
-            new(
-                "26-external-table-overwrites-pending-edit",
-                [Folder(SV, 185), Item(SV, 186, folder: 185)],
-                [
-                    new UpdateItemOp(D1, Direct, 186, 185, null, "c-186", "d1"),
-                    new UpdateItemOp(SV, Direct, 186, 185, null, "c-186", "sv"),
-                    Sync(D1),
-                    new ExpectLocalOp(
-                        D1,
-                        ModelTables.Items,
-                        "186",
-                        "folder=185 label=null code=c-186 title=d1"
-                    ),
-                ]
-            )
-            {
-                ExternalTables = [D1],
-            },
             // #27: キーだけのスタブで消した削除が黙って捨てられ、サーバーに行が残る
             new(
                 "27-key-only-stub-delete",
@@ -1457,23 +1279,6 @@ internal static partial class SyncModelScenarios
                     state.Folders[238].Name == "sv"
                         ? null
                         : $"folder 238: {state.Folders[238].Name}"
-            ),
-            // 区切り 40-4（型 5 #7）: エンジンがローカルへ行を適用するとき、ローカルの Before フックが 1 行を飛ばす。その表は
-            // その行で止まり、次の同期で降りる（後ろの行を書くと再開点が飛ばした行を越え、その行が二度と降りない）
-            new(
-                "apply-skip-stops-table",
-                [],
-                [
-                    Folder(SV, 620),
-                    Folder(SV, 621),
-                    Folder(SV, 622),
-                    new ArmFaultOp(D1, ModelFaultKind.ApplySkip),
-                    Sync(D1),
-                    new ExpectLocalOp(D1, ModelTables.Folders, "620", null),
-                    new ExpectLocalOp(D1, ModelTables.Folders, "621", null),
-                    new ExpectLocalOp(D1, ModelTables.Folders, "622", null),
-                    Sync(D1),
-                ]
             ),
             // 新規（案 N10）: フックが飛ばした書き込み（Before が false＝例外にならない）の記録が残り、中身の変わらない書き込みが
             // 上がって版を進め、別の端末に偽の ModifiedOnServer を出す（#16 と同じ根。種 887・1834 の形）
@@ -1818,6 +1623,93 @@ internal static partial class SyncModelScenarios
             ? $"interrupt-{point}-{shape}"
             : $"interrupt-{point}-{shape}-{policy.ToString().ToLowerInvariant()}";
 
+    /// <summary>
+    /// 洗い替えの割り込みの点が起こり得るか（洗い替えはサーバーへ書かないので、サーバーへの書き込みの直前の点に来ない）
+    /// </summary>
+    public static bool IsPossibleRefreshInterruptPoint(ModelInterruptPoint point) =>
+        point != ModelInterruptPoint.BeforeServerWrite;
+
+    /// <summary>
+    /// 端末の書き手の、前段ありの Force の洗い替えの行（宣言。点 × 形。網羅のテストが起こり得る組の全積を含むことを表明する）
+    /// </summary>
+    /// <remarks>
+    /// 前段の未送信があると Force なしの洗い替えは取得の前に断るので、割り込まれる実行は Force の洗い替え。洗い替えは競合
+    /// ポリシーを読まないので、ポリシーの軸を持たない
+    /// </remarks>
+    public static IReadOnlyList<(
+        ModelInterruptPoint Point,
+        InterruptPrelude Prelude,
+        InterruptWrite Write,
+        string Shape,
+        string Name
+    )> RefreshForceInterruptCells =>
+        [
+            .. Enum.GetValues<ModelInterruptPoint>()
+                .Where(IsPossibleRefreshInterruptPoint)
+                .SelectMany(point =>
+                    InterruptShapes.Select(shape =>
+                        (
+                            point,
+                            shape.Prelude,
+                            shape.Write,
+                            shape.Shape,
+                            $"interrupt-{point}-{shape.Shape}-refresh-force"
+                        )
+                    )
+                ),
+        ];
+
+    /// <summary>前段なしの洗い替えの行の、割り込んで差し込む書き込み</summary>
+    public enum InterruptCleanWrite
+    {
+        /// <summary>サーバーにもある品目の更新</summary>
+        Update,
+
+        /// <summary>サーバーにもある品目の削除</summary>
+        Delete,
+
+        /// <summary>サーバーに無い新しいキーの品目の挿入</summary>
+        Insert,
+
+        /// <summary>洗い替えの前にサーバーの他者が消しておいた品目の削除（端末にはまだ行がある）</summary>
+        DeleteGoneOnServer,
+    }
+
+    /// <summary>前段なしの洗い替えの行の、割り込みの書き込みの名前</summary>
+    public static string InterruptCleanWriteName(InterruptCleanWrite write) =>
+        write switch
+        {
+            InterruptCleanWrite.Update => "update",
+            InterruptCleanWrite.Delete => "delete",
+            InterruptCleanWrite.Insert => "insert",
+            InterruptCleanWrite.DeleteGoneOnServer => "delete-gone-on-server",
+            _ => throw new ArgumentOutOfRangeException(nameof(write), write, null),
+        };
+
+    /// <summary>
+    /// 端末の書き手の、前段なしの Force なしの洗い替えの行（宣言。点 × 割り込みの書き込み。網羅のテストが起こり得る組の全積を
+    /// 含むことを表明する）
+    /// </summary>
+    public static IReadOnlyList<(
+        ModelInterruptPoint Point,
+        InterruptCleanWrite Write,
+        string Name
+    )> RefreshCleanInterruptCells =>
+        [
+            .. Enum.GetValues<ModelInterruptPoint>()
+                .Where(IsPossibleRefreshInterruptPoint)
+                .SelectMany(point =>
+                    Enum.GetValues<InterruptCleanWrite>()
+                        .Select(write =>
+                            (
+                                point,
+                                write,
+                                $"interrupt-{point}-{InterruptCleanWriteName(write)}-clean-refresh"
+                            )
+                        )
+                ),
+        ];
+
     /// <summary>割り込みの書き手（網羅のテストが書き手ごとの軸の全積を表明する）</summary>
     public enum InterruptWriter
     {
@@ -1878,7 +1770,7 @@ internal static partial class SyncModelScenarios
         /// <summary>もう一度同期する（サーバーの最新の内容が内容ごと降りる）</summary>
         NextSync,
 
-        /// <summary>対象の行を端末で編集してから同期する（ミラー版が original になる＝割り込みの更新を偽の上書きで消さない）</summary>
+        /// <summary>対象の行を端末で編集してから同期する（行の状態の基準の版が元の版になる＝割り込みの更新を偽の上書きで消さない）</summary>
         EditThenSync,
     }
 
@@ -1889,8 +1781,8 @@ internal static partial class SyncModelScenarios
         None,
 
         /// <summary>
-        /// 割り込みの後のサーバーからの次の取得が失敗する（割り込まれた同期は、割り込みの点の取得が返したバッチを書いてから、
-        /// 同じ表の次のバッチの取得で例外になる。バッチの大きさは 2）
+        /// 割り込みの後のサーバーからの次の取得が失敗する（割り込まれた同期は、割り込みの点の取得の後、同じ表の次のバッチの取得で
+        /// 例外になる。バッチの大きさは 2）
         /// </summary>
         NextFetchFails,
     }
@@ -1902,12 +1794,27 @@ internal static partial class SyncModelScenarios
     /// <summary>
     /// サーバーの書き手の行の組が起こり得るか（原理的に起こり得ない組だけを外す：サーバーへの書き込みの直前の点は、端末が送るものの
     /// 無い形なので来ない／消した行は端末で編集できない）。次の取得の失敗は、割り込まれた実行が取得の後の点のバッチ（割り込みより
-    /// 古い写し）を書いてから同じ表のダウンロードを例外で終える窓の水準なので、その窓がある組（取得の後の点・更新・同期）にだけ
-    /// ある。取得の前の点は割り込みの後に取得したバッチが新しい写しを持ち、削除は解決役が読み直す行が無く、洗い替えは受理記録を
-    /// バッチのコミットごとに消すので、どれも窓が無い
+    /// 古い写し）を取得してから同じ表の次の取得で例外になる窓の水準なので、その窓がある組（取得の後の点・更新・同期）にだけある。
+    /// 取得の前の点は割り込みの後に取得したバッチが新しい写しを持ち、削除は対象の行が残らず、洗い替えは同期と別の経路なので、
+    /// どれも窓が無い
     /// </summary>
+    /// <remarks>
+    /// 次の取得の失敗 × 前段 <c>parent-after-child-*</c> × 編集してから同期も起こり得ない：対象の行（親のフォルダー 800）は
+    /// 前段でサーバーに作られ、実行の前の端末に無い。取得が失敗した実行は何も適用しない（エンジンは全部を取得してから 1 つの
+    /// トランザクションで適用する）ので、実行の後も端末に無く、端末で編集できない（前段 <c>unique-holder-after-taker</c> の対象の行
+    /// 820 は初期データにあって前から端末に在るので、編集できる）。塊を確定した後に次の取得が失敗する窓は、塊ごとに確定する経路にだけ
+    /// あり、table:SyncEngineFixed の行 chunk-failure-between-chunks-keeps-first-chunk-and-next-sync-resumes・
+    /// chunk-failure-after-carry-keeps-resume-point-before-carried-row・
+    /// chunk-stale-row-then-fetch-failure-then-device-edit-collect-reports-conflict・
+    /// chunk-stale-row-then-fetch-failure-then-device-edit-serverwins-restores が持つ。
+    /// この外し方は、取得が失敗した 1 回で全部の道の実行は何も適用しない、という仕様に依る（この仕様が変わると、この組は起こり
+    /// 得るようになる）。仕様を守る行は table:SyncEngineFixed の sync-fetch-failure-leaves-device-as-before（同期）と
+    /// refresh-fetch-failure-leaves-device-as-before（洗い替え）で、取得の失敗の後の端末の行・未送信・行の状態の表・再開点が
+    /// 実行の前と同じであることを表明する
+    /// </remarks>
     public static bool IsPossibleServerInterrupt(
         ModelInterruptPoint point,
+        ServerInterruptPrelude prelude,
         ServerInterruptWrite write,
         InterruptRun run,
         InterruptFollowUp followUp,
@@ -1920,6 +1827,10 @@ internal static partial class SyncModelScenarios
             || point == ModelInterruptPoint.AfterServerFetchBeforeApply
                 && write == ServerInterruptWrite.Update
                 && run == InterruptRun.Sync
+                && !(
+                    followUp == InterruptFollowUp.EditThenSync
+                    && prelude != ServerInterruptPrelude.UniqueHolderAfterTaker
+                )
         );
 
     /// <summary>サーバーの書き手の行の前段の名前</summary>
@@ -1980,6 +1891,7 @@ internal static partial class SyncModelScenarios
                                                             .Where(fault =>
                                                                 IsPossibleServerInterrupt(
                                                                     point,
+                                                                    prelude,
                                                                     write,
                                                                     run,
                                                                     followUp,
@@ -2036,14 +1948,12 @@ internal static partial class SyncModelScenarios
     /// </para>
     /// <para>
     /// 洗い替えでは、親の解決役が読み直した行がそのバッチに来ると上書きする（<c>again</c>）。同期と同じ後段の期待を持つ。
-    /// 洗い替えは一意な値のぶつかりを読み直さない（表を空にしてから入れる）ので、持ち主の前段は対照になる。洗い替え ×
-    /// 自己参照 × 削除 × 取得の後の点の 2 行は、既知の失敗の一覧（<see cref="SyncModelKnownFailures"/>）に載っている。
+    /// 洗い替えは一意な値のぶつかりを読み直さない（表を空にしてから入れる）ので、持ち主の前段は対照になる。
     /// </para>
     /// <para>
     /// 次の取得の失敗の行（<see cref="ServerInterruptFault.NextFetchFails"/>）は、割り込まれた同期のバッチの大きさを 2 にし、
-    /// 取得の後の点のバッチ（解決役が読み直した対象の行を古い写しで上書きする）を書いた後の、同じ表の次のバッチの取得を失敗させる。
-    /// 表のダウンロードが例外で終わっても、上書きされた受理記録が残らないことを、同期の行と同じ後段の期待で見る（降ろした数は
-    /// 前段で違うので見ない）。
+    /// 取得の後の点のバッチの後の、同じ表の次のバッチの取得を失敗させる。後段は同期の行と同じ期待で見る（降ろした数は前段で
+    /// 違うので見ない）。
     /// </para>
     /// </remarks>
     private static IEnumerable<SyncModelScenario> ServerInterruptScenarios()
@@ -2111,7 +2021,7 @@ internal static partial class SyncModelScenarios
 
             if (fetchFails)
             {
-                // 割り込まれた同期は、取得の後の点のバッチ（2 行）を書いてから、同じ表の次のバッチの取得で例外になる
+                // 割り込まれた同期は、取得の後の点のバッチ（2 行）の後、同じ表の次のバッチの取得で例外になる
                 ops.Add(new ExpectThrowOp(D1));
                 ops.Add(Sync(D1, policy: policy, batch: 2));
             }
@@ -2129,11 +2039,9 @@ internal static partial class SyncModelScenarios
             var row = $"{target} parent=null name=p-interrupt";
 
             // 洗い替え × 持ち主 × 取得の前の点 × 更新：上限を実行の始めに固定するサーバー役（実 SQL Server）では、割り込みの
-            // 版は上限より後なので、洗い替えの最初の取得に入らない。保留した行を同じ実行の中で取り直さないエンジンは、表を空に
-            // してから入れるので一意な値の持ち主の読み直しも走らず（親の前段は親の解決役がキーで読み直すので拾う）、洗い替えの
-            // 直後の端末に対象の行は無く、次の同期で降りる（取りこぼさない）。取り直すエンジンは表を空にしないので、値を取る行が
-            // まだ値を持つ対象の行で保留され、上限を取り直したもう 1 回の取得が対象の行の新しい版を同じ洗い替えに入れる（次の
-            // 同期は何も降ろさない）。どちらも、上限を持たないサーバー役と同じ後段へ進む
+            // 版は上限より後なので、洗い替えの最初の取得に入らない。エンジンは表を空にしないので、値を取る行がまだ値を持つ対象の
+            // 行で保留され、上限を取り直したもう 1 回の取得が対象の行の新しい版を同じ洗い替えに入れる（次の同期は何も降ろさない）。
+            // その後は、上限を持たないサーバー役と同じ後段へ進む
             if (
                 run == InterruptRun.Refresh
                 && point == ModelInterruptPoint.BeforeServerFetch
@@ -2144,22 +2052,10 @@ internal static partial class SyncModelScenarios
                 ops.Add(
                     new WhenServerFixesCeilingOp(
                         [
-                            new WhenEngineDeclaresOp(
-                                D1,
-                                EngineDeclaration.RefetchesHeldRowsInSameRun,
-                                [
-                                    Expect.Rows(D1, ModelTables.Folders).Contains(row),
-                                    Sync(D1, policy: policy),
-                                    Expect.Result(D1).Contains("downloaded=0").Absent("conflict *"),
-                                    Expect.Rows(D1, ModelTables.Folders).Contains(row),
-                                ],
-                                [
-                                    Expect.Rows(D1, ModelTables.Folders).Absent($"{target} *"),
-                                    Sync(D1, policy: policy),
-                                    Expect.Result(D1).Contains("downloaded=1").Absent("conflict *"),
-                                    Expect.Rows(D1, ModelTables.Folders).Contains(row),
-                                ]
-                            ),
+                            Expect.Rows(D1, ModelTables.Folders).Contains(row),
+                            Sync(D1, policy: policy),
+                            Expect.Result(D1).Contains("downloaded=0").Absent("conflict *"),
+                            Expect.Rows(D1, ModelTables.Folders).Contains(row),
                         ],
                         []
                     )
@@ -2310,6 +2206,11 @@ internal static partial class SyncModelScenarios
             yield return new(name, setup, ops);
         }
 
+        foreach (var scenario in RefreshInterruptScenarios())
+        {
+            yield return scenario;
+        }
+
         yield return new(
             ModelSyncScenarioNames.D1Folders,
             [Folder(SV, 710), Folder(SV, 711)],
@@ -2325,6 +2226,191 @@ internal static partial class SyncModelScenarios
                 Sync(D1),
             ]
         );
+    }
+
+    /// <summary>
+    /// 洗い替えの途中の端末の書き込みの行：洗い替えの取得の直前か、取得の後で適用の前に、別の流れから端末が品目へ記録つきで
+    /// 1 つ書く。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 前段ありの行（<see cref="RefreshForceInterruptCells"/>）：割り込みの網と同じく、端末 1 が品目 701 を編集し、品目 702 に
+    /// 前段の未送信の書き込みをしてから、702 への割り込みの書き込みを点に仕掛けて Force の洗い替え（blob を運ぶ）を流す。
+    /// Force の洗い替えは、取得の前に読んだ未送信の行を捨てる行に決め、適用のトランザクションの中で連番がそのときのままの行
+    /// だけをサーバーの行で置き換える。701 は置き換わって未送信が外れ、割り込みの書き込みで連番の進んだ 702 は、前段と割り込みの
+    /// 書き込みの後の端末の内容（blob を含む。削除なら行が無い）のまま未送信で残る。続く Collect の同期がその内容を上げ、競合は
+    /// 無い（サーバーの他者は 702 を書かない）。
+    /// </para>
+    /// <para>
+    /// 前段なしの行（<see cref="RefreshCleanInterruptCells"/>）：未送信の無い端末で Force なしの洗い替え（降ろす行の上限は既定）を
+    /// 流し、途中で端末が 702 を更新・削除するか、サーバーに無いキー 705 の品目を作るか、洗い替えの前にサーバーの他者が消して
+    /// おいた 702 を消す。洗い替えは断らずに終わり、途中で書いた行は端末の内容のまま未送信で残る（サーバーに無い 705 を消さず、
+    /// サーバーにも端末にも無い 702 の未送信の削除の状態も消さない）。続く Collect の同期がその内容を上げる。
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<SyncModelScenario> RefreshInterruptScenarios()
+    {
+        foreach (var (point, prelude, write, _, name) in RefreshForceInterruptCells)
+        {
+            List<ModelWriteOp> setup =
+            [
+                Folder(SV, 700),
+                Item(SV, 701, folder: 700),
+                Item(SV, 702, folder: 700),
+            ];
+            List<ModelOp> ops = [new UpdateItemOp(D1, Direct, 701, 700, null, "c-701", "a-edited")];
+            // 洗い替えの後の端末の 702 の内容（題名と blob。null は行が無い）
+            (string Title, string Payload)? expected;
+
+            switch (prelude)
+            {
+                case InterruptPrelude.Update:
+                    ops.Add(new UpdateItemOp(D1, Direct, 702, 700, null, "c-702", "b-offline"));
+                    expected = ("b-interrupt", "0A0B02BE");
+                    break;
+
+                case InterruptPrelude.DeleteRecreate:
+                    ops.Add(new DeleteItemOp(D1, Direct, 702));
+                    ops.Add(
+                        new AddItemOp(D1, Direct, 702, 700, null, "c-702", "again", "0A0B0702")
+                    );
+                    expected = ("b-interrupt", "0A0B0702");
+                    break;
+
+                case InterruptPrelude.Delete:
+                    ops.Add(new DeleteItemOp(D1, Direct, 702));
+                    expected = ("b-recreated", "0A0B0702");
+                    break;
+
+                default:
+                    ops.Add(new WritePayloadOp(D1, 702, "DEADBEEF"));
+                    expected = ("b-interrupt", "DEADBEEF");
+                    break;
+            }
+
+            if (write == InterruptWrite.Delete)
+            {
+                expected = null;
+            }
+
+            ModelWriteOp interrupt = write switch
+            {
+                InterruptWrite.Update => new UpdateItemOp(
+                    D1,
+                    Direct,
+                    702,
+                    700,
+                    null,
+                    "c-702",
+                    "b-interrupt"
+                ),
+                InterruptWrite.Delete => new DeleteItemOp(D1, Direct, 702),
+                _ => new AddItemOp(D1, Direct, 702, 700, null, "c-702", "b-recreated", "0A0B0702"),
+            };
+            ops.Add(new ArmInterruptOp(D1, point, interrupt));
+            ops.Add(RefreshAll(D1, force: true));
+            // 701 はサーバーの行で置き換わり、702 は端末の内容のまま未送信で残る（捨てた数は実際に捨てた 701 の 1 つだけで、
+            // 取得の前に捨てると決めた 702 は数えない）
+            ops.Add(Expect.Result(D1).Contains("discarded-changes=1"));
+            ops.Add(
+                Expect
+                    .Rows(D1, ModelTables.Items)
+                    .Contains("701 folder=700 * code=c-701 title=t701")
+            );
+            ops.AddRange(RefreshInterruptAftermath(702, expected));
+
+            yield return new(name, setup, ops);
+        }
+
+        foreach (var (point, write, name) in RefreshCleanInterruptCells)
+        {
+            List<ModelWriteOp> setup =
+            [
+                Folder(SV, 700),
+                Item(SV, 701, folder: 700),
+                Item(SV, 702, folder: 700),
+            ];
+            var (interrupt, key, expected) = write switch
+            {
+                InterruptCleanWrite.Update => (
+                    (ModelWriteOp)
+                        new UpdateItemOp(D1, Direct, 702, 700, null, "c-702", "b-interrupt"),
+                    702,
+                    ((string Title, string Payload)?)("b-interrupt", "0A0B02BE")
+                ),
+                InterruptCleanWrite.Delete or InterruptCleanWrite.DeleteGoneOnServer => (
+                    new DeleteItemOp(D1, Direct, 702),
+                    702,
+                    null
+                ),
+                _ => (
+                    new AddItemOp(D1, Direct, 705, 700, null, "c-705", "n705", "0A0B0705"),
+                    705,
+                    ("n705", "0A0B0705")
+                ),
+            };
+            // サーバーの他者が洗い替えの前に 702（子を持たない）を消しておく形：端末の未送信の削除の行は、サーバーにも端末にも
+            // 無いが、洗い替えは未送信の行の状態を「両方に無い行」として消さない。続く同期の版つきの削除は、サーバーの書き手が
+            // 無い行の削除を何もせずに受けるので、競合なしに送られて片付く
+            List<ModelOp> prelude =
+                write == InterruptCleanWrite.DeleteGoneOnServer
+                    ? [new DeleteItemOp(SV, Direct, 702)]
+                    : [];
+
+            yield return new(
+                name,
+                setup,
+                [
+                    .. prelude,
+                    new ArmInterruptOp(D1, point, interrupt),
+                    RefreshAll(D1),
+                    Expect.Result(D1).Contains("discarded-changes=0"),
+                    .. RefreshInterruptAftermath(key, expected),
+                ]
+            );
+        }
+    }
+
+    /// <summary>
+    /// 洗い替えの途中の端末の書き込みの行の後段：洗い替えの直後、品目 <paramref name="key"/> が端末の内容（null は行が無い）の
+    /// まま未送信で残り、続く Collect の同期がその内容を競合なしに上げて未送信が無くなる
+    /// </summary>
+    private static IEnumerable<ModelOp> RefreshInterruptAftermath(
+        int key,
+        (string Title, string Payload)? expected
+    )
+    {
+        yield return Expect
+            .Pending(D1)
+            .Exact($"{ModelTables.Items} key={key} row={(expected is null ? "gone" : "present")}");
+
+        if (expected is { } local)
+        {
+            yield return Expect
+                .Rows(D1, ModelTables.Items)
+                .Contains($"{key} folder=700 * code=c-{key} title={local.Title}");
+            yield return new ExpectPayloadOp(D1, key, local.Payload);
+        }
+        else
+        {
+            yield return Expect.Rows(D1, ModelTables.Items).Absent($"{key} *");
+        }
+
+        yield return Sync(D1);
+        yield return Expect.Result(D1).Contains("uploaded=1").Absent("conflict *");
+        yield return Expect.Pending(D1).Empty();
+
+        if (expected is { } sent)
+        {
+            yield return Expect
+                .Rows(SV, ModelTables.Items)
+                .Contains($"{key} folder=700 * code=c-{key} title={sent.Title}");
+            yield return new ExpectPayloadOp(SV, key, sent.Payload);
+        }
+        else
+        {
+            yield return Expect.Rows(SV, ModelTables.Items).Absent($"{key} *");
+        }
     }
 
     /// <summary>
@@ -2373,28 +2459,33 @@ internal static partial class SyncModelScenarios
             yield return scenario;
         }
 
-        // 乱数の種 14 の形を縮めたもの：サーバーで品目 775・776 の code を入れ替え、端末は入れ替える前の値のまま（洗い替えを
-        // 挟まない n8-true-swap-stops）。docs の既知の割り切りで、静止化しない（受け入れ）。ダウンロードは版の小さい 776 で
-        // 打ち切り、端末は持ち主の行 775 に未送信の更新を持つ（種 14 と同じく、静止化の Collect の周で毎回競合になる）＝持ち主の
-        // 行の競合を、分類できないものに数えないことをこのシナリオが固定する（打ち切った行の競合は swap-folder-names-*）
+        // 乱数の種 14 の形を縮めたもの：サーバーで品目 775・776 の code を（仮の値を挟んで）入れ替え、端末は入れ替える前の値の
+        // まま。1 回の同期が打ち切りも競合も残さずに入れ替えを降ろし、端末の 2 行がサーバーと同じ code になる（新しいエンジンの
+        // 段の順と適用）。端末の 2 行がまだ相手の値を持つので、1 行ずつ書くと一意制約で断られる形
         yield return new(
-            "swap-without-refresh-does-not-settle",
+            "swap-codes-settles-in-one-sync",
             [Folder(SV, 774), Item(SV, 775, 774, code: "w1"), Item(SV, 776, 774, code: "w2")],
             [
                 new UpdateItemOp(SV, Direct, 775, 774, null, "wtmp", "t775"),
                 new UpdateItemOp(SV, Direct, 776, 774, null, "w1", "t776"),
                 new UpdateItemOp(SV, Direct, 775, 774, null, "w2", "t775"),
                 Sync(D1),
-                new UpdateItemOp(D1, Direct, 775, 774, null, "w1", "t775d1"),
+                Expect.Result(D1).Absent("truncation *", "conflict *"),
+                Expect
+                    .Rows(D1, ModelTables.Items)
+                    .Contains(
+                        "775 folder=774 * code=w2 title=t775",
+                        "776 folder=774 * code=w1 title=t776"
+                    ),
+                Expect.Pending(D1).Empty(),
             ]
         );
 
         // サーバーで品目 778・779・780 の code を 3 行で回し（778→v2・779→v3・780→v1。途中は仮の値）、端末は回す前の値のまま。
-        // docs の既知の割り切り（2 行で入れ替えても 3 行以上で回しても適用できない）で、静止化しない（受け入れ）。端末は回転の
-        // 行 778 に未送信の更新を持つ＝打ち切った行から持ち主を辿って元の行へ戻る回転の行の競合を、分類できないものに数えない
-        // ことをこのシナリオが固定する（2 行の入れ替えは swap-without-refresh-does-not-settle）
+        // 1 回の同期が打ち切りも競合も残さずに回転を降ろし、端末の 3 行がサーバーと同じ code になる（2 行の入れ替えは
+        // swap-codes-settles-in-one-sync）
         yield return new(
-            "rotate-three-codes-without-refresh-does-not-settle",
+            "rotate-three-codes-settles-in-one-sync",
             [
                 Folder(SV, 777),
                 Item(SV, 778, 777, code: "v1"),
@@ -2407,13 +2498,21 @@ internal static partial class SyncModelScenarios
                 new UpdateItemOp(SV, Direct, 779, 777, null, "v3", "t779"),
                 new UpdateItemOp(SV, Direct, 778, 777, null, "v2", "t778"),
                 Sync(D1),
-                new UpdateItemOp(D1, Direct, 778, 777, null, "v1", "t778d1"),
+                Expect.Result(D1).Absent("truncation *", "conflict *"),
+                Expect
+                    .Rows(D1, ModelTables.Items)
+                    .Contains(
+                        "778 folder=777 * code=v2 title=t778",
+                        "779 folder=777 * code=v3 title=t779",
+                        "780 folder=777 * code=v1 title=t780"
+                    ),
+                Expect.Pending(D1).Empty(),
             ]
         );
 
         // 乱数の夜間の種 786 の形を縮めたもの：端末 2 がフォルダー 781 の下に品目を足す。端末 1 がフォルダー 781 を消して上げる。
-        // 端末 2 の後勝ち＋ServerWins の同期は、親の無い品目をダウンロードの前の削除伝搬でローカルから消し（RemovedBeforeDownload）、
-        // その後の blob のコピーで失敗する（記録は残る）。次の同期は「行なし＋追加だけ」の記録を送るものが無いとして捨てる
+        // 端末 2 の後勝ち＋ServerWins の同期は、親の無い品目の追加を捨ててローカルから消し（DiscardedByServerWins として
+        // 実行が変えた行の一覧に載る）、その後の blob のコピーで例外になる。次の同期（削除伝搬なし）は、消した品目を送らずに終わる
         yield return new(
             "n786-thrown-serverwins-removal-then-record-dropped",
             [Folder(SV, 781), Folder(SV, 782), Item(SV, 783, 782)],
@@ -2543,17 +2642,21 @@ internal static partial class SyncModelScenarios
             ]
         );
 
-        // 受け入れ（フォルダーの name）：swap-without-refresh-does-not-settle と同じ形（夜間の種 255）。こちらは端末が打ち切った行
-        // 832（版の小さいほう）に未送信の更新を持つ＝打ち切った行の競合を、分類できないものに数えないことをこのシナリオが固定する
+        // フォルダーの name で swap-codes-settles-in-one-sync と同じ形（夜間の種 255）：サーバーで 831・832 の name を入れ替え、
+        // 1 回の同期が打ち切りも競合も残さずに降ろす（自己参照の外部キーを持つ表の入れ替え）
         yield return new(
-            "swap-folder-names-without-refresh-does-not-settle",
+            "swap-folder-names-settles-in-one-sync",
             [Folder(SV, 831, name: "w831"), Folder(SV, 832, name: "w832")],
             [
                 new UpdateFolderOp(SV, Direct, 831, null, "wtmp831"),
                 new UpdateFolderOp(SV, Direct, 832, null, "w831"),
                 new UpdateFolderOp(SV, Direct, 831, null, "w832"),
                 Sync(D1),
-                new UpdateFolderOp(D1, Direct, 832, null, "w832"),
+                Expect.Result(D1).Absent("truncation *", "conflict *"),
+                Expect
+                    .Rows(D1, ModelTables.Folders)
+                    .Contains("831 parent=null name=w832", "832 parent=null name=w831"),
+                Expect.Pending(D1).Empty(),
             ]
         );
 

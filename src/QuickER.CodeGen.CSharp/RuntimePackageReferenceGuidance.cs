@@ -81,7 +81,7 @@ public static class RuntimePackageReferenceGuidance
             packages.Add(RuntimePackages.AspNetCore);
         }
 
-        // 同期支援の固定エンジン（SyncEngine・SyncJournal・SyncTable 基底）は専用パッケージが持つ。
+        // 同期支援の固定エンジン（SyncEngine・SyncTable）は専用パッケージが持つ。
         if (options.GenerateSyncSupport && !packages.Contains(RuntimePackages.Sync))
         {
             packages.Add(RuntimePackages.Sync);

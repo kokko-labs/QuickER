@@ -206,46 +206,17 @@ internal static partial class SyncModelScenarios
                         .Count("table *", 2)
                         .Contains($"table {F} *", $"table {I} *"),
                     new RestoreLocalTableOp(D1, ModelTables.Events),
-                    // 作り直した空の表：再開点をミラー版から導くエンジンは次の同期が全部を降ろし直す。再開点を表ごとに別に
-                    // 持つエンジンは、同期が空にされた表として断るので、その表を範囲に含む洗い替えで作り直す
-                    new WhenEngineDeclaresOp(
-                        D1,
-                        EngineDeclaration.DerivesResumePointFromLocalVersions,
-                        [],
-                        [
-                            new ExpectThrowOp(D1),
-                            Plain(D1),
-                            Expect
-                                .Result(D1)
-                                .Contains(
-                                    $"exception SyncLocalTableEmptiedException: *{ModelTables.Events}*"
-                                ),
-                            RefreshAll(D1),
-                            Expect.Result(D1).Absent("exception *"),
-                            Expect.Rows(D1, ModelTables.Events).Contains("* item=999 memo=tail"),
-                        ]
-                    ),
-                ]
-            ),
-            Moved(
-                "refresh-failed-wipe-keeps-acks",
-                [],
-                [
-                    Folder(D1, 620, name: "c0"),
-                    PlainOnly(D1, ModelSyncKind.Upload),
-                    Expect.Result(D1).Absent("conflict *"),
-                    new LocalSqlOp(
-                        D1,
-                        $"CREATE TRIGGER block_wipe BEFORE DELETE ON {F} BEGIN SELECT RAISE(ABORT, 'wipe blocked'); END"
-                    ),
+                    // 作り直した空の表：同期が空にされた表として断るので、その表を範囲に含む洗い替えで作り直す
                     new ExpectThrowOp(D1),
+                    Plain(D1),
+                    Expect
+                        .Result(D1)
+                        .Contains(
+                            $"exception SyncLocalTableEmptiedException: *{ModelTables.Events}*"
+                        ),
                     RefreshAll(D1),
-                    Expect.Result(D1).Contains("exception SqliteException: *wipe blocked*"),
-                    new LocalSqlOp(D1, "DROP TRIGGER block_wipe"),
-                    Rename(D1, 620, "c1"),
-                    PlainOnly(D1, ModelSyncKind.Upload),
-                    Expect.Result(D1).Absent("conflict *"),
-                    Expect.Rows(SV, F).Contains("620 parent=null name=c1"),
+                    Expect.Result(D1).Absent("exception *"),
+                    Expect.Rows(D1, ModelTables.Events).Contains("* item=999 memo=tail"),
                 ]
             ),
             // P5-2 の S3：表どうしの外部キーの循環（品目→フォルダー・フォルダーのピン留め→品目）。行は循環しない（フォルダー 700
@@ -279,7 +250,7 @@ internal static partial class SyncModelScenarios
                     Expect.Rows(D1, F).Contains("710 parent=null name=f710"),
                 ]
             ),
-            // 以下の 5 行は、エンジンの記録の面（ジャーナル・受理記録）を読まずに、洗い替えの振る舞いを実行の結果・例外・
+            // 以下の 5 行は、端末の状態の表を読まずに、洗い替えの振る舞いを実行の結果・例外・
             // 端末とサーバーの行・その後の同期が送るか送らないかで見る（どちらの端末でも流れる）
             Moved(
                 "refresh-cycle-force-replaces-pending-and-next-sync-sends-nothing",
@@ -441,34 +412,6 @@ internal static partial class SyncModelScenarios
             {
                 OmitsTail = true,
             },
-            // 循環の全消しは 1 つのトランザクション：最後の表（親のフォルダー）の DELETE が断られると、先に消した表も含めて
-            // 何も消えず、受理記録も残り、開いたトランザクションも残らない（次の書き込みと同期が普通に通る）
-            Moved(
-                "refresh-failed-wipe-in-a-foreign-key-cycle-deletes-nothing",
-                [],
-                [
-                    .. CyclePinned(),
-                    Plain(D1),
-                    Folder(D1, 620, name: "c0"),
-                    PlainOnly(D1, ModelSyncKind.Upload),
-                    Expect.Result(D1).Absent("conflict *"),
-                    new LocalSqlOp(
-                        D1,
-                        $"CREATE TRIGGER block_wipe BEFORE DELETE ON {F} BEGIN SELECT RAISE(ABORT, 'wipe blocked'); END"
-                    ),
-                    new ExpectThrowOp(D1),
-                    RefreshAll(D1),
-                    Expect.Result(D1).Contains("exception SqliteException: *wipe blocked*"),
-                    Expect.Rows(D1, F).Contains("700 parent=null name=f700 pinned=711", "620 *"),
-                    Expect.Rows(D1, I).Exact("711 folder=710 *", "999 *"),
-                    Expect.Rows(D1, ModelTables.Events).Count("*", 1),
-                    new LocalSqlOp(D1, "DROP TRIGGER block_wipe"),
-                    Rename(D1, 620, "c1"),
-                    PlainOnly(D1, ModelSyncKind.Upload),
-                    Expect.Result(D1).Absent("conflict *"),
-                    Expect.Rows(SV, F).Contains("620 parent=null name=c1"),
-                ]
-            ),
             Moved(
                 "refresh-honors-foreign-key-order",
                 [.. Seed(1, "alice", 11, "widget")],

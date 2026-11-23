@@ -388,6 +388,15 @@ public sealed partial class CSharpCodeGenerationService
                 Strings.CodeGen_Warning_SyncFixedLengthStringPrimaryKeys,
                 BuildSyncFixedLengthKeyLines(model, diagram, columnTypes)
             );
+
+            // 名前がスキーマ修飾の表は SQLite では別の DB の表になり、ローカルの変更の記録が追えないので同期の対象から外す。
+            // 外した表を名指しする（通常のテーブルとしては生成される）
+            AddListDiagnostic(
+                diagnostics,
+                GenerationDiagnostic.Warning,
+                Strings.CodeGen_Warning_SyncSchemaQualifiedTables,
+                model.SyncSchemaQualifiedTableNames
+            );
         }
         // 出力ファイルの構成（非分割=1 ファイル、分割=カテゴリごと、マルチ方言=契約＋方言別実装）を決め、
         // 各ファイルを範囲を絞って描画する。1 ファイルに複数スペック（非分割マルチ方言）が対応する場合は連結する。
@@ -836,9 +845,20 @@ public sealed partial class CSharpCodeGenerationService
         CodeGenerationOptions options
     )
     {
+        if (!options.UseRuntimePackages)
+        {
+            return [];
+        }
+
+        // 同期の登録（AddGeneratedSyncEngine）は契約のスペックのブロックで SQLite の方言エンジンの固定の型を名指しするので、
+        // そのブロックでは SQLite の方言パッケージだけを開く
+        if (GeneratedFileUsings.SyncRegistrationNeedsSqliteEngine(spec))
+        {
+            return [RuntimePackages.Sqlite];
+        }
+
         if (
-            !options.UseRuntimePackages
-            || !options.GenerateRepositories
+            !options.GenerateRepositories
             || spec.ContractOnly
             || !spec.Buckets.Contains(GenerationBucket.Repository)
         )
@@ -1206,7 +1226,7 @@ public sealed partial class CSharpCodeGenerationService
     /// ＝差分走査は SQL Server の <c>rowversion</c> と <c>MIN_ACTIVE_ROWVERSION()</c> に、ミラー列の書き込みは
     /// SQLite が同じ列を通常列として扱うことに、それぞれ依存している。(2) QuickER 版 Repository の実装を生成すること
     /// ＝エンジンはその読み書き経路そのものを使う。(3) 同期可能なテーブル（Repository 契約が生成される単一主キーの
-    /// テーブル）が 1 つ以上あること＝1 つも無ければ同期対象が空の生成物が黙って出てしまう。rowversion 列の有無は
+    /// スキーマ修飾でないテーブル）が 1 つ以上あること＝1 つも無ければ同期対象が空の生成物が黙って出てしまう。rowversion 列の有無は
     /// 対象かどうかを決めず、モード（版あり＝増分＋競合検出／版なし＝後勝ち・全量）を決める。
     /// </para>
     /// <para>
@@ -1250,10 +1270,11 @@ public sealed partial class CSharpCodeGenerationService
             );
         }
 
-        // 対象は「Repository 契約が生成される（単一主キーの）テーブル」。rowversion 列の有無はモード素材であって
-        // 対象かどうかを決めない（版なしテーブルは後勝ちランでのみ同期される）
+        // 対象は「Repository 契約が生成される（単一主キーの）スキーマ修飾でないテーブル」。rowversion 列の有無は
+        // モード素材であって対象かどうかを決めない（版なしテーブルは後勝ちランでのみ同期される）
         var hasEligibleTable = diagram.Entities.Any(entity =>
             entity.Columns.Count(column => column.IsPrimaryKey) == 1
+            && !CSharpGenerationModelBuilder.IsSchemaQualifiedTable(entity)
         );
 
         if (!hasEligibleTable)

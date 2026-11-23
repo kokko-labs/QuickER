@@ -424,9 +424,8 @@ internal abstract class SyncTestRemoteServerRepository<TEntity, TKey>(
 /// サーバー役（SQLite）の差分ソースを組み立てる唯一の場所（SQL 文とその組み合わせ方の正本）。
 /// </summary>
 /// <remarks>
-/// パリティスイートの基底（<see cref="SyncRuntimeTestsBase"/>）とベンチマーク（
-/// <see cref="SyncRefreshBenchmarkRuntimeTests"/>）が同じサーバー役を使うため、SQL をどちらかへ書くと
-/// 「同じサーバー役のつもりで別物を測る」ことになる。組み立てはここへ 1 本化する。
+/// SyncFixture のサーバー役（<see cref="SyncFixtureTestServer"/>）を使うテストはどれもこの組み立てを通す。SQL を使う側へ
+/// 書くと「同じサーバー役のつもりで別物を見る」ことになるので、組み立てはここへ 1 本化する。
 /// </remarks>
 internal static class SyncTestServerSources
 {

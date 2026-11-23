@@ -200,20 +200,20 @@ public sealed record CodeGenerationOptions
 
     /// <summary>
     /// サーバー（SQL Server）とローカル（SQLite）のハイブリッド構成で双方向の差分同期を行う支援コード
-    /// （同期エンジン・同期記述子・ジャーナル記録デコレータ・差分ソース・DI 登録）を生成するかどうか（既定 false）。
+    /// （同期エンジン・同期記述子・差分ソース・DI 登録）を生成するかどうか（既定 false）。
     /// </summary>
     /// <remarks>
     /// <para>
     /// <c>true</c> のとき、<see cref="RepositoryDialects"/> がちょうど <c>"sqlserver"</c> と <c>"sqlite"</c> の 2 方言で、
-    /// かつ同期可能テーブル（Repository 契約を持つ単一主キーのテーブル）が 1 つ以上あることを要求する
+    /// かつ同期可能テーブル（Repository 契約を持つ単一主キーのテーブルで、名前がスキーマ修飾でないもの）が 1 つ以上あることを要求する
     /// （満たさない指定は生成時の診断エラー）。<c>rowversion</c>（<c>timestamp</c>）列の有無は対象でなく
     /// モードを決める＝版あり＝増分ダウンロード＋競合検出／版なし＝後勝ち・全量スキャン。
     /// </para>
     /// <para>
-    /// サーバー側には追加スキーマを一切作らない。ローカル（SQLite）にだけ共有テーブル 2 つ
-    /// （オフライン編集のジャーナル <c>quicker_sync_journal</c>・受理記録 <c>quicker_sync_ack</c>）を
-    /// 実行時に <c>CREATE TABLE IF NOT EXISTS</c> で用意する。
-    /// 差分の再開点（アンカー）は保存せず、ローカルのミラー版列の <c>MAX</c> から導出する。
+    /// サーバー側には追加スキーマを一切作らない。ローカル（SQLite）にだけ状態のテーブル 3 つ
+    /// （<c>quicker_sync_state</c>・行ごとの状態 <c>quicker_sync_row</c>・表ごとの再開点 <c>quicker_sync_table</c>）と、
+    /// 同期するテーブルの変更を記録するトリガーを実行時に用意する。
+    /// ローカルの変更はそのトリガーが業務の書き込みと同じトランザクションで記録する。
     /// </para>
     /// <para>
     /// <see cref="GenerateRepositories"/> が前提（QuickER 版 Repository の実装が同期の読み書き経路になる）。

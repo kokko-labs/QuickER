@@ -225,7 +225,7 @@ internal sealed record ModelSyncOutcome(
     public (bool Conflicts, bool Truncations)? ReportedFlags { get; init; }
 }
 
-/// <summary>端末 1 台（ローカル SQLite・ジャーナル・ジャーナル記録デコレータ・同期エンジン）</summary>
+/// <summary>端末 1 台（ローカル SQLite・リポジトリ・エンジンの面・状態の面）</summary>
 internal sealed class SyncModelDevice : IDisposable
 {
     private readonly SqliteTempDatabase _db;
@@ -242,57 +242,6 @@ internal sealed class SyncModelDevice : IDisposable
 
     public ISqlExecutor Sql { get; private set; } = null!;
 
-    /// <summary>製品のジャーナル（既定の端末だけが持つ。別のエンジンへ差し替えた端末では null）</summary>
-    private SyncJournal? _journal;
-
-    /// <summary>製品の同期エンジン（既定の端末だけが持つ。別のエンジンへ差し替えた端末では null）</summary>
-    private SyncEngine? _engine;
-
-    /// <summary>
-    /// 端末が製品の部品（ジャーナル・エンジン）を持たないときに、使おうとした手が投げる例外のメッセージの先頭。例外の型は
-    /// <see cref="NotSupportedException"/> で、メッセージはこの先頭に手の名前・空白・「needs the product 部品」が続く
-    /// （<see cref="UnsupportedHand"/> が手の名前を取り出す）
-    /// </summary>
-    public const string UnsupportedPrefix = "Not supported by this device: ";
-
-    /// <summary>
-    /// 製品のジャーナルを返す（持たない端末では、使おうとした手の名前つきで <see cref="NotSupportedException"/> を投げる）
-    /// </summary>
-    /// <param name="hand">使おうとした手の名前</param>
-    public SyncJournal RequireJournal(string hand) =>
-        _journal ?? throw Unsupported(hand, "journal");
-
-    /// <summary>
-    /// 製品の同期エンジンを返す（持たない端末では、使おうとした手の名前つきで <see cref="NotSupportedException"/> を投げる）
-    /// </summary>
-    /// <param name="hand">使おうとした手の名前</param>
-    public SyncEngine RequireEngine(string hand) => _engine ?? throw Unsupported(hand, "engine");
-
-    /// <summary>
-    /// 例外が「この端末では流せない手」なら、その手の名前を返す（<see cref="RequireJournal"/>・<see cref="RequireEngine"/> が投げた
-    /// 例外。ほかの例外は null）
-    /// </summary>
-    public static string? UnsupportedHand(Exception exception) =>
-        exception is NotSupportedException
-        && exception.Message.StartsWith(UnsupportedPrefix, StringComparison.Ordinal)
-            ? exception.Message[UnsupportedPrefix.Length..].Split(' ')[0]
-            : null;
-
-    /// <summary>
-    /// 「この端末では流せない手」の例外を作る（<see cref="UnsupportedHand"/> が <paramref name="hand"/> を取り出す）
-    /// </summary>
-    /// <param name="hand">流せない手の名前（空白を含めない）</param>
-    /// <param name="part">手が要る製品の部品</param>
-    public static NotSupportedException Unsupported(string hand, string part) =>
-        new($"{UnsupportedPrefix}{hand} needs the product {part}");
-
-    /// <summary>
-    /// 例外が、シナリオをこの端末で流せないことの知らせ（「流せない」）か。素通しの印
-    /// （<see cref="SyncModelWorldOptions.PassesNotRunnableThrough"/>）が真の世界では、モデルはこれを違反として記録せず、
-    /// シナリオの外へそのまま出す（偽の世界ではほかの例外と同じ扱い）
-    /// </summary>
-    public static bool StopsScenario(Exception exception) => UnsupportedHand(exception) is not null;
-
     /// <summary>接続ファクトリ（<see cref="OpenAsync"/> が作る）</summary>
     public ISqlConnectionFactory Factory { get; private set; } = null!;
 
@@ -307,15 +256,6 @@ internal sealed class SyncModelDevice : IDisposable
 
     public IModelEventRepository Events { get; private set; } = null!;
 
-    /// <summary>記録しないフォルダーのリポジトリ（ジャーナル記録デコレータの内側。記録しない書き込みの手が使う）</summary>
-    public IModelFolderRepository RawFolders { get; private set; } = null!;
-
-    /// <summary>記録しない品目のリポジトリ</summary>
-    public IModelItemRepository RawItems { get; private set; } = null!;
-
-    /// <summary>記録しないラベルのリポジトリ</summary>
-    public IModelLabelRepository RawLabels { get; private set; } = null!;
-
     /// <summary>端末のエンジンの面（同期・洗い替えを流す入口）</summary>
     public IModelDeviceSync Sync { get; private set; } = null!;
 
@@ -328,85 +268,11 @@ internal sealed class SyncModelDevice : IDisposable
     /// </summary>
     public Dictionary<(string Table, string Key), EntityBase> Held { get; } = [];
 
-    /// <summary>端末を作り、サーバーの差分ソースへつないだ同期エンジンを組む（DI 登録の中身と同じ組み方）</summary>
-    /// <param name="actor">端末</param>
-    /// <param name="server">サーバー役</param>
-    /// <param name="faults">失敗の注入（ローカルの Save フックが見る）</param>
-    /// <param name="externalTables">表を外部の <see cref="ISyncTable"/> 実装の代役で包むか</param>
-    /// <param name="ct">キャンセルトークン</param>
-    public static async Task<SyncModelDevice> CreateAsync(
-        ModelActor actor,
-        ISyncModelSources server,
-        SyncModelFaults faults,
-        bool externalTables,
-        CancellationToken ct
-    )
-    {
-        var device = await OpenAsync(actor, faults, ct);
-        var factory = device.Factory;
-        var hooks = device.Hooks;
-        var journal = new SyncJournal(device.Sql);
-        device._journal = journal;
-        await journal.EnsureCreatedAsync(ct);
-
-        device.RawFolders = new ModelFolderRepository(factory, hooks);
-        device.RawLabels = new ModelLabelRepository(factory, hooks);
-        device.RawItems = new ModelItemRepository(factory, hooks);
-        device.Folders = new JournalingModelFolderRepository(device.RawFolders, journal);
-        device.Labels = new JournalingModelLabelRepository(device.RawLabels, journal);
-        device.Items = new JournalingModelItemRepository(device.RawItems, journal);
-        device.Events = new JournalingModelEventRepository(
-            new ModelEventRepository(factory, hooks),
-            journal
-        );
-
-        ISyncTable[] tables =
-        [
-            new SyncTable<ModelFolderEntity, int>(
-                device.Folders,
-                device.Sql,
-                server.FolderSource,
-                GeneratedSyncTables.ModelFolder,
-                hooks
-            ),
-            new VersionlessSyncTable<ModelLabelEntity, string>(
-                device.Labels,
-                device.Sql,
-                server.LabelSource,
-                GeneratedSyncTables.ModelLabel,
-                hooks
-            ),
-            new SyncTable<ModelItemEntity, int>(
-                device.Items,
-                device.Sql,
-                server.ItemSource,
-                GeneratedSyncTables.ModelItem,
-                hooks
-            ),
-            new SyncTable<ModelEventEntity, DateTime>(
-                device.Events,
-                device.Sql,
-                server.EventSource,
-                GeneratedSyncTables.ModelEvent,
-                hooks
-            ),
-        ];
-
-        var engine = new SyncEngine(
-            externalTables ? tables.Select(t => (ISyncTable)new SyncModelExternalTable(t)) : tables,
-            journal
-        );
-        device._engine = engine;
-        device.Sync = new ProductModelDeviceSync(engine);
-        device.State = new JournalModelDeviceSyncState(journal);
-
-        return device;
-    }
-
     /// <summary>
     /// 端末の殻だけを開く（ローカルの一時 DB にモデルの図の DDL を当て、接続ファクトリ・生 SQL 実行器・失敗の注入の Save フックを
-    /// 作る）。リポジトリ・エンジンの面・状態の面は載せない。別のエンジンの端末を作る端末の作り方（
-    /// <see cref="SyncModelWorldOptions.CreateDevice"/>）が、これで殻を開いて <see cref="Install"/> で部品を載せる
+    /// 作る）。リポジトリ・エンジンの面・状態の面は載せない。端末の作り方（<see cref="SyncModelWorldOptions.CreateDevice"/>＝
+    /// <see cref="SyncModelEngineDevice.CreateAsync(SyncModelDeviceRequest, CancellationToken)"/>）が、これで殻を開いて
+    /// <see cref="Install"/> で部品を載せる
     /// </summary>
     /// <param name="actor">端末</param>
     /// <param name="faults">失敗の注入（ローカルの Save フックが見る）</param>
@@ -453,21 +319,13 @@ internal sealed class SyncModelDevice : IDisposable
         return device;
     }
 
-    /// <summary>
-    /// 殻（<see cref="OpenAsync"/>）へ、リポジトリ・エンジンの面・状態の面を載せる（別のエンジンの端末用）。リポジトリが記録
-    /// デコレータで包まれていなければ、記録しないリポジトリ（Raw 系）には同じものを渡す。製品のジャーナルとエンジンは載せない
-    /// （<see cref="CreateAsync"/> で作った端末へ載せ直したときは持ったまま。殻から作った端末では
-    /// <see cref="RequireJournal"/>・<see cref="RequireEngine"/> が投げる＝製品のジャーナルを読む決定的なシナリオの手は使えない）
-    /// </summary>
+    /// <summary>殻（<see cref="OpenAsync"/>）へ、リポジトリ・エンジンの面・状態の面・記録しない書き込みの口を載せる</summary>
     public void Install(SyncModelDeviceParts parts)
     {
         Folders = parts.Folders;
         Labels = parts.Labels;
         Items = parts.Items;
         Events = parts.Events;
-        RawFolders = parts.RawFolders ?? parts.Folders;
-        RawLabels = parts.RawLabels ?? parts.Labels;
-        RawItems = parts.RawItems ?? parts.Items;
         Sync = parts.Sync;
         State = parts.State;
         _writeUntracked = parts.WriteUntrackedAsync;
@@ -475,7 +333,7 @@ internal sealed class SyncModelDevice : IDisposable
     }
 
     /// <summary>
-    /// 殻の接続ファクトリと生 SQL 実行器を差し替える（別のエンジンの端末が、開くたびの確認つきのファクトリへ載せ替える。
+    /// 殻の接続ファクトリと生 SQL 実行器を差し替える（端末の作り方が、開くたびの確認つきのファクトリへ載せ替える。
     /// 同じ DB を開くファクトリに限る。接続のプールの解放は殻が作ったファクトリで行う）
     /// </summary>
     /// <param name="factory">新しい接続ファクトリ</param>
@@ -493,9 +351,6 @@ internal sealed class SyncModelDevice : IDisposable
             Labels = Labels,
             Items = Items,
             Events = Events,
-            RawFolders = RawFolders,
-            RawLabels = RawLabels,
-            RawItems = RawItems,
             Sync = Sync,
             State = State,
             WriteUntrackedAsync = _writeUntracked,
@@ -503,27 +358,23 @@ internal sealed class SyncModelDevice : IDisposable
         };
 
     /// <summary>記録しない書き込みを流す口（<see cref="SyncModelDeviceParts.WriteUntrackedAsync"/>）</summary>
-    private Func<Func<DbConnection, Task>, CancellationToken, bool, Task>? _writeUntracked;
+    private Func<Func<DbConnection, Task>, CancellationToken, bool, Task> _writeUntracked = null!;
 
     /// <summary>1 行の未送信の記録を全部消す口（<see cref="SyncModelDeviceParts.ClearPendingRecordsAsync"/>）</summary>
-    private Func<string, string, CancellationToken, Task>? _clearPendingRecords;
+    private Func<string, string, CancellationToken, Task> _clearPendingRecords = null!;
 
     /// <summary>
-    /// 記録しない書き込みを、端末の未送信の記録が残らないように流す。口を持つ端末は、口が開いた接続を関数へ渡す（関数は
-    /// その接続の SQL か <see cref="LocalRows"/> だけで書く）。口が無い端末は、関数へ null を渡してそのまま流す（関数は
-    /// Raw 系のリポジトリ・生の SQL で書く）。前からある未送信の記録は変えない
+    /// 記録しない書き込みを、端末の未送信の記録が残らないように流す。口が開いた接続を関数へ渡す（関数はその接続の SQL か
+    /// <see cref="LocalRows"/> だけで書く）。前からある未送信の記録は変えない
     /// </summary>
-    /// <param name="write">記録しない書き込みを流す関数（接続は口を持つ端末だけが渡す）</param>
+    /// <param name="write">記録しない書き込みを流す関数</param>
     /// <param name="ct">キャンセルトークン</param>
-    /// <param name="withoutForeignKeys">真なら、口が外部キーの検査を切った接続を渡す（口が無い端末では関係しない）</param>
+    /// <param name="withoutForeignKeys">真なら、口が外部キーの検査を切った接続を渡す</param>
     public Task WriteUntrackedAsync(
-        Func<DbConnection?, Task> write,
+        Func<DbConnection, Task> write,
         CancellationToken ct,
         bool withoutForeignKeys = false
-    ) =>
-        _writeUntracked is { } writeUntracked
-            ? writeUntracked(connection => write(connection), ct, withoutForeignKeys)
-            : write(null);
+    ) => _writeUntracked(write, ct, withoutForeignKeys);
 
     /// <summary>
     /// 端末の DB の行を、渡された接続で読み書きする口（記録しない書き込みの口が渡した接続の上で、行を書くのに使う。状態を
@@ -531,32 +382,17 @@ internal sealed class SyncModelDevice : IDisposable
     /// </summary>
     public ILocalRowStore LocalRows => new SqliteLocalRowStore(Factory);
 
-    /// <summary>
-    /// 1 行の未送信の記録を全部消す（口が無い端末では、製品のジャーナルの表からその行の記録を消す）
-    /// </summary>
+    /// <summary>1 行の未送信の記録を全部消す</summary>
     /// <param name="table">表の名前</param>
     /// <param name="keyText">キーのテキスト</param>
     /// <param name="ct">キャンセルトークン</param>
-    public async Task ClearPendingRecordsAsync(string table, string keyText, CancellationToken ct)
-    {
-        if (_clearPendingRecords is { } clear)
-        {
-            await clear(table, keyText, ct);
-
-            return;
-        }
-
-        await Sql.ExecuteSqlAsync(
-            "DELETE FROM quicker_sync_journal WHERE table_name = @table AND key_text = @key",
-            new { table, key = keyText },
-            ct
-        );
-    }
+    public Task ClearPendingRecordsAsync(string table, string keyText, CancellationToken ct) =>
+        _clearPendingRecords(table, keyText, ct);
 
     /// <summary>キーを決めるフックが挿入する行の主キーへ足す値</summary>
     public const int RekeyOffset = 100000;
 
-    /// <summary>未送信のジャーナルの件数</summary>
+    /// <summary>未送信の変更の件数</summary>
     public Task<int> PendingCountAsync(CancellationToken ct) => State.CountPendingAsync(ct);
 
     private ISqlConnectionFactory? _factory;
@@ -760,7 +596,7 @@ internal sealed class SyncModelWorld : IAsyncDisposable
     /// <summary>書き手（世界の端末とサーバーの他者）</summary>
     public IEnumerable<ModelActor> Actors => [.. _devices.Select(d => d.Actor), ModelActor.Server];
 
-    /// <param name="options">サーバー役・転送経路・外部の ISyncTable の代役</param>
+    /// <param name="options">サーバー役・転送経路・端末の作り方</param>
     /// <param name="ct">キャンセルトークン</param>
     public static async Task<SyncModelWorld> CreateAsync(
         SyncModelWorldOptions options,
@@ -779,12 +615,7 @@ internal sealed class SyncModelWorld : IAsyncDisposable
             {
                 devices.Add(
                     await options.CreateDevice(
-                        new SyncModelDeviceRequest(
-                            actor,
-                            sources,
-                            faults,
-                            options.ExternalTables.Contains(actor)
-                        ),
+                        new SyncModelDeviceRequest(actor, sources, faults),
                         ct
                     )
                 );
@@ -792,7 +623,7 @@ internal sealed class SyncModelWorld : IAsyncDisposable
         }
         catch
         {
-            // 端末を作れなかったら（「流せない」の例外を含む）、作った端末・転送・サーバー役を破棄してから投げる
+            // 端末を作れなかったら、作った端末・転送・サーバー役を破棄してから投げる
             await new SyncModelWorld(server, http, devices, faults).DisposeAsync();
             throw;
         }
@@ -841,7 +672,6 @@ internal sealed class SyncModelWorld : IAsyncDisposable
     )
     {
         Faults.Syncing = device;
-        Faults.Refreshing = true;
 
         try
         {
@@ -850,7 +680,6 @@ internal sealed class SyncModelWorld : IAsyncDisposable
         finally
         {
             Faults.Syncing = null;
-            Faults.Refreshing = false;
         }
     }
 
@@ -878,9 +707,8 @@ internal sealed class SyncModelWorld : IAsyncDisposable
     }
 
     /// <summary>
-    /// 追加の手を、端末の DB へ Repository を通らずに入れる（ジャーナル記録デコレータの内側のリポジトリ＝記録しない。
-    /// ミラー版は NULL のまま）。端末の記録しない書き込みの口（<see cref="SyncModelDevice.WriteUntrackedAsync"/>）を通して流す。
-    /// 端末の最初の形 <see cref="ModelPreload.Untracked"/> が使う
+    /// 追加の手を、端末の DB へ Repository を通らずに入れる（記録しない。版の列は NULL のまま）。端末の記録しない書き込みの口
+    /// （<see cref="SyncModelDevice.WriteUntrackedAsync"/>）を通して流す。端末の最初の形 <see cref="ModelPreload.Untracked"/> が使う
     /// </summary>
     public Task ApplyUntrackedAsync(ModelWriteOp op, CancellationToken ct)
     {
@@ -893,83 +721,59 @@ internal sealed class SyncModelWorld : IAsyncDisposable
     }
 
     /// <summary>
-    /// 追加の手を入れる（<see cref="ApplyUntrackedAsync"/> の本体）。接続があれば、その接続へ <see cref="SyncModelDevice.LocalRows"/>
-    /// で全列を書き、接続が無ければ、端末の記録しないリポジトリ（Raw 系）で入れる
+    /// 追加の手を入れる（<see cref="ApplyUntrackedAsync"/> の本体）。口が渡した接続へ <see cref="SyncModelDevice.LocalRows"/> で
+    /// 全列を書く
     /// </summary>
     private static async Task InsertUntrackedAsync(
         SyncModelDevice device,
         ModelWriteOp op,
-        DbConnection? connection,
+        DbConnection connection,
         CancellationToken ct
     )
     {
         switch (op)
         {
             case AddFolderOp add:
-            {
-                var folder = new ModelFolderEntity
-                {
-                    FolderId = add.Id,
-                    ParentId = add.ParentId,
-                    Name = add.Name,
-                };
-
-                if (connection is null)
-                {
-                    await device.RawFolders.InsertAsync(folder, ct);
-                }
-                else
-                {
-                    await device.LocalRows.InsertAsync(connection, folder, ct);
-                }
-
+                await device.LocalRows.InsertAsync(
+                    connection,
+                    new ModelFolderEntity
+                    {
+                        FolderId = add.Id,
+                        ParentId = add.ParentId,
+                        Name = add.Name,
+                    },
+                    ct
+                );
                 break;
-            }
 
             case AddLabelOp add:
-            {
-                var label = new ModelLabelEntity
-                {
-                    LabelCode = add.Code,
-                    FolderId = add.FolderId,
-                    Caption = add.Caption,
-                };
-
-                if (connection is null)
-                {
-                    await device.RawLabels.InsertAsync(label, ct);
-                }
-                else
-                {
-                    await device.LocalRows.InsertAsync(connection, label, ct);
-                }
-
+                await device.LocalRows.InsertAsync(
+                    connection,
+                    new ModelLabelEntity
+                    {
+                        LabelCode = add.Code,
+                        FolderId = add.FolderId,
+                        Caption = add.Caption,
+                    },
+                    ct
+                );
                 break;
-            }
 
             case AddItemOp add:
-            {
-                var item = new ModelItemEntity
-                {
-                    ItemId = add.Id,
-                    FolderId = add.FolderId,
-                    LabelCode = add.LabelCode,
-                    Code = add.Code,
-                    Title = add.Title,
-                    Payload = Convert.FromHexString(add.PayloadHex),
-                };
-
-                if (connection is null)
-                {
-                    await device.RawItems.InsertAsync(item, ct);
-                }
-                else
-                {
-                    await device.LocalRows.InsertAsync(connection, item, ct);
-                }
-
+                await device.LocalRows.InsertAsync(
+                    connection,
+                    new ModelItemEntity
+                    {
+                        ItemId = add.Id,
+                        FolderId = add.FolderId,
+                        LabelCode = add.LabelCode,
+                        Code = add.Code,
+                        Title = add.Title,
+                        Payload = Convert.FromHexString(add.PayloadHex),
+                    },
+                    ct
+                );
                 break;
-            }
 
             default:
                 throw new ArgumentException(

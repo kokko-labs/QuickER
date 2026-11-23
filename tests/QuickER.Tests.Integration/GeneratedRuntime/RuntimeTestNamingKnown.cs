@@ -19,11 +19,9 @@ public static class RuntimeTestNamingKnown
     [
         new("SyncBinaryTransferResponseRuntimeTests", SyncRebuild),
         new("SyncConfigMatrixRuntimeTests", SyncRebuild),
-        new("SyncConstructionExclusionTests", SyncRebuild),
         new("SyncEndpointRegistrationRuntimeTests", SyncRebuild),
         new("SyncHttpRuntimeTests", SyncRebuild),
         new("SyncKeyTextRuntimeTests", SyncRebuild),
-        new("SyncLocalSaveHookRegistrationTests", SyncRebuild),
         new("SyncModelHttpRuntimeTests", SyncRebuild),
         new("SyncModelHttpRuntimeTestsPart2", SyncRebuild),
         new("SyncModelHttpRuntimeTestsPart3", SyncRebuild),
@@ -31,11 +29,7 @@ public static class RuntimeTestNamingKnown
         new("SyncModelRuntimeTests", SyncRebuild),
         new("SyncModelRuntimeTestsPart2", SyncRebuild),
         new("SyncModelSqlServerRuntimeTests", SyncRebuild),
-        new("SyncNullKeyRuntimeTests", SyncRebuild),
-        new("SyncRefreshBenchmarkRuntimeTests", SyncRebuild),
         new("SyncSqlServerHttpRuntimeTests", SyncRebuild),
         new("SyncSqlServerRuntimeTests", SyncRebuild),
-        new("SyncSqliteRuntimeTests", SyncRebuild),
-        new("SyncVoRuntimeTests", SyncRebuild),
     ];
 }

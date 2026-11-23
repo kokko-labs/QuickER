@@ -3621,7 +3621,6 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     public void Skip(EntityBaseCore entity) => _skipped.Add(entity);
 
     /// <summary>Calls Before in registration order and short-circuits at the first <c>false</c> (types with no hooks yield <c>true</c>).</summary>
-    /// <remarks>The hooks run with the write registration taken away (see <see cref="SaveHookContextWrites"/>), so a save they start is not reported to it.</remarks>
     public async Task<bool> InvokeBeforeAsync(
         EntityBaseCore entity,
         SaveOperation operation,
@@ -3635,19 +3634,12 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             return true;
         }
 
-        using (SaveHookContextWrites.Detach(out _))
-        {
-            return await invoker
-                .InvokeBeforeAsync(entity, operation, cancellationToken)
-                .ConfigureAwait(false);
-        }
+        return await invoker
+            .InvokeBeforeAsync(entity, operation, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Calls After in registration order (types with no hooks do nothing). The context is created bound to the entity type.</summary>
-    /// <remarks>
-    /// The hooks run with the write registration taken away (see <see cref="SaveHookContextWrites"/>): the columns they
-    /// write through the context are reported to it by the context, and a save they start is not.
-    /// </remarks>
     public async Task InvokeAfterAsync(
         EntityBaseCore entity,
         SaveOperation operation,
@@ -3661,27 +3653,19 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             return;
         }
 
-        using (SaveHookContextWrites.Detach(out var observer))
-        {
-            await invoker
-                .InvokeAfterAsync(
-                    entity,
-                    operation,
-                    new WriteNotingContext(_contextFactory(entity), this, entity.GetType(), observer),
-                    cancellationToken
-                )
-                .ConfigureAwait(false);
-        }
+        await invoker
+            .InvokeAfterAsync(
+                entity,
+                operation,
+                new WriteNotingContext(_contextFactory(entity), this),
+                cancellationToken
+            )
+            .ConfigureAwait(false);
     }
 
     /// <summary>Hands every call on to the backend's context, noting on the session that a hook wrote an unbounded binary column through it.</summary>
-    /// <remarks>A write that stored a value in a row is also reported to the observer the session took from <see cref="SaveHookContextWrites"/>, before the hook goes on.</remarks>
-    private sealed class WriteNotingContext(
-        ISaveHookContext inner,
-        SaveHookSession session,
-        Type entityType,
-        Func<SaveHookBinaryColumnWrite, CancellationToken, Task>? observer
-    ) : ISaveHookContext
+    private sealed class WriteNotingContext(ISaveHookContext inner, SaveHookSession session)
+        : ISaveHookContext
     {
         public Task<int> ExecuteSqlAsync(
             string sql,
@@ -3689,7 +3673,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             CancellationToken cancellationToken = default
         ) => inner.ExecuteSqlAsync(sql, parameters, cancellationToken);
 
-        public async Task<bool> WriteBinaryColumnAsync(
+        public Task<bool> WriteBinaryColumnAsync(
             string propertyName,
             object key,
             Stream? source,
@@ -3698,20 +3682,8 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         )
         {
             session.BinaryColumnWritten = true;
-            var written = await inner
-                .WriteBinaryColumnAsync(propertyName, key, source, length, cancellationToken)
-                .ConfigureAwait(false);
 
-            if (written && observer is not null)
-            {
-                await observer(
-                        new SaveHookBinaryColumnWrite(entityType, propertyName, key, inner),
-                        cancellationToken
-                    )
-                    .ConfigureAwait(false);
-            }
-
-            return written;
+            return inner.WriteBinaryColumnAsync(propertyName, key, source, length, cancellationToken);
         }
     }
 }
@@ -4555,7 +4527,9 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
     /// <remarks>
     /// Registers I{Entity}Repository / ISqlExecutor keyed by <paramref name="serviceKey"/>. Consumers resolve the
     /// dialect-specific implementation like <c>[FromKeyedServices(serviceKey)] ICustomerRepository</c>.
-    /// The connection factory is captured per key in a closure, so it causes no non-keyed registration collisions.
+    /// The connection factory is registered under the same key, and the repositories and the SQL executor resolve it
+    /// from the container. To use your own, register an <c>ISqlConnectionFactory</c> under the same key after this call
+    /// (the last registration wins). Keyed registrations do not collide with non-keyed ones.
     /// </remarks>
     public static IServiceCollection AddGenerated{{ dialect_di_suffix }}Repositories(
         this IServiceCollection services,
@@ -4570,7 +4544,7 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
         services.AddKeyedSingleton<ISqlConnectionFactory>(serviceKey, (_, _) => connectionFactory);
         services.AddKeyedSingleton<ISqlExecutor>(
             serviceKey,
-            (_, _) => new SqlExecutor(connectionFactory)
+            (provider, key) => new SqlExecutor(provider.GetRequiredKeyedService<ISqlConnectionFactory>(key))
         );
 
         // Register the save hook registry by default (non-keyed; a complete no-op when no ISaveHook<T> is registered)
@@ -4579,7 +4553,7 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
         ));
 {{~ if repository_classes.size > 0 ~}}
 
-        // Every entity is wired the same way, so the local function holds what they share - the captured connection
+        // Every entity is wired the same way, so the local function holds what they share - the keyed connection
         // factory, the key, and the keyed SQL executor - and each entity contributes only its contract and constructor
         void AddRepository<TContract{{ if remote_contracts }}, TRemote{{ end }}>(
             Func<ISqlConnectionFactory, ISaveHookRegistry?, ISqlExecutor?, TContract> create
@@ -4594,7 +4568,7 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
             services.AddKeyedScoped(
                 serviceKey,
                 (provider, key) => create(
-                    connectionFactory,
+                    provider.GetRequiredKeyedService<ISqlConnectionFactory>(key),
                     provider.GetService<ISaveHookRegistry>(),
                     provider.GetKeyedService<ISqlExecutor>(key)
                 )

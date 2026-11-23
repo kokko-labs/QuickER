@@ -18,8 +18,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <para>
 /// Microsoft.Data.Sqlite はロックで待つやり直しを各文の最初の step でしか行わない。自動コミットの
 /// <c>INSERT … RETURNING</c> は確定が後の step で起きるので、別の接続が読んでいると待たずに失敗する。busy timeout を
-/// 当てると SQLite 自身がどの step でも待つ（待ちそのものは <c>SyncRuntimeTestsBase</c> の
-/// <c>JournaledWrite_WaitsForReaderOnAnotherConnection</c> / <c>RawSqlReturning_WaitsForReaderOnAnotherConnection</c>
+/// 当てると SQLite 自身がどの step でも待つ（待ちそのものは <c>RawSqlReturning_WaitsForReaderOnAnotherConnection</c>
 /// が固定する）。
 /// </para>
 /// <para>
@@ -90,6 +89,60 @@ public sealed class BusyTimeoutDefaultAdoSqliteRuntimeTests : IDisposable
             .Should()
             .BeTrue("プールから同じ接続が戻っている");
         (await BusyTimeoutAsync(second)).Should().Be(30_000, "開き直すたびに当て直す");
+    }
+
+    /// <summary>
+    /// 生 SQL の実行器へ渡した <c>INSERT … RETURNING</c> も、別の接続の読み取りが終わるのを待ってから成功する。
+    /// </summary>
+    /// <remarks>
+    /// 自動コミットの確定は最初の行を返した後の step で起きる。ロールバックジャーナルの確定には排他のロックが要るので、
+    /// 別の接続が読み取り（共有のロック）を持っている間は確定できない。読み取りを持ったまま書き込みを始め、上限の時間まで
+    /// 終わらない（待っている）ことと、読み取りを終えた後に成功することを見る。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[SQLite busy] 生 SQL の INSERT … RETURNING は、別の接続の読み取りの後に成功する"
+    )]
+    public async Task RawSqlReturning_WaitsForReaderOnAnotherConnection()
+    {
+        var factory = new SqlConnectionFactory(ConnectionString(null));
+        var sql = new SqlExecutor(factory);
+        await sql.ExecuteSqlAsync(
+            "CREATE TABLE busy_probe (id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
+            null,
+            Ct
+        );
+
+        await using var reader = new SqliteConnection(_db.ReadWriteCreateConnectionString);
+        await reader.OpenAsync(Ct);
+        var readTransaction = reader.BeginTransaction(deferred: true);
+
+        await using (var read = new SqliteCommand("SELECT count(*) FROM busy_probe", reader))
+        {
+            read.Transaction = readTransaction;
+            await read.ExecuteScalarAsync(Ct);
+        }
+
+        // SQLite の待ちは呼び出したスレッドを止める（プロバイダの処理は同期）ので、書き込みは別のタスクで始める
+        var insert = Task.Run(
+            () =>
+                sql.QueryProjectionBySqlAsync<long>(
+                    "INSERT INTO busy_probe (id, name) VALUES (7, 'raw') RETURNING id",
+                    null,
+                    Ct
+                ),
+            Ct
+        );
+        var first = await Task.WhenAny(insert, Task.Delay(TimeSpan.FromSeconds(2), Ct));
+
+        first.Should().NotBeSameAs(insert, "読み取りが終わるまで書き込みは確定できず、待っている");
+
+        readTransaction.Commit();
+        readTransaction.Dispose();
+
+        (await insert).Should().Equal(7L);
+        (await sql.ExecuteScalarSqlAsync<long>("SELECT count(*) FROM busy_probe", null, Ct))
+            .Should()
+            .Be(1);
     }
 
     private string ConnectionString(int? defaultTimeout)

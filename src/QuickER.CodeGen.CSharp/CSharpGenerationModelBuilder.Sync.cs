@@ -4,7 +4,7 @@ using QuickER.Model;
 namespace QuickER.CodeGen.CSharp;
 
 /// <summary>
-/// 双方向同期の支援コード（同期記述子・ジャーナル記録デコレータ・直結差分ソース）の生成素材を組み立てる部分クラス
+/// 双方向同期の支援コード（同期記述子・直結差分ソース）の生成素材を組み立てる部分クラス
 /// </summary>
 /// <remarks>
 /// <para>
@@ -22,7 +22,57 @@ internal sealed partial class CSharpGenerationModelBuilder
     private const string SqlServerQuoteClose = "]";
 
     /// <summary>
-    /// 同期対象テーブル（Repository 契約を持つ単一主キーのテーブル）の生成モデルを FK トポロジカル順で組み立てる
+    /// 表の名前がスキーマ修飾か（最初の <c>.</c> でスキーマと表に分かれるか。判定は <c>SchemaQualifiedName.TrySplit</c>）
+    /// </summary>
+    /// <remarks>
+    /// スキーマ修飾の表は SQLite では別の DB（ATTACH した DB）の表になり、同期のローカルの変更の記録（トリガー）は
+    /// main の DB の表にしか付けられない。そのため同期はこの表を対象にも参照元にも数えない。
+    /// 同期の対象の絞り込み・同期できる表の検査・ローカルの参照元の一覧は、すべてこの判定を通す。
+    /// </remarks>
+    internal static bool IsSchemaQualifiedTable(Entity entity) =>
+        SchemaQualifiedName.TrySplit(entity.TableName, out _, out _);
+
+    /// <summary>
+    /// Repository 契約を持つ（単一主キーの）表を FK トポロジカル順で列挙する（同期の対象とスキーマ修飾で外れる表の元）
+    /// </summary>
+    private IEnumerable<Entity> ListSyncCandidates(
+        ErDiagram diagram,
+        CodeGenerationOptions options,
+        IReadOnlyList<CSharpRepositoryModel> repositoryClasses
+    )
+    {
+        if (!options.GenerateSyncSupport || !options.GeneratesRepositoryContract)
+        {
+            return [];
+        }
+
+        var repositoriesByEntityClass = repositoryClasses
+            .Select(repository => repository.EntityClassName)
+            .ToHashSet(StringComparer.Ordinal);
+
+        return OrderEntitiesByForeignKey(diagram)
+            .Where(entity =>
+                repositoriesByEntityClass.Contains(
+                    _nameConverter.ToEntityClassName(entity.TableName)
+                )
+            );
+    }
+
+    /// <summary>
+    /// スキーマ修飾でなければ同期の対象になったはずの表（Repository 契約を持つスキーマ修飾の表）の名前を FK 順で返す
+    /// </summary>
+    private IReadOnlyList<string> ListSyncSchemaQualifiedTableNames(
+        ErDiagram diagram,
+        CodeGenerationOptions options,
+        IReadOnlyList<CSharpRepositoryModel> repositoryClasses
+    ) =>
+        ListSyncCandidates(diagram, options, repositoryClasses)
+            .Where(IsSchemaQualifiedTable)
+            .Select(entity => entity.TableName)
+            .ToList();
+
+    /// <summary>
+    /// 同期対象テーブル（Repository 契約を持つ単一主キーのスキーマ修飾でないテーブル）の生成モデルを FK トポロジカル順で組み立てる
     /// </summary>
     /// <remarks>
     /// rowversion 列の有無は対象かどうかを決めず、モード素材（版あり＝増分＋競合検出／版なし＝後勝ち・全量）に
@@ -35,29 +85,14 @@ internal sealed partial class CSharpGenerationModelBuilder
         IReadOnlyList<CSharpRepositoryModel> repositoryClasses
     )
     {
-        if (!options.GenerateSyncSupport || !options.GeneratesRepositoryContract)
-        {
-            return [];
-        }
-
         var repositoriesByEntityClass = repositoryClasses.ToDictionary(
             repository => repository.EntityClassName,
             StringComparer.Ordinal
         );
 
-        var targets = new List<Entity>();
-
-        foreach (var entity in OrderEntitiesByForeignKey(diagram))
-        {
-            var className = _nameConverter.ToEntityClassName(entity.TableName);
-
-            if (!repositoriesByEntityClass.ContainsKey(className))
-            {
-                continue;
-            }
-
-            targets.Add(entity);
-        }
+        var targets = ListSyncCandidates(diagram, options, repositoryClasses)
+            .Where(entity => !IsSchemaQualifiedTable(entity))
+            .ToList();
 
         var targetIds = targets.Select(entity => entity.Id).ToHashSet();
 
@@ -233,13 +268,6 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Select(column => _nameConverter.ToPropertyName(column.Name))
             .ToList();
 
-        // 変更を記録するトリガーはスキーマの部分を除いた表の名前で張る（分け方は QuoteQualified と同じ最初のドット）
-        var isSchemaQualified = SchemaQualifiedName.TrySplit(
-            entity.TableName,
-            out var schemaPart,
-            out var tablePart
-        );
-
         // 差分走査の SELECT 列。除外列があるときだけ明示列挙へ切り替え、除外列を落とす。
         // 生 SQL のエンティティ取得は SELECT に含まれた列を opportunistic にマップするため、"*" のままだと
         // 除外列まで降りてきてしまう（そして UPDATE 経路の「除外列に値が入っている」ガードに引っかかる）。
@@ -256,19 +284,18 @@ internal sealed partial class CSharpGenerationModelBuilder
                         )
                 );
 
-        var serverTable = QuoteQualified(entity.TableName, SqlServerQuoteOpen, SqlServerQuoteClose);
-        var localTable = QuoteQualified(entity.TableName, "\"", "\"");
+        var serverTable = QuoteIdentifier(
+            entity.TableName,
+            SqlServerQuoteOpen,
+            SqlServerQuoteClose
+        );
         var serverKey = QuoteIdentifier(keyColumn.Name, SqlServerQuoteOpen, SqlServerQuoteClose);
-        var localKey = QuoteIdentifier(keyColumn.Name, "\"", "\"");
         var rowVersionPropertyName = rowVersionColumn is null
             ? string.Empty
             : _nameConverter.ToPropertyName(rowVersionColumn.Name);
         var serverRowVersion = rowVersionColumn is null
             ? string.Empty
             : QuoteIdentifier(rowVersionColumn.Name, SqlServerQuoteOpen, SqlServerQuoteClose);
-        var localRowVersion = rowVersionColumn is null
-            ? string.Empty
-            : QuoteIdentifier(rowVersionColumn.Name, "\"", "\"");
 
         return new CSharpSyncTableModel
         {
@@ -279,10 +306,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             TableName = EscapeNameForCSharpString(entity.TableName),
             // 記述子プロパティの XmlDoc へ載せるため、XML としてエスケープした形も持つ
             TableNameXmlDoc = EscapeForXmlDocSummary(entity.TableName),
-            // 修飾されていなければ表の部分は名前全体（TrySplit の規則）
-            LocalTableName = EscapeNameForCSharpString(tablePart),
-            // 空のスキーマの部分（".x"）も名前として残すため、リテラルの形で持つ（無いときだけ空文字）
-            LocalDatabaseName = isSchemaQualified ? CSharpLiteral(schemaPart!) : string.Empty,
+            // スキーマ修飾の表は同期の対象にならないので、ローカルの表の名前は図の名前そのもの
+            LocalTableName = EscapeNameForCSharpString(entity.TableName),
             LocalKeyColumnName = EscapeNameForCSharpString(keyColumn.Name),
             LocalUnboundedBinaryColumnNames = string.Join(
                 ", ",
@@ -291,12 +316,6 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsVersionless = isVersionless,
             RemoteRouteName = repositoryName,
             DescriptorPropertyName = repositoryName,
-            DecoratorClassName = $"Journaling{repositoryName}Repository",
-            // デコレータの汎用基底だけは版の有無でサブクラス階層を選ぶ（削除記録の形が違う＝版ありは
-            // 行が消える前にミラー版を読む）。記述子・差分ソースの選択は登録時に IsVersionless が決める
-            DecoratorBaseClassName = isVersionless
-                ? "VersionlessJournalingRepository"
-                : "JournalingRepository",
             KeyPropertyName = keyPropertyName,
             // 昇順・上限つきの差分走査（版ありのみ）。2 点が効いている:
             //  (1) @anchor / @ceiling は NULL を取り得るため、素の比較では 3 値論理で全行が UNKNOWN になる
@@ -326,20 +345,6 @@ internal sealed partial class CSharpGenerationModelBuilder
                 )
                 : string.Empty,
             ServerKeysSql = CSharpLiteral($"SELECT {serverKey} FROM {serverTable}"),
-            LocalAnchorSql = isVersionless
-                ? string.Empty
-                : CSharpLiteral($"SELECT MAX({localRowVersion}) FROM {localTable}"),
-            // グラフ保存の削除の記録が、ローカルの行のミラー版を読む（スタブや古い実体は版を持たない＝#27）
-            LocalRowVersionSql = isVersionless
-                ? string.Empty
-                : CSharpLiteral(
-                    $"SELECT {localRowVersion} FROM {localTable} WHERE {localKey} = @key"
-                ),
-            LocalKeysSql = CSharpLiteral($"SELECT {localKey} FROM {localTable}"),
-            LocalExistingKeysSql = CSharpLiteral(
-                $"SELECT {localKey} FROM {localTable} WHERE {localKey} IN (@keys)"
-            ),
-            LocalDeleteAllSql = CSharpLiteral($"DELETE FROM {localTable}"),
             // 版なしテーブルのミラー版は存在しない＝記述子は版アクセサを載せず、既定（常に null）が働く
             RowVersionReadExpression = rowVersionColumn is null
                 ? "null"
@@ -353,16 +358,10 @@ internal sealed partial class CSharpGenerationModelBuilder
                 ),
             FormatKeyExpression = BuildFormatKey("key", keyColumn, keyValueObject),
             ParseKeyExpression = BuildParseKey(keyColumn, keyValueObject),
-            NormalizeKeyTextExpression = BuildNormalizeKeyText(keyColumn),
-            DecoratorDelegationBlock = BuildSyncDelegationBlock(repository),
             BinaryColumnPropertyNames = binaryColumns,
             BinaryAccessorsBlock = BuildSyncBinaryAccessorsBlock(
                 binaryColumns,
                 repository.InterfaceName,
-                repository.KeyTypeName
-            ),
-            DecoratorBinaryBlock = BuildSyncDecoratorBinaryBlock(
-                binaryColumns,
                 repository.KeyTypeName
             ),
             FillUnsetUnboundedBinariesBlock = BuildSyncFillUnsetUnboundedBinariesBlock(
@@ -375,16 +374,11 @@ internal sealed partial class CSharpGenerationModelBuilder
                 diagram,
                 syncTargetIds
             ),
-            ReferencingTableNamesBlock = BuildSyncReferencingTableNamesBlock(entity, diagram),
             UnlistedReferencingTableNamesBlock = BuildSyncUnlistedReferencingTableNamesBlock(
                 entity,
                 diagram
             ),
             LocalReferencesBlock = BuildSyncLocalReferencesBlock(entity, diagram),
-            LocalUniqueLookupsBlock = BuildSyncLocalUniqueLookupsBlock(
-                entity,
-                repository.EntityClassName
-            ),
         };
     }
 
@@ -437,8 +431,8 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// （docs の既知の制限）。
     /// </para>
     /// <para>
-    /// キーのテキストは子の外部キー列へ主キーと同じ整形（<see cref="BuildFormatKey"/>）を当てて作る。ジャーナルの
-    /// キーは「同じ値が同じ文字列になる」ことだけを要求するので、int と long、親と同じ値オブジェクト（FK 列の VO 型
+    /// キーのテキストは子の外部キー列へ主キーと同じ整形（<see cref="BuildFormatKey"/>）を当てて作る。キーの
+    /// テキストは「同じ値が同じ文字列になる」ことだけを要求するので、int と long、親と同じ値オブジェクト（FK 列の VO 型
     /// 統一）のどちらでも親の記述子が作る文字列と一致する。NULL の外部キーは「参照なし」＝null を返す。
     /// </para>
     /// </remarks>
@@ -501,125 +495,6 @@ internal sealed partial class CSharpGenerationModelBuilder
                 + "\n            ],";
     }
 
-    /// <summary>記述子の被参照テーブル名（このテーブルを親として参照する子テーブル・図の全リレーションから）を組み立てる。</summary>
-    /// <remarks>
-    /// 同期対象かどうかを問わない。サーバーの削除を断るのはサーバーの外部キーで、同期対象外の子テーブルにも
-    /// 外部キーはあるため。自己参照も含める（自分の子の行が削除を断り得る）。
-    /// </remarks>
-    private static string BuildSyncReferencingTableNamesBlock(Entity entity, ErDiagram diagram)
-    {
-        var columnOwners = diagram
-            .Entities.SelectMany(owner => owner.Columns.Select(column => (column.Id, owner)))
-            .ToDictionary(pair => pair.Id, pair => pair.owner);
-        var names = new List<string>();
-
-        foreach (var relationship in diagram.Relationships)
-        {
-            foreach (var pair in relationship.ColumnPairs)
-            {
-                if (
-                    columnOwners.TryGetValue(pair.SourceColumnId, out var parent)
-                    && parent.Id == entity.Id
-                    && columnOwners.TryGetValue(pair.TargetColumnId, out var child)
-                    && !names.Contains(child.TableName, SchemaNames.Comparer)
-                )
-                {
-                    names.Add(child.TableName);
-                }
-            }
-        }
-
-        return names.Count == 0
-            ? string.Empty
-            : "            ReferencingTableNames = ["
-                + string.Join(", ", names.Select(name => $"\"{EscapeNameForCSharpString(name)}\""))
-                + "],";
-    }
-
-    /// <summary>
-    /// 記述子の、一意制約ごとの引き当ての並び（<c>LocalUniqueLookups</c>）と、同じ制約の値を書き写す関数
-    /// （<c>CopyUniqueValues</c>）を組み立てる。
-    /// </summary>
-    /// <remarks>
-    /// 一意制約ごとに、行から制約の値を読む関数（値オブジェクトは内側の値）と、その値を持つローカルの行のキーを返す
-    /// <c>SELECT "キー" FROM "表" WHERE "列0" = @values0 AND …</c>（ローカル＝SQLite の引用）を 1 組作る。ダウンロードで
-    /// サーバーの行がローカルの行と一意な値でぶつかったとき、値を持つローカルの行を引き当ててサーバーから読み直す。
-    /// 書き写す関数は、載せた制約の構成列（重ねない）を、片方の行からもう片方へ代入する（引き当てと書き写しが同じ制約の
-    /// 集合を見るよう、ここで一緒に作る）。主キーが 1 列でない表・制約の列を解決できない制約は載せない。
-    /// </remarks>
-    private string BuildSyncLocalUniqueLookupsBlock(Entity entity, string entityClassName)
-    {
-        var keys = entity.Columns.Where(column => column.IsPrimaryKey).ToList();
-
-        if (keys.Count != 1 || entity.UniqueConstraints.Count == 0)
-        {
-            return string.Empty;
-        }
-
-        var table = QuoteQualified(entity.TableName, "\"", "\"");
-        var key = QuoteIdentifier(keys[0].Name, "\"", "\"");
-        var lookups = new List<string>();
-        var copied = new List<string>();
-
-        foreach (var constraint in entity.UniqueConstraints)
-        {
-            var columns = constraint
-                .ColumnIds.Select(id => entity.Columns.FirstOrDefault(column => column.Id == id))
-                .ToList();
-
-            if (columns.Count == 0 || columns.Any(column => column is null))
-            {
-                continue;
-            }
-
-            foreach (var column in columns)
-            {
-                var propertyName = _nameConverter.ToPropertyName(column!.Name);
-
-                if (!copied.Contains(propertyName))
-                {
-                    copied.Add(propertyName);
-                }
-            }
-
-            var reads = columns.Select(
-                (column, index) =>
-                {
-                    var propertyName = _nameConverter.ToPropertyName(column!.Name);
-
-                    return ResolveValueObject(column) is null
-                        ? $"entity.{propertyName}"
-                        : $"entity.{propertyName} is {{ }} value{index} ? (object?)value{index}.Value : null";
-                }
-            );
-            var conditions = columns.Select(
-                (column, index) => $"{QuoteIdentifier(column!.Name, "\"", "\"")} = @values{index}"
-            );
-            var sql = CSharpLiteral(
-                $"SELECT {key} FROM {table} WHERE {string.Join(" AND ", conditions)}"
-            );
-
-            lookups.Add(
-                $"                new SyncUniqueLookup<{entityClassName}>(\n"
-                    + $"                    entity => [{string.Join(", ", reads)}],\n"
-                    + $"                    {sql}\n"
-                    + "                ),"
-            );
-        }
-
-        return lookups.Count == 0
-            ? string.Empty
-            : "            LocalUniqueLookups =\n            [\n"
-                + string.Join("\n", lookups)
-                + "\n            ],\n"
-                + "            CopyUniqueValues = (source, target) =>\n            {\n"
-                + string.Join(
-                    "\n",
-                    copied.Select(name => $"                target.{name} = source.{name};")
-                )
-                + "\n            },";
-    }
-
     /// <summary>
     /// 記述子の、この表を参照する外部キーの並び（<c>LocalReferences</c>）を組み立てる。
     /// </summary>
@@ -633,7 +508,8 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// </para>
     /// <para>
     /// 一意制約を参照する外部キーと複数列の外部キーは載せない（親のキーを子の行の 1 列から読めない＝
-    /// <c>ParentReferences</c> と同じ線引き）。
+    /// <c>ParentReferences</c> と同じ線引き）。子の表がスキーマ修飾（<see cref="IsSchemaQualifiedTable"/>）なら
+    /// 載せない（同期はその表を参照元に数えない）。
     /// </para>
     /// </remarks>
     private static string BuildSyncLocalReferencesBlock(Entity entity, ErDiagram diagram)
@@ -642,7 +518,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         foreach (var (child, childColumn, _) in ListedReferences(entity, diagram))
         {
-            var childTable = QuoteQualified(child.TableName, "\"", "\"");
+            var childTable = QuoteIdentifier(child.TableName, "\"", "\"");
             var quotedColumn = QuoteIdentifier(childColumn.Name, "\"", "\"");
             var sql =
                 $"new SyncLocalReference({CSharpLiteral(child.TableName)}, "
@@ -699,6 +575,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                     columnOwners.TryGetValue(pair.SourceColumnId, out var parent)
                     && parent.Id == entity.Id
                     && columnOwners.TryGetValue(pair.TargetColumnId, out var child)
+                    && !IsSchemaQualifiedTable(child)
                     && !names.Contains(child.TableName, SchemaNames.Comparer)
                 )
                 {
@@ -748,6 +625,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             if (
                 pair.SourceColumnId == keys[0].Id
                 && columnOwners.TryGetValue(pair.TargetColumnId, out var child)
+                && !IsSchemaQualifiedTable(child.Owner)
             )
             {
                 yield return (child.Owner, child.Column, relationship);
@@ -804,92 +682,6 @@ internal sealed partial class CSharpGenerationModelBuilder
             + entries
             + "\n            },";
     }
-
-    /// <summary>
-    /// ジャーナル記録デコレータの除外列アクセサ（読みは素通し・書きは journal-first で記録）を組み立てる。
-    /// </summary>
-    /// <remarks>
-    /// blob だけを差し替える編集（行の通常列は変わらない）は Repository の他の入口を一切通らないため、
-    /// ここで記録しないとオフライン編集として永久に検出されない。記録は
-    /// <c>SyncOptions.IncludeUnboundedBinary</c> に依らず常時行う（送るかどうかは送信側の判断で、
-    /// 生成時点ではどちらで呼ばれるか分からない）。記録と書き込みは基底の
-    /// <c>RecordUnboundedBinaryWriteAsync</c> がローカルの書き込みロックの内側で 1 組として行い、
-    /// <c>SyncSession.IsSuppressed</c> のとき（エンジン自身のコピー）は記録もロックもしない。
-    /// </remarks>
-    private static string BuildSyncDecoratorBinaryBlock(
-        IReadOnlyList<string> columns,
-        string keyTypeName
-    )
-    {
-        if (columns.Count == 0)
-        {
-            return string.Empty;
-        }
-
-        var members = columns.Select(column =>
-            "    /// <inheritdoc />\n"
-            + $"    public Task<bool> Read{column}Async(\n"
-            + $"        {keyTypeName} id,\n"
-            + "        Stream destination,\n"
-            + "        CancellationToken cancellationToken = default\n"
-            + $"    ) => _inner.Read{column}Async(id, destination, cancellationToken);\n\n"
-            + "    /// <inheritdoc />\n"
-            + "    /// <remarks>\n"
-            + "    /// A blob written on its own changes no ordinary column, so no other entry point records it. The\n"
-            + "    /// intent is journaled first, exactly as every other write is, and the upload sends the row's\n"
-            + "    /// current content (blob included) when it is asked to carry the excluded columns.\n"
-            + "    /// </remarks>\n"
-            + $"    public Task<bool> Write{column}Async(\n"
-            + $"        {keyTypeName} id,\n"
-            + "        Stream? source,\n"
-            + "        long? length = null,\n"
-            + "        CancellationToken cancellationToken = default\n"
-            + "    ) =>\n"
-            + "        RecordUnboundedBinaryWriteAsync(\n"
-            + "            id,\n"
-            + $"            \"{column}\",\n"
-            + $"            () => _inner.Write{column}Async(id, source, length, cancellationToken),\n"
-            + "            cancellationToken\n"
-            + "        );"
-        );
-
-        return string.Join("\n\n", members);
-    }
-
-    /// <summary>ジャーナル記録デコレータへ追加する委譲メンバー（名前付きクエリ）を組み立てる</summary>
-    /// <remarks>
-    /// デコレータは <c>I{Entity}Repository</c> の全機能面を実装するため、契約へ載る追加メンバーもすべて素通しで
-    /// 実装しなければならない。名前付きクエリは Repository 契約の構築時に組んだ委譲ブロック
-    /// （<see cref="CSharpRepositoryModel.QueryDelegationBlock"/>）をそのまま使う（契約とのずれが構造的に
-    /// 起きない。同じエンティティで <c>BuildQueryBlocks</c> を呼び直すと、ビルド全体で一意管理している
-    /// 射影 DTO 名の重複判定に 1 回目が引っかかり、射影クエリの委譲だけが黙って抜けて CS0535 になる）。
-    /// 重複事前チェックはランタイム共通面へ上がったため、素通しは基底
-    /// <c>JournalingRepositoryBase</c> が 1 回だけ持つ＝ここでは出さない。
-    /// </remarks>
-    private static string BuildSyncDelegationBlock(CSharpRepositoryModel repository)
-    {
-        var members = new List<string>();
-
-        if (!string.IsNullOrEmpty(repository.QueryDelegationBlock))
-        {
-            members.Add(repository.QueryDelegationBlock);
-        }
-
-        return string.Join("\n\n", members);
-    }
-
-    /// <summary>
-    /// ドット付きテーブル名を最初の <c>.</c> で 2 分割してクォートする（DDL・生成 CRUD の
-    /// <c>EntitySaveMetadata.QuoteTableName</c> と同じ規則）。
-    /// </summary>
-    /// <remarks>
-    /// 全ドット分割にすると <c>a.b.c</c> のような名前で DDL・CRUD と同期 SQL のクォート結果が食い違い、
-    /// 同じテーブルを指せなくなる（2 つ目以降のドットは名前の一部として扱う）。
-    /// </remarks>
-    private static string QuoteQualified(string name, string open, string close) =>
-        SchemaQualifiedName.TrySplit(name, out var schema, out var table)
-            ? $"{QuoteIdentifier(schema, open, close)}.{QuoteIdentifier(table, open, close)}"
-            : QuoteIdentifier(name, open, close);
 
     /// <summary>SQL 識別子を方言のクォートで包む（終端クォート文字を二重化してクォートの脱出を防ぐ）</summary>
     /// <remarks>
@@ -973,7 +765,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         return sqlType is null ? "@afterKey" : $"CAST(@afterKey AS {sqlType})";
     }
 
-    /// <summary>主キーをジャーナルのテキスト形へ変換する式を組み立てる</summary>
+    /// <summary>主キーをキーのテキスト形へ変換する式を組み立てる</summary>
     /// <remarks>
     /// テキスト形は「往復できること」と「同じ値が同じ文字列になること」だけを要求する（照合は序数比較）。
     /// 文化圏に依存する既定の書式は使わず、数値・日時は不変文化・往復書式で書く。
@@ -1007,21 +799,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         };
     }
 
-    /// <summary>以前の版が書いたキーのテキストをいまの形へ書き直す関数の式を組み立てる（形が変わっていない型は空文字）</summary>
-    /// <remarks>
-    /// DateTime の主キーは、以前は Kind つきの往復書式（<c>Z</c> やローカルのオフセット）で書いていた。decimal の主キーは、
-    /// 以前は絶対値 1e-5 未満の値を指数表記（<c>1E-06</c>）で書いていた。ローカル DB に残ったジャーナル・受理記録・
-    /// コピー待ちのテキストを、ランの前にいまの形へ書き直す。
-    /// </remarks>
-    private string BuildNormalizeKeyText(Column column) =>
-        _columnTypes[column.Id].TypeName.TrimEnd('?') switch
-        {
-            "DateTime" => "SyncKeyText.WithoutDateTimeKind",
-            "decimal" => "SyncKeyText.WithoutDecimalExponent",
-            _ => string.Empty,
-        };
-
-    /// <summary>ジャーナルのテキスト形から主キーを復元する式を組み立てる</summary>
+    /// <summary>キーのテキスト形から主キーを復元する式を組み立てる</summary>
     private string BuildParseKey(Column column, CSharpValueObjectModel? valueObject)
     {
         var underlying = _columnTypes[column.Id].TypeName.TrimEnd('?');

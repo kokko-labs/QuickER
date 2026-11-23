@@ -1173,27 +1173,6 @@ internal static partial class SourceRuleProbes
                     ),
                 ]
             ),
-            // まだ持たない部分の例外の書式を、文字列・コメントの中のどちらでも番号と部分ごと拾い、大文字小文字の違う綴りと
-            // 前置きの途中で切れた綴りは拾わない
-            new SourceRuleProbe(
-                "sync-engine-pending-markers-in-templates-forms",
-                "sync-engine-pending-markers-in-templates",
-                [
-                    new ProbeFile(
-                        "Probe.scriban",
-                        """
-                        throw new NotSupportedException("QUICKER-SYNC-PENDING:3:refresh");
-                        // QUICKER-SYNC-PENDING marks a part that is not built yet.
-                        throw new NotSupportedException("quicker-sync-pending:4:blob");
-                        throw new NotSupportedException("QUICKER-SYNC-PEND");
-                        const string Prefix = "QUICKER-SYNC-PENDING:";
-                        """,
-                        "QUICKER-SYNC-PENDING:3:refresh",
-                        "QUICKER-SYNC-PENDING",
-                        "QUICKER-SYNC-PENDING:"
-                    ),
-                ]
-            ),
             // 専用の接続を開くメソッドの呼び出し（await つき・using の中・変数への代入）と、接続を作る呼び出しを拾い、開くメソッドの
             // 宣言・XmlDoc の cref・名前の途中で切れた綴りは拾わない（3 か所目の呼び出しを足すと件数の照合が赤にする）
             new SourceRuleProbe(
@@ -1215,26 +1194,6 @@ internal static partial class SourceRuleProbes
                         "OpenDedicatedAsync(",
                         "OpenDedicatedAsync(",
                         "CreateDedicatedConnection("
-                    ),
-                ]
-            ),
-            new SourceRuleProbe(
-                "sync-engine-pending-markers-in-runtime-forms",
-                "sync-engine-pending-markers-in-runtime",
-                [
-                    new ProbeFile(
-                        "Probe.cs",
-                        """
-                        internal static class Engine
-                        {
-                            internal const string Marker = "QUICKER-SYNC-PENDING:7:cycle";
-
-                            // QUICKER-SYNC-PENDING
-                            internal const string Other = "QUICKER_SYNC_PENDING";
-                        }
-                        """,
-                        "QUICKER-SYNC-PENDING:7:cycle",
-                        "QUICKER-SYNC-PENDING"
                     ),
                 ]
             ),

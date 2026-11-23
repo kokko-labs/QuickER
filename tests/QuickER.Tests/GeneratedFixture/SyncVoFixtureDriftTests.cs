@@ -10,8 +10,8 @@ namespace QuickER.Tests.GeneratedSyncVoFixture;
 /// <remarks>
 /// 同期支援（<c>GenerateSyncSupport</c>）× マルチターゲット（<c>["sqlserver","sqlite"]</c>）×
 /// 値オブジェクト（<c>GenerateValueObjects</c>）× 親子 2 テーブルの生成物を固定する。守る対象は
-/// 「ミラー版の読み書き・キー整形・キー解析が VO 型を経由する式で出ること」、とりわけ
-/// <b>NOT NULL 宣言の行バージョン列でもミラー版の読み出しが <c>?.Value</c> であること</b>のテキスト。
+/// 「版の列の読み書き・キー整形・キー解析が VO 型を経由する式で出ること」、とりわけ
+/// <b>NOT NULL 宣言の行バージョン列でも版の列の読み出しが <c>?.Value</c> であること</b>のテキスト。
 /// 再生成手順は <see cref="FixtureDriftHarness"/> の docstring と失敗メッセージを参照。
 /// </remarks>
 public sealed class SyncVoFixtureDriftTests

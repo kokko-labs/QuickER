@@ -39,7 +39,7 @@ internal enum CodegenProbe
     /// </summary>
     EfCoreModel,
 
-    /// <summary>同期の記述子の <c>FormatKey</c> / <c>ParseKey</c> がキーを往復し、書き直し（<c>NormalizeKeyText</c>）は日時と decimal の主キーの表だけが持つ</summary>
+    /// <summary>同期の記述子の <c>FormatKey</c> / <c>ParseKey</c> がキーを往復し、decimal のキーは指数表記のテキストも読む</summary>
     SyncKeyText,
 }
 
@@ -799,9 +799,9 @@ internal static class Probes
     // ===== 同期のキーのテキスト =====
 
     /// <summary>
-    /// decimal のキーの往復と以前の形の書き直し（値・いまの形・以前の指数表記の形。元の <c>SyncDecimalKeyExecutionTests</c> の行）
+    /// decimal のキーの往復と指数表記の読み取り（値・書く形・指数表記の形）
     /// </summary>
-    private static readonly (decimal Value, string Text, string Legacy)[] DecimalKeySamples =
+    private static readonly (decimal Value, string Text, string Exponent)[] DecimalKeySamples =
     [
         (0.000001m, "0.000001", "1E-06"),
         (-0.000001m, "-0.000001", "-1E-06"),
@@ -811,8 +811,7 @@ internal static class Probes
     ];
 
     /// <summary>
-    /// 生成した <c>GeneratedSyncTables</c> の全記述子について、キーの型の見本を <c>FormatKey</c> → <c>ParseKey</c> で往復させ、
-    /// 書き直し（<c>NormalizeKeyText</c>）の有無がキーの型（日時・decimal だけが持つ）と合うことを見る
+    /// 生成した <c>GeneratedSyncTables</c> の全記述子について、キーの型の見本を <c>FormatKey</c> → <c>ParseKey</c> で往復させる
     /// </summary>
     private static IReadOnlyList<string> SyncKeyText(Assembly assembly)
     {
@@ -842,23 +841,12 @@ internal static class Probes
             var descriptorType = descriptor.GetType();
             var format = (Delegate)descriptorType.GetProperty("FormatKey")!.GetValue(descriptor)!;
             var parse = (Delegate)descriptorType.GetProperty("ParseKey")!.GetValue(descriptor)!;
-            var normalize = (Delegate?)
-                descriptorType.GetProperty("NormalizeKeyText")!.GetValue(descriptor);
             var keyType = descriptorType
                 .GetProperty("FormatKey")!
                 .PropertyType.GetGenericArguments()[0];
             var valueObjectCreate = ValueObjectCreate(keyType);
             var underlying = valueObjectCreate?.GetParameters()[0].ParameterType ?? keyType;
             var name = $"{property.Name}（{underlying.Name}）";
-            var expectsNormalizer = underlying == typeof(decimal) || underlying == typeof(DateTime);
-
-            if ((normalize is not null) != expectsNormalizer)
-            {
-                problems.Add(
-                    $"探針（同期のキー）: {name} の NormalizeKeyText が{(expectsNormalizer ? "無い" : "ある（日時・decimal の主キーの表だけが持つ）")}"
-                );
-            }
-
             var samples = KeySamples(underlying);
 
             if (samples is null)
@@ -894,36 +882,26 @@ internal static class Probes
                         $"探針（同期のキー）: {name} の {Show(sample)} が '{text}' から元の値へ戻らない（{Show(parsed)}）"
                     );
                 }
-
-                if (normalize is not null && (string?)normalize.DynamicInvoke(text) != text)
-                {
-                    problems.Add(
-                        $"探針（同期のキー）: {name} の書き直しがいまの形 '{text}' を変えた"
-                    );
-                }
             }
 
             if (underlying == typeof(decimal))
             {
-                problems.AddRange(
-                    DecimalKeyText(name, format, parse, normalize, valueObjectCreate)
-                );
+                problems.AddRange(DecimalKeyText(name, format, parse, valueObjectCreate));
             }
         }
 
         return problems;
     }
 
-    /// <summary>decimal のキーは指数表記を使わずに書き、以前の指数表記のテキストを読み、いまの形へ書き直す</summary>
+    /// <summary>decimal のキーは指数表記を使わずに書き、指数表記のテキストも読む</summary>
     private static IEnumerable<string> DecimalKeyText(
         string name,
         Delegate format,
         Delegate parse,
-        Delegate? normalize,
         MethodInfo? valueObjectCreate
     )
     {
-        foreach (var (value, text, legacy) in DecimalKeySamples)
+        foreach (var (value, text, exponent) in DecimalKeySamples)
         {
             var key = valueObjectCreate is null ? value : valueObjectCreate.Invoke(null, [value])!;
             var formatted = (string)format.DynamicInvoke(key)!;
@@ -933,14 +911,9 @@ internal static class Probes
                 yield return $"探針（同期のキー）: {name} の {Show(value)} を '{formatted}' と書いた（期待 '{text}'）";
             }
 
-            if (!SameKey(parse.DynamicInvoke(legacy), key))
+            if (!SameKey(parse.DynamicInvoke(exponent), key))
             {
-                yield return $"探針（同期のキー）: {name} が以前の形 '{legacy}' を {Show(value)} と読まない";
-            }
-
-            if (normalize is not null && (string?)normalize.DynamicInvoke(legacy) != text)
-            {
-                yield return $"探針（同期のキー）: {name} の書き直しが '{legacy}' を '{text}' にしない";
+                yield return $"探針（同期のキー）: {name} が指数表記の '{exponent}' を {Show(value)} と読まない";
             }
         }
     }

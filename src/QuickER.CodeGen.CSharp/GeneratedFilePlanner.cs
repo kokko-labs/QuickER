@@ -30,7 +30,7 @@ public enum GenerationBucket
     /// <summary>リモート面の ASP.NET Core サーバー実装（エンドポイントマッピング。常に別ファイル）</summary>
     RemoteServer,
 
-    /// <summary>双方向同期の支援コード（同期記述子・ジャーナル記録デコレータ・直結差分ソース・DI 登録）</summary>
+    /// <summary>双方向同期の支援コード（同期記述子・直結差分ソース・DI 登録）</summary>
     Sync,
 
     /// <summary>リモート面の HTTP クライアント実装（Http{Entity}RemoteRepository・AddGeneratedHttpRemoteRepositories・OwnedHttpClient）</summary>
@@ -694,7 +694,16 @@ public static class GeneratedFilePlanner
                     FileName = outputFileName,
                     NamespaceName = root,
                     Buckets = active,
-                    CrossNamespaceUsings = [],
+                    // 同期の登録（AddGeneratedSyncEngine）は SQLite の方言エンジンの固定の型（接続ファクトリ・
+                    // ローカルの行を読み書きする口）を名指しするので、同じファイルの SQLite の方言 namespace を using する
+                    // （パッケージ参照モードでは方言パッケージをブロック内の using で開く）
+                    CrossNamespaceUsings =
+                        active.Contains(GenerationBucket.Sync) && !options.UseRuntimePackages
+                            ?
+                            [
+                                $"{repositoryNamespace}.{DialectNamespaceSuffix(QuickER.Dialects.DialectNames.Sqlite)}",
+                            ]
+                            : [],
                     Dialect = primaryDialect,
                     ContractOnly = true,
                     MultiDialect = true,
@@ -811,6 +820,19 @@ public static class GeneratedFilePlanner
             )
             {
                 dependencyNamespaces.Add($"{runtimeNamespace}.{fixedSuffix}");
+            }
+
+            // 同期の登録（AddGeneratedSyncEngine）は SQLite の方言エンジンの固定の型（接続ファクトリ・ローカルの行を
+            // 読み書きする口）を名指しするので、その固定部の namespace も using する（通常分割は {Runtime}.Sqlite、
+            // 層別出力は {インフラ層ルート}.Sqlite。パッケージ参照モードでは PackageRuntimeUsings が付ける）
+            if (bucket == GenerationBucket.Sync && runtimeNamespace is not null)
+            {
+                var sqliteEngineBase = options.LayeredOutput
+                    ? LayerNamespaceRoot(options, GeneratedLayer.Infrastructure, used)
+                    : runtimeNamespace;
+                dependencyNamespaces.Add(
+                    $"{sqliteEngineBase}.{DialectNamespaceSuffix(QuickER.Dialects.DialectNames.Sqlite)}"
+                );
             }
 
             var crossUsings = OrderCrossUsings(dependencyNamespaces, ownNamespace);
@@ -1042,7 +1064,7 @@ public static class GeneratedFilePlanner
             );
         }
 
-        // 同期エンジンの固定部（SyncEngine・ジャーナル・セッション抑制・結果／競合レコード）
+        // 同期エンジンの固定部（SyncEngine・SyncTable・変更の記録・結果／競合レコード）
         if (activeSet.Contains(GenerationBucket.Sync))
         {
             AddFixedRuntimeSubSpec(
@@ -1226,7 +1248,7 @@ public static class GeneratedFilePlanner
             dependencyNamespaces.Add(aspNetCoreNamespace);
 
             // 同期エンドポイントは同期の固定部（ISyncServerSource・同期エンベロープ・操作名）を参照する。
-            // per-entity の同期生成物（記述子・デコレータ・HTTP 差分ソース）は参照しないため、Sync バケット
+            // per-entity の同期生成物（記述子・HTTP 差分ソース）は参照しないため、Sync バケット
             // そのものではなく固定部の namespace だけを足す（層別出力では固定部が {インフラ}.Sync へ統合
             // されているため ResolveNamespace のフォールバックがそのまま固定部の namespace になる）。
             if (activeSet.Contains(GenerationBucket.Sync))

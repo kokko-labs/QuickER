@@ -136,7 +136,15 @@ internal static partial class CodegenCases
 
         foreach (var output in Service_Outputs)
         {
-            foreach (var table in new[] { "customer_address", "http_order", "order_line" })
+            foreach (
+                var table in new[]
+                {
+                    "customer_address",
+                    "http_order",
+                    "order_line",
+                    "journaling_order",
+                }
+            )
             {
                 yield return CompileRow(
                     $"compile-type-names-distinct-{table.Replace('_', '-')}-{output}",

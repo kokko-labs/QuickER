@@ -28,16 +28,7 @@ internal static class ExpectFacets
     /// </summary>
     public const string Pending = "pending";
 
-    /// <summary>端末の未送信のジャーナル（id の順）</summary>
-    public const string Journal = "journal";
-
-    /// <summary>端末の受理記録</summary>
-    public const string Acks = "acks";
-
-    /// <summary>端末の blob のコピー待ち</summary>
-    public const string BlobPending = "blob-pending";
-
-    /// <summary>端末のミラー版とサーバー役のいまの版の関係</summary>
+    /// <summary>端末の行の版の列とサーバー役のいまの版の関係</summary>
     public const string Mirror = "mirror";
 
     /// <summary>After フックの blob の書き込みの結果（<see cref="ArmHookBlobWriteOp"/>）</summary>
@@ -48,9 +39,9 @@ internal static class ExpectFacets
 /// シナリオの途中で、書き手の面（<see cref="ExpectFacets"/>）を行の並びとして読み、期待（同期計画の期待の行と同じ照合＝
 /// <see cref="SyncPlanExpectation"/>）と比べる。違反は署名 <c>5/expect-{面}[:{表}]</c> で報告する。
 /// </summary>
-/// <param name="Actor">読む書き手（結果・ジャーナル・受理記録・コピー待ち・ミラー版は端末だけ）</param>
+/// <param name="Actor">読む書き手（結果・未送信の行・行の版の列は端末だけ）</param>
 /// <param name="Facet">面</param>
-/// <param name="Table">表（行・受理記録・コピー待ち・ミラー版の面だけ）</param>
+/// <param name="Table">表（行・行の版の列の面だけ）</param>
 /// <param name="Checks">期待（1 つ以上）</param>
 internal sealed record ExpectFacetOp(
     ModelActor Actor,
@@ -153,24 +144,6 @@ internal enum EngineDeclaration
     /// 帳簿を書く前に例外になる窓を持たない
     /// </summary>
     CarriesServerWinsDecision,
-
-    /// <summary>
-    /// <see cref="IModelDeviceSync.DerivesResumePointFromLocalVersions"/>：真のエンジンは ServerWins で戻した行の版の列を据え置き、
-    /// 偽のエンジンはサーバーの版にする
-    /// </summary>
-    DerivesResumePointFromLocalVersions,
-
-    /// <summary>
-    /// <see cref="IModelDeviceSync.RefetchesHeldRowsInSameRun"/>：真のエンジンは保留で取り残した行を同じ実行の中で取り直すので、
-    /// その間にサーバーで変わった行もその実行に入る
-    /// </summary>
-    RefetchesHeldRowsInSameRun,
-
-    /// <summary>
-    /// <see cref="IModelDeviceSync.RefusesDownloadOverRowLimit"/>：真のエンジンは、降ろす行が上限を超え範囲の表に未送信があると
-    /// 何も適用せずに断る。偽のエンジンは上限を見ずに降ろす
-    /// </summary>
-    RefusesDownloadOverRowLimit,
 }
 
 /// <summary>
@@ -193,10 +166,6 @@ internal sealed record WhenEngineDeclaresOp(
         Declaration switch
         {
             EngineDeclaration.CarriesServerWinsDecision => engine.CarriesServerWinsDecision,
-            EngineDeclaration.DerivesResumePointFromLocalVersions =>
-                engine.DerivesResumePointFromLocalVersions,
-            EngineDeclaration.RefetchesHeldRowsInSameRun => engine.RefetchesHeldRowsInSameRun,
-            EngineDeclaration.RefusesDownloadOverRowLimit => engine.RefusesDownloadOverRowLimit,
             _ => throw new ArgumentOutOfRangeException(nameof(Declaration), Declaration, null),
         };
 
@@ -220,19 +189,7 @@ internal static class Expect
     public static ExpectFacetOp Pending(ModelActor device) =>
         new(device, ExpectFacets.Pending, null, []);
 
-    /// <summary>端末の未送信のジャーナル</summary>
-    public static ExpectFacetOp Journal(ModelActor device) =>
-        new(device, ExpectFacets.Journal, null, []);
-
-    /// <summary>端末の受理記録</summary>
-    public static ExpectFacetOp Acks(ModelActor device, string table) =>
-        new(device, ExpectFacets.Acks, table, []);
-
-    /// <summary>端末の blob のコピー待ち</summary>
-    public static ExpectFacetOp BlobPending(ModelActor device, string table) =>
-        new(device, ExpectFacets.BlobPending, table, []);
-
-    /// <summary>端末のミラー版</summary>
+    /// <summary>端末の行の版の列</summary>
     public static ExpectFacetOp Mirror(ModelActor device, string table) =>
         new(device, ExpectFacets.Mirror, table, []);
 
@@ -253,11 +210,11 @@ internal sealed record ExpectThrowOp(ModelActor Device) : ModelOp
 /// <summary>記録の仕方（一括の書き込みの手）</summary>
 internal enum ModelBulkMode
 {
-    /// <summary>端末のジャーナル記録デコレータの BulkInsertAsync（記録する）</summary>
+    /// <summary>端末のリポジトリの BulkInsertAsync（記録する）</summary>
     Journaled,
 
     /// <summary>
-    /// 端末の記録しないリポジトリの BulkInsertAsync（同期しないローカルの行を作る）。この手が書いたキーは、消失なしの規則
+    /// 端末の記録しない書き込みの口で行を書く（同期しないローカルの行を作る）。この手が書いたキーは、消失なしの規則
     /// （書き手が 1 人のキーの値・消えた行・作り話の値）の対象から外す（収束・外部キー・止まらないの表明は当たる）
     /// </summary>
     Raw,
@@ -297,49 +254,6 @@ internal sealed record BulkAddItemsOp(
     public override string Describe() =>
         $"{Who(Actor)} BulkAddItems mode={Mode} rows=[{string.Join(",", Rows.Select(r => $"{r.Id}@{r.FolderId}"))}] "
         + $"code={CodePrefix}{{id}}";
-}
-
-/// <summary>
-/// 端末のジャーナルへ、業務の書き込みの無い記録を直接書く（記録の後で落ちて残った記録の再現）
-/// </summary>
-internal sealed record RecordJournalOp(
-    ModelActor Device,
-    string Table,
-    string KeyText,
-    SyncJournalOperation Operation
-) : ModelOp
-{
-    public override string Describe() =>
-        $"{Who(Device)} RecordJournal {ModelTables.Short(Table)} key={KeyText} op={Operation}";
-}
-
-/// <summary>
-/// 端末のローカル DB に、1 つのキーの記録の削除を断るトリガーを仕掛ける（<paramref name="Refuse"/> が false なら外す）。
-/// 記録を捨てる処理と行を消す処理の順を、途中で失敗させて確かめる
-/// </summary>
-/// <param name="Device">端末</param>
-/// <param name="Table">記録の表</param>
-/// <param name="KeyText">記録のキー</param>
-/// <param name="Refuse">仕掛けるか（false なら外す）</param>
-internal sealed record RefuseJournalRemovalOp(
-    ModelActor Device,
-    string Table,
-    string KeyText,
-    bool Refuse
-) : ModelOp
-{
-    public override string Describe() =>
-        $"{Who(Device)} RefuseJournalRemoval {ModelTables.Short(Table)} key={KeyText} refuse={Refuse}";
-}
-
-/// <summary>
-/// 端末のジャーナルを捨てる（表を指定すれば RemoveTableAsync・null なら RemoveAllAsync）。捨てた記録のキーは、消失なしの
-/// 規則の対象から外す（利用者が送らないと決めた変更）
-/// </summary>
-internal sealed record ClearJournalOp(ModelActor Device, string? Table) : ModelOp
-{
-    public override string Describe() =>
-        $"{Who(Device)} ClearJournal {(Table is null ? "all" : ModelTables.Short(Table))}";
 }
 
 /// <summary>
@@ -445,13 +359,6 @@ internal sealed record ArmEmptyFetchOp(ModelActor Device, string Table) : ModelO
     public override string Describe() => $"{Who(Device)} ArmEmptyFetch {ModelTables.Short(Table)}";
 }
 
-/// <summary>端末の同期がその行をローカルへ適用するとき、ローカルの Before フックが 1 回だけ保存を飛ばす</summary>
-internal sealed record ArmApplySkipOp(ModelActor Device, string Table, string KeyText) : ModelOp
-{
-    public override string Describe() =>
-        $"{Who(Device)} ArmApplySkip {ModelTables.Short(Table)} key={KeyText}";
-}
-
 /// <summary>
 /// 端末の次の品目の保存の After フックが、context の WriteBinaryColumnAsync で blob を書く（対象の品目を指定しなければ
 /// 保存した品目。キーを long で渡せば主キーの型と違う型のキー）。後で投げると保存ごと失敗する。結果はフックの面
@@ -516,13 +423,11 @@ internal sealed record SaveFolderGraphOp(
 /// 手の後に外部キーの表明を行わない（作った親の無い行は、後の実行の前の違反の集合に入る）
 /// </summary>
 /// <remarks>
-/// 元のテストの前提（ジャーナル記録デコレータを通らないローカルの書き込み・ローカルだけの表・トリガー）を作るためだけに使う。
+/// 元のテストの前提（トリガーに記録させないローカルの書き込み・ローカルだけの表・トリガー）を作るためだけに使う。
 /// 書き込みの履歴に残らない（同期のモデルの汎用の表明〔消失なし〕が根拠にする書き手の値にならない）。使うシナリオは blob-refresh-discard-drops-local-blobs・
 /// blob-refresh-refuses-when-blobs-would-be-lost・blob-default-preserves-existing-local-blobs-new-rows-arrive-empty・
-/// refresh-excluding-referencing-child-refuses-under-cascade・refresh-failed-wipe-keeps-acks・
-/// refresh-leaves-local-only-tables-alone と、holder-referenced-by-other-table-current-child-* の降ろし直す約束の行
-/// （約束の書き込み・行の削除・読み直しを途中で断るトリガーと、約束の表を消す古い DB の形）と、前からある外部キーの違反を作る
-/// judge-foreign-key-* の行。
+/// refresh-excluding-referencing-child-refuses-under-cascade・refresh-leaves-local-only-tables-alone と、前からある外部キーの
+/// 違反を作る judge-foreign-key-* の行。
 /// </remarks>
 internal sealed record LocalSqlOp(ModelActor Device, string Sql) : ModelOp
 {
@@ -535,15 +440,6 @@ internal sealed record LocalSqlOp(ModelActor Device, string Sql) : ModelOp
 
     public override string Describe() =>
         $"{Who(Device)} LocalSql{(Untracked ? " untracked" : "")} {Sql}";
-}
-
-/// <summary>
-/// 端末のローカル DB に新しい <c>SyncJournal</c> のインスタンスを開き、最初の使用の表の作成を流す（アプリの再起動に当たる）。
-/// 補助の表の一部が無い古い端末の DB でも、足りない表が作られることを確かめる
-/// </summary>
-internal sealed record OpenNewJournalOp(ModelActor Device) : ModelOp
-{
-    public override string Describe() => $"{Who(Device)} OpenNewJournal";
 }
 
 /// <summary>端末のローカル DB から表を消す（作り直すための定義を控える。<see cref="RestoreLocalTableOp"/> で戻す）</summary>
@@ -567,7 +463,7 @@ internal sealed record MakeLocalCascadeOp(ModelActor Device, string ChildTable, 
         $"{Who(Device)} MakeLocalCascade {ModelTables.Short(ChildTable)}->{ModelTables.Short(ParentTable)}";
 }
 
-/// <summary>端末のミラー版を名前で控える（ミラー版の面が <c>{名前}=same|changed</c> を書く）</summary>
+/// <summary>端末の行の版の列を名前で控える（版の列の面が <c>{名前}=same|changed</c> を書く）</summary>
 internal sealed record CaptureMirrorOp(ModelActor Device, string Table, string KeyText, string Name)
     : ModelOp
 {

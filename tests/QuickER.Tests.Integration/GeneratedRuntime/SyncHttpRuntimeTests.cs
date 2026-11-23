@@ -1,4 +1,6 @@
+using System.Linq;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,26 +12,29 @@ using Xunit;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// 同期支援のパリティスイートを <b>HTTP</b> の差分ソースで流す派生（サーバー役を in-process Kestrel の向こうへ置く）。
+/// 同期の差分ソースの <b>HTTP</b> の往復を確かめる（サーバー役を in-process Kestrel の向こうへ置く）。
 /// </summary>
 /// <remarks>
 /// <para>
-/// サーバー側は生成された <c>MapGeneratedRemoteEndpoints</c>（同期専用エンドポイント 3 本を含む）で、その背後に
-/// 直結テストとまったく同じ差分ソースを DI 登録する。クライアント側は生成された
-/// <c>AddGeneratedHttpSyncSources</c> の <c>Http{Entity}SyncSource</c> だけを使う。したがって基底の全シナリオが
-/// 「同じサーバー実体・同じ期待値」のまま HTTP 越しに走り、直結との差が出ればそれは転送の欠陥である。
+/// サーバー側は生成された <c>MapGeneratedRemoteEndpoints</c>（同期専用エンドポイントを含む）で、その背後に
+/// SyncFixture の SQLite のサーバー役（<see cref="SyncFixtureTestServer"/>）の差分ソースを DI 登録する。クライアント側は生成された
+/// <c>AddGeneratedHttpSyncSources</c> の <c>Http{Entity}SyncSource</c> だけを使い、アンカーの Base64 の往復・続きの有無・
+/// 上限・全キー・400 の拒否を差分ソースの面で直接見る。同期のエンジン越しの HTTP の振る舞いは、同期のモデルの HTTP の転送
+/// （<see cref="SyncModelHttpRuntimeTests"/>）が持つ。
 /// </para>
 /// <para>
-/// アップロードは新設のエンドポイントではなく既存の CRUD／保存エンドポイントを通る（版の採番と版ガードは
-/// サーバー側リポジトリが担う）。基底の競合シナリオが HTTP でも同じ結論になることが、409 の型復元まで含めた
-/// 経路の検証になっている。
+/// アップロードが使う既存の CRUD／保存エンドポイントの面には、版を採番するサーバー役のリポジトリを登録する
+/// （版なしのメモは採番なし＝素のリポジトリへ委譲するだけのアダプタ）。
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
-[RuntimeCell(RuntimeFeatures.SyncRefresh, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
-public sealed class SyncHttpRuntimeTests : SyncRuntimeTestsBase
+public sealed class SyncHttpRuntimeTests : IAsyncLifetime
 {
+    /// <summary>テスト全体で使うキャンセルトークン</summary>
+    private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
+
+    private SyncFixtureTestServer? _server;
     private InProcessRemoteServer? _remoteServer;
     private ServiceProvider? _clientProvider;
 
@@ -37,43 +42,34 @@ public sealed class SyncHttpRuntimeTests : SyncRuntimeTestsBase
     private ISyncServerSource<SyncOrderEntity, int> HttpOrderSource =>
         _clientProvider!.GetRequiredService<ISyncServerSource<SyncOrderEntity, int>>();
 
-    /// <inheritdoc />
-    protected override async Task<(
-        ISyncServerSource<SyncOrderEntity, int> Orders,
-        ISyncServerSource<SyncOrderLineEntity, int> Lines,
-        ISyncServerSource<SyncNoteEntity, int> Notes
-    )> CreateServerSourcesAsync()
+    /// <summary>サーバー役を作り、Kestrel の向こうへ差分ソースとリモート面を置き、クライアントの HTTP の差分ソースを組む</summary>
+    public async ValueTask InitializeAsync()
     {
-        var serverOrderSource = CreateOrderTestSource();
-        var serverLineSource = CreateLineTestSource();
-        var serverNoteSource = CreateNoteTestSource();
-        var serverMarkerSource = CreateMarkerTestSource();
+        var server = await SyncFixtureTestServer.CreateAsync(Ct);
+        _server = server;
 
         _remoteServer = await InProcessRemoteServer.StartAsync(
             services =>
             {
-                // 同期エンドポイントが答える実体＝直結テストと同一の差分ソース
-                services.AddSingleton<ISyncServerSource<SyncOrderEntity, int>>(serverOrderSource);
-                services.AddSingleton<ISyncServerSource<SyncOrderLineEntity, int>>(
-                    serverLineSource
-                );
-                services.AddSingleton<ISyncServerSource<SyncNoteEntity, int>>(serverNoteSource);
-                services.AddSingleton<ISyncServerSource<SyncMarkerEntity, int>>(serverMarkerSource);
+                // 同期エンドポイントが答える実体＝サーバー役の差分ソース
+                services.AddSingleton(server.Sources.Orders);
+                services.AddSingleton(server.Sources.Lines);
+                services.AddSingleton(server.Sources.Notes);
+                services.AddSingleton(server.Sources.Markers);
 
                 // アップロード（既存の CRUD／保存エンドポイント）が使う面。版採番ラッパーを噛ませる
-                // （版なしのメモは採番なし＝素のリポジトリへ委譲するだけのアダプタ）
                 services.AddScoped<ISyncOrderRemoteRepository>(
                     _ => new SyncTestOrderRemoteRepository(
-                        ServerOrders,
-                        ServerOrdersRaw,
-                        ServerOrderBlobs
+                        server.Orders,
+                        server.OrdersRaw,
+                        server.OrderBlobs
                     )
                 );
                 services.AddScoped<ISyncOrderLineRemoteRepository>(
-                    _ => new SyncTestOrderLineRemoteRepository(ServerLines)
+                    _ => new SyncTestOrderLineRemoteRepository(server.Lines)
                 );
                 services.AddScoped<ISyncNoteRemoteRepository>(_ => new SyncTestNoteRemoteRepository(
-                    ServerNotes
+                    server.Notes
                 ));
             },
             app => app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous),
@@ -83,16 +79,10 @@ public sealed class SyncHttpRuntimeTests : SyncRuntimeTestsBase
         _clientProvider = new ServiceCollection()
             .AddGeneratedHttpSyncSources(_remoteServer.BaseAddress(RemotePaths.DefaultPrefix))
             .BuildServiceProvider();
-
-        return (
-            _clientProvider.GetRequiredService<ISyncServerSource<SyncOrderEntity, int>>(),
-            _clientProvider.GetRequiredService<ISyncServerSource<SyncOrderLineEntity, int>>(),
-            _clientProvider.GetRequiredService<ISyncServerSource<SyncNoteEntity, int>>()
-        );
     }
 
-    /// <inheritdoc />
-    protected override async ValueTask DisposeTransportAsync()
+    /// <summary>クライアント・Kestrel・サーバー役の一時 DB を破棄する</summary>
+    public async ValueTask DisposeAsync()
     {
         _clientProvider?.Dispose();
 
@@ -100,6 +90,26 @@ public sealed class SyncHttpRuntimeTests : SyncRuntimeTestsBase
         {
             await _remoteServer.DisposeAsync();
         }
+
+        _server?.Dispose();
+    }
+
+    /// <summary>サーバー役へ注文とその明細を 1 件ずつ入れる（版はラッパーが採番する）</summary>
+    private async Task SeedServerAsync(int orderId, string customer, int lineId, string product)
+    {
+        await _server!.Orders.InsertAsync(
+            new SyncOrderEntity { OrderId = orderId, CustomerName = customer },
+            Ct
+        );
+        await _server.Lines.InsertAsync(
+            new SyncOrderLineEntity
+            {
+                LineId = lineId,
+                OrderId = orderId,
+                Product = product,
+            },
+            Ct
+        );
     }
 
     /// <summary>

@@ -12,7 +12,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </summary>
 internal enum ModelActor
 {
-    /// <summary>端末 1（ローカル SQLite・ジャーナル記録デコレータ越しに書く）</summary>
+    /// <summary>端末 1（ローカル SQLite・トリガーが変更を記録する表へ Repository 越しに書く）</summary>
     Device1,
 
     /// <summary>端末 2</summary>
@@ -148,7 +148,7 @@ internal abstract record ModelWriteOp(ModelActor Actor, ModelWriteVia Via) : Mod
     public abstract string KeyText { get; }
 
     /// <summary>
-    /// 失敗する書き込み（業務の書き込みが失敗し、ジャーナルの記録だけが残る形）。失敗しなければ違反。
+    /// 失敗する書き込み（業務の書き込みが失敗する形。トリガーの記録は書き込みと一緒に巻き戻る）。失敗しなければ違反。
     /// <see cref="WritePayloadOp"/> では途中で失敗するストリームを渡す。
     /// </summary>
     public bool ExpectFailure { get; init; }
@@ -327,7 +327,7 @@ internal sealed record DeleteItemOp(ModelActor Actor, ModelWriteVia Via, int Id)
     public override string Describe() => $"{Who(Actor)} DeleteItem id={Id}{ViaText}";
 }
 
-/// <summary>除外列（payload）を Write{列}Async で書く（端末はジャーナルの blob 列の記録を通る）</summary>
+/// <summary>除外列（payload）を Write{列}Async で書く（端末はトリガーがその列の名前を記録する）</summary>
 internal sealed record WritePayloadOp(ModelActor Actor, int Id, string PayloadHex)
     : ModelWriteOp(Actor, ModelWriteVia.Direct)
 {
@@ -425,7 +425,7 @@ internal sealed record ModelSyncOp(
         );
 }
 
-/// <summary>端末の洗い替え 1 回（未送信のジャーナルがあれば拒否される＝Force は使わない）</summary>
+/// <summary>端末の洗い替え 1 回（未送信の行があれば拒否される＝Force は使わない）</summary>
 /// <param name="ExpectScopeRefusal">
 /// 範囲外の表の行が範囲内の行を参照しているので <see cref="SyncRefreshScopeException"/> で断られ、端末の DB が変わらない
 /// ことを期待するか
@@ -513,45 +513,11 @@ internal sealed record ArmInterruptOp(
         + (ThenArm is { } kind ? $" then arm {kind}" : "");
 }
 
-/// <summary>
-/// 端末のジャーナル・受理記録・blob のコピー待ちのうち、その表のキーのテキストの末尾へ文字列を足す（以前の版が書いた
-/// 形の再現。日時の主キーは Kind つき＝<c>Z</c> やオフセットつきで書いていた）
-/// </summary>
-internal sealed record LegacyKeyTextsOp(ModelActor Device, string Table, string Suffix) : ModelOp
-{
-    public override string Describe() =>
-        $"{Who(Device)} LegacyKeyTexts {ModelTables.Short(Table)} suffix={Suffix}";
-}
-
-/// <summary>
-/// 端末のジャーナルへ、キーの決まっていない行の記録（<c>SyncJournal.UnsetKeyText</c>）を直接書く（書き込みの後・突き合わせの
-/// 前に落ちて残った記録の再現）。書いた直後に、エンジンが使う読み取りがその記録を返さないことも確かめる（違反は
-/// 5/unset-key-read）
-/// </summary>
-internal sealed record LeftoverUnsetKeyEntryOp(ModelActor Device, string Table) : ModelOp
-{
-    public override string Describe() =>
-        $"{Who(Device)} LeftoverUnsetKeyEntry {ModelTables.Short(Table)}";
-}
-
-/// <summary>シナリオの途中で、端末のジャーナルにキーの決まっていない行の記録が残っていないことを確かめる（違反は 5/unset-key-left）</summary>
-internal sealed record ExpectNoUnsetKeyEntryOp(ModelActor Device) : ModelOp
-{
-    public override string Describe() => $"{Who(Device)} ExpectNoUnsetKeyEntry";
-}
-
 /// <summary>シナリオの途中で、書き手（端末かサーバー役）の品目の blob を確かめる（違反は 5/expect-payload）</summary>
 internal sealed record ExpectPayloadOp(ModelActor Actor, int ItemId, string? PayloadHex) : ModelOp
 {
     public override string Describe() =>
         $"{Who(Actor)} ExpectPayload id={ItemId} payload={PayloadHex ?? "(none)"}";
-}
-
-/// <summary>シナリオの途中で、端末がそのキーの受理記録を持たないことを確かめる（違反は 5/expect-no-ack）</summary>
-internal sealed record ExpectNoAckOp(ModelActor Device, string Table, string KeyText) : ModelOp
-{
-    public override string Describe() =>
-        $"{Who(Device)} ExpectNoAck {ModelTables.Short(Table)} key={KeyText}";
 }
 
 /// <summary>

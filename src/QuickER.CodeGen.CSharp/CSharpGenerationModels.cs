@@ -31,6 +31,12 @@ internal sealed class CSharpGenerationModel
     public IReadOnlyList<CSharpSyncTableModel> SyncTables { get; init; } = [];
 
     /// <summary>
+    /// スキーマ修飾の名前のため同期の対象から外れた表の名前（Repository 契約を持つ表のうち、スキーマ修飾でなければ
+    /// 同期の対象になったもの）。FK トポロジカル順。同期を生成しないときは空。
+    /// </summary>
+    public IReadOnlyList<string> SyncSchemaQualifiedTableNames { get; init; } = [];
+
+    /// <summary>
     /// クエリ糖衣の静的クラス（<c>SqlQueryExtensions</c>）の整形済み全文。Repository 契約が出ない構成では空文字。
     /// </summary>
     /// <remarks>
@@ -80,20 +86,17 @@ internal sealed class CSharpSyncTableModel
     /// <summary>主キーの C# 型名（値オブジェクト有効時は VO 型名）</summary>
     public required string KeyTypeName { get; init; }
 
-    /// <summary>対象テーブル名（ジャーナルへ記録する識別子でもある）</summary>
+    /// <summary>対象テーブル名（同期の状態の表へ記録する識別子でもある）</summary>
     public required string TableName { get; init; }
 
     /// <summary>XML doc summary の定型文へ埋め込むテーブル名（XML エスケープ・改行畳み込み済み）</summary>
     public required string TableNameXmlDoc { get; init; }
 
     /// <summary>
-    /// ローカル（SQLite）の表の名前のうちスキーマの部分を除いた表の部分（<c>sqlite_master.tbl_name</c> と同じもの。
-    /// C# 文字列リテラルの中身としてエスケープ済み。スキーマの部分が無ければ図の名前そのもの）
+    /// ローカル（SQLite）の表の名前（<c>sqlite_master.tbl_name</c> と同じもの。C# 文字列リテラルの中身として
+    /// エスケープ済み。スキーマ修飾の表は同期の対象にならないので、図の名前そのもの）
     /// </summary>
     public required string LocalTableName { get; init; }
-
-    /// <summary>ローカルの表の名前のスキーマの部分を C# 文字列リテラル（前後の <c>"</c> 込み）にしたもの（スキーマの部分が無ければ空文字）</summary>
-    public string LocalDatabaseName { get; init; } = string.Empty;
 
     /// <summary>主キーの列の DB の列名（C# 文字列リテラルの中身としてエスケープ済み）</summary>
     public required string LocalKeyColumnName { get; init; }
@@ -115,16 +118,10 @@ internal sealed class CSharpSyncTableModel
 
     /// <summary>記述子（<c>SyncTableDescriptor</c>）を公開する静的プロパティ名（例 <c>SyncItem</c>）</summary>
     /// <remarks>
-    /// 記述子は <c>GeneratedSyncTables</c> の静的プロパティとして 1 テーブル 1 つ出る。デコレータ・DI 登録・
-    /// グラフ記録レジストリはすべてこの名前で同じ実体を引く（テーブルごとのクラスはもう出ない）。
+    /// 記述子は <c>GeneratedSyncTables</c> の静的プロパティとして 1 テーブル 1 つ出る。DI 登録はこの名前で
+    /// 同じ実体を引く（テーブルごとのクラスは出ない）。
     /// </remarks>
     public required string DescriptorPropertyName { get; init; }
-
-    /// <summary>ジャーナル記録デコレータのクラス名（例 <c>JournalingSyncItemRepository</c>）</summary>
-    public required string DecoratorClassName { get; init; }
-
-    /// <summary>デコレータが継承する汎用基底名（版あり <c>JournalingRepository</c>／版なし <c>VersionlessJournalingRepository</c>）</summary>
-    public required string DecoratorBaseClassName { get; init; }
 
     /// <summary>主キーのプロパティ名</summary>
     public required string KeyPropertyName { get; init; }
@@ -135,38 +132,17 @@ internal sealed class CSharpSyncTableModel
     /// <summary>サーバー側の全キー取得 SQL（C# 文字列リテラル・SQL Server クォート）</summary>
     public required string ServerKeysSql { get; init; }
 
-    /// <summary>ローカルのアンカー導出 SQL（C# 文字列リテラル・SQLite クォート・ミラー列の MAX）</summary>
-    public required string LocalAnchorSql { get; init; }
-
-    /// <summary>ローカルの 1 行のミラー版を読む SQL（C# 文字列リテラル・SQLite クォート・<c>@key</c>。版なしの表は空文字）</summary>
-    public string LocalRowVersionSql { get; init; } = string.Empty;
-
-    /// <summary>ローカルの全キー取得 SQL（C# 文字列リテラル・SQLite クォート）</summary>
-    public required string LocalKeysSql { get; init; }
-
-    /// <summary>ローカルの存在確認 SQL（C# 文字列リテラル・SQLite クォート・<c>@keys</c> のコレクション展開）</summary>
-    public required string LocalExistingKeysSql { get; init; }
-
-    /// <summary>ローカルの全行削除 SQL（C# 文字列リテラル・SQLite クォート・洗い替えの前半）</summary>
-    public required string LocalDeleteAllSql { get; init; }
-
     /// <summary>エンティティからミラー版を読む式（VO 有効時は内包値を取り出す）</summary>
     public required string RowVersionReadExpression { get; init; }
 
     /// <summary>エンティティへミラー版を書く式（VO 有効時は再ラップする）</summary>
     public required string RowVersionWriteExpression { get; init; }
 
-    /// <summary>キー変数 <c>key</c> をジャーナルのテキスト形へ変換する式</summary>
+    /// <summary>キー変数 <c>key</c> をキーのテキスト形へ変換する式</summary>
     public required string FormatKeyExpression { get; init; }
 
-    /// <summary>ジャーナルのテキスト形 <c>keyText</c> から主キーを復元する式</summary>
+    /// <summary>キーのテキスト形 <c>keyText</c> から主キーを復元する式</summary>
     public required string ParseKeyExpression { get; init; }
-
-    /// <summary>以前の版が書いたキーのテキストを、いまの形へ書き直す関数の式（形が変わっていない型は空文字）</summary>
-    public string NormalizeKeyTextExpression { get; init; } = string.Empty;
-
-    /// <summary>デコレータへ追加で挿入する委譲メンバー群（名前付きクエリ・重複事前チェック等。整形済み・無ければ空文字）</summary>
-    public string DecoratorDelegationBlock { get; init; } = string.Empty;
 
     /// <summary>
     /// このテーブルの無制限バイナリ列（除外列）の C# プロパティ名一覧（宣言順。除外オプション OFF・該当列なしでは空）。
@@ -184,9 +160,6 @@ internal sealed class CSharpSyncTableModel
     /// </remarks>
     public string BinaryAccessorsBlock { get; init; } = string.Empty;
 
-    /// <summary>ジャーナル記録デコレータへ挿入する除外列アクセサ（Read は素通し・Write は journal-first。無ければ空文字）</summary>
-    public string DecoratorBinaryBlock { get; init; } = string.Empty;
-
     /// <summary>記述子の初期化子へ挿入する、NOT NULL の除外列へ空の値を入れる処理（整形済み・無ければ空文字）</summary>
     /// <remarks>
     /// 同期の行の読み出しは除外列を含まないため、値オブジェクトの除外列は null のまま届き、ローカルへ挿入すると
@@ -201,13 +174,6 @@ internal sealed class CSharpSyncTableModel
     /// 親の不在として報告するために、エンジンが子の行から親のキーを読む。
     /// </remarks>
     public string ParentReferencesBlock { get; init; } = string.Empty;
-
-    /// <summary>記述子の初期化子へ挿入する被参照テーブル名（<c>ReferencingTableNames = [...]</c>・整形済み・無ければ空文字）</summary>
-    /// <remarks>
-    /// 図の全リレーションから、このテーブルを親として参照する子テーブル（同期対象かどうかを問わない）。サーバーへの
-    /// 削除の失敗を「サーバーが削除を断った」と報告してよいかの判定材料。
-    /// </remarks>
-    public string ReferencingTableNamesBlock { get; init; } = string.Empty;
 
     /// <summary>
     /// 記述子の初期化子へ挿入する、<c>LocalReferences</c> に載らない外部キーでこの表を参照するテーブル名
@@ -227,12 +193,6 @@ internal sealed class CSharpSyncTableModel
     /// 含む）ごとに 1 本。削除伝搬は、ローカルのどの行からも参照されていない行だけを消す。
     /// </remarks>
     public string LocalReferencesBlock { get; init; } = string.Empty;
-
-    /// <summary>
-    /// 記述子の初期化子へ挿入する、一意制約ごとの引き当ての並び（<c>LocalUniqueLookups = [...]</c>＝値を読む関数と、
-    /// その値を持つローカルの行のキーを返す SELECT・整形済み・無ければ空文字）
-    /// </summary>
-    public string LocalUniqueLookupsBlock { get; init; } = string.Empty;
 }
 
 /// <summary>EF Core 用コード（DbContext と OnModelCreating の Fluent 構成）のルート生成モデル</summary>
@@ -871,17 +831,6 @@ internal sealed class CSharpRepositoryModel
 
     /// <summary>名前付きクエリのサーバー側リクエストレコード群（クラスレベルへ挿入。無ければ空文字）</summary>
     public string QueryRemoteServerRecordsBlock { get; init; } = string.Empty;
-
-    /// <summary>
-    /// 名前付きクエリの委譲メンバー群（ジャーナル記録デコレータへ挿入。無ければ空文字）。
-    /// </summary>
-    /// <remarks>
-    /// Repository 契約の構築時に組んだ 1 回目の <c>BuildQueryBlocks</c> の結果をここへ保持し、同期支援側は
-    /// 再構築せずこれを使う。同じエンティティで 2 回目を呼ぶと、ビルド全体で一意管理している射影 DTO 名の
-    /// 重複判定に自分の 1 回目が引っかかり、射影クエリだけが黙って落ちて委譲メソッドが抜ける
-    /// （＝デコレータが契約を実装しきれず CS0535）。
-    /// </remarks>
-    public string QueryDelegationBlock { get; init; } = string.Empty;
 
     /// <summary>
     /// 無制限バイナリ列の Stream アクセサの契約メンバー群（整形済み）。

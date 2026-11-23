@@ -1351,7 +1351,6 @@ internal static partial class CodegenCases
                     ("i_order", "IOrderRepository"),
                     ("in_memory_order", "InMemoryOrderRepository"),
                     ("ef_core_order", "EfCoreOrderRepository"),
-                    ("journaling_order", "JournalingOrderRepository"),
                 }
             )
             {

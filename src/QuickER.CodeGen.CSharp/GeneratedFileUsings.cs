@@ -152,8 +152,8 @@ internal static class GeneratedFileUsings
             yield return RuntimePackages.AspNetCore;
         }
 
-        // 同期支援の per-entity 生成物（記述子・デコレータ・直結差分ソース・DI）は、固定エンジン
-        // （SyncEngine・SyncJournal・SyncTable 基底）を持つ同期パッケージを参照する。
+        // 同期支援の per-entity 生成物（記述子・直結差分ソース・DI）は、固定エンジン
+        // （SyncEngine・SyncTable）を持つ同期パッケージを参照する。
         // サーバー実装ファイルも同期エンドポイントを張るとき同じパッケージを参照する
         // （ISyncServerSource と同期エンベロープ＝エンドポイントは差分ソースの薄い remoting）。
         if (
@@ -163,7 +163,21 @@ internal static class GeneratedFileUsings
         {
             yield return RuntimePackages.Sync;
         }
+
+        // 同期の登録（AddGeneratedSyncEngine）は SQLite の方言エンジンの固定の型（接続ファクトリ・ローカルの行を
+        // 読み書きする口）を名指しするので、同期のスキーマ依存物を出すファイルは SQLite の方言パッケージも参照する
+        if (SyncRegistrationNeedsSqliteEngine(spec))
+        {
+            yield return RuntimePackages.Sqlite;
+        }
     }
+
+    /// <summary>
+    /// このスペックが同期の登録（<c>AddGeneratedSyncEngine</c>）を出し、SQLite の方言エンジンの固定の型を名指しするか
+    /// （同期のスキーマ依存物を出すスペック）
+    /// </summary>
+    internal static bool SyncRegistrationNeedsSqliteEngine(GeneratedFileSpec spec) =>
+        spec.Buckets.Contains(GenerationBucket.Sync) && spec.EmitSchemaDependent;
 
     /// <summary>このスペックの方言が SQLite かどうか（ADO using の出し分けに使う）</summary>
     private static bool IsSqliteDialect(GeneratedFileSpec spec) =>
@@ -536,10 +550,10 @@ internal static class GeneratedFileUsings
                 }
                 break;
 
-            // Sync: 双方向同期の固定エンジンと per-entity の記述子・デコレータ・直結差分ソース・DI 登録。
+            // Sync: 双方向同期の固定エンジンと per-entity の記述子・直結差分ソース・DI 登録。
             //   固定エンジン: AsyncLocal（System.Threading）・非同期（System.Threading.Tasks）・
             //     集合演算とグルーピング（System.Linq / System.Collections.Generic）・
-            //     ジャーナルの記録時刻と主キーの往復書式（System / System.Globalization）・
+            //     主キーの往復書式（System / System.Globalization）・
             //     洗い替えの所要時間計測（Stopwatch＝System.Diagnostics）。
             //   per-entity: DI 登録拡張（Microsoft.Extensions.DependencyInjection）＝キー付き解決とデコレーション。
             //   同期のコード（固定エンジンも per-entity も）は ADO のドライバ・EF Core・ASP.NET Core に依存しない

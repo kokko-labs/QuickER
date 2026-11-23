@@ -615,9 +615,7 @@ internal static partial class CodegenCases
         ProbeKit
             .Type(assembly, "GeneratedSyncTables")
             .GetProperties(BindingFlags.Public | BindingFlags.Static)
-            .Where(property =>
-                property.PropertyType.GetProperty("ReferencingTableNames") is not null
-            )
+            .Where(property => property.PropertyType.GetProperty("ParentReferences") is not null)
             .Select(property => (property.Name, property.GetValue(null)!))
             .ToList();
 
@@ -910,7 +908,7 @@ internal static partial class CodegenCases
                 },
                 code:
                 [
-                    QueryText_NoTypeNamedLike("SyncEngine", "SyncJournal", "Journaling"),
+                    QueryText_NoTypeNamedLike("SyncEngine", "SyncTable", "SyncLocalTracking"),
                     NoType("RemoteSyncOperations"),
                     NoType("HttpSyncServerSource"),
                     Text_NoTypeDeclaring("AddGeneratedSyncSupport"),
@@ -965,7 +963,7 @@ internal static partial class CodegenCases
                 code:
                 [
                     Type("SyncEngine", kind: "class", modifiers: "public sealed"),
-                    Type("SyncJournal", kind: "class", modifiers: "public sealed"),
+                    Type("SyncTable", kind: "class", modifiers: "public abstract"),
                     Type("SyncTable<TEntity, TKey>", kind: "class", modifiers: "public sealed"),
                     Type(
                         "DirectSyncSource<TEntity, TKey>",
@@ -985,25 +983,19 @@ internal static partial class CodegenCases
                         "SyncTableDescriptor<SyncOrderLineEntity, int> SyncOrderLine { get; }",
                         modifiers: "public static"
                     ),
-                    Type(
-                        "JournalingSyncOrderRepository",
-                        kind: "class",
-                        modifiers: "public sealed"
-                    ),
-                    Type(
-                        "JournalingSyncOrderLineRepository",
-                        kind: "class",
-                        modifiers: "public sealed"
-                    ),
                     Member("GeneratedSyncServiceCollectionExtensions", "AddGeneratedSyncSupport"),
                     NoType("SyncOrderSyncTable"),
                     NoType("SyncOrderDirectSyncSource"),
+                    // エンジンは 1 つ：記録のジャーナル・記録のデコレータ・グラフの記録器・表の契約の型を宣言しない
+                    QueryText_NoTypeNamedLike("SyncJournal", "Journaling"),
+                    NoType("ISyncTable"),
+                    NoType("SyncGraphRecorder"),
                 ]
             ),
             QueryTextRow(
                 "probe-sync-key-text-decimal-order-key-scale",
                 SyncClass,
-                "SyncKeyText_DecimalPrimaryKey_NormalizesScale（sync_orders.order_id を decimal(10,2) にした同じ図で、探針 SyncKeyText が往復・指数表記を使わないこと・NormalizeKeyText が decimal の主キーの表だけにあることを実行で確かめる）",
+                "SyncKeyText_DecimalPrimaryKey_NormalizesScale（sync_orders.order_id を decimal(10,2) にした同じ図で、探針 SyncKeyText が往復・指数表記を使わないこと・指数表記のテキストも読むことを実行で確かめる）",
                 QueryText_SyncDecimalOrderKeyDiagram,
                 SyncFixtureDefinition.Options,
                 probes: [CodegenProbe.SyncKeyText]
@@ -1016,13 +1008,13 @@ internal static partial class CodegenCases
                 SyncFixtureDefinition.Options,
                 code:
                 [
-                    CallOrder(
+                    CreationOrder(
                         "GeneratedSyncServiceCollectionExtensions",
                         "AddGeneratedSyncEngine",
                         [
-                            "AddSyncTable<UserEntity, int, IUserRepository>",
-                            "AddSyncTable<CommentEntity, int, ICommentRepository>",
-                            "AddSyncTable<TeamEntity, int, ITeamRepository>",
+                            "SyncTable<UserEntity, int>",
+                            "SyncTable<CommentEntity, int>",
+                            "SyncTable<TeamEntity, int>",
                         ]
                     ),
                 ]
@@ -1035,14 +1027,46 @@ internal static partial class CodegenCases
                 SyncFixtureDefinition.Options,
                 code:
                 [
-                    CallOrder(
+                    CreationOrder(
                         "GeneratedSyncServiceCollectionExtensions",
                         "AddGeneratedSyncEngine",
-                        [
-                            "AddSyncTable<SyncOrderEntity, int, ISyncOrderRepository>",
-                            "AddSyncTable<SyncOrderLineEntity, int, ISyncOrderLineRepository>",
-                        ]
+                        ["SyncTable<SyncOrderEntity, int>", "SyncTable<SyncOrderLineEntity, int>"]
                     ),
+                    // 登録はエンジンを組む：開くたびの確認・ローカルの行を読み書きする口・エンジンを作り、
+                    // ローカルの接続ファクトリの登録を確認つきの包みへ差し替える
+                    Creates(
+                        "GeneratedSyncServiceCollectionExtensions",
+                        "AddGeneratedSyncEngine",
+                        "SyncLocalTrackingGuard",
+                        ["synchronised"]
+                    ),
+                    Creates(
+                        "GeneratedSyncServiceCollectionExtensions",
+                        "AddGeneratedSyncEngine",
+                        "SqliteLocalRowStore",
+                        ["?"]
+                    ),
+                    Creates(
+                        "GeneratedSyncServiceCollectionExtensions",
+                        "AddGeneratedSyncEngine",
+                        "SyncEngine",
+                        ["tables"]
+                    ),
+                    Calls(
+                        "GeneratedSyncServiceCollectionExtensions",
+                        "AddGeneratedSyncEngine",
+                        "ObserveLocalConnections",
+                        count: 1
+                    ),
+                    Creates(
+                        "GeneratedSyncServiceCollectionExtensions",
+                        "ObserveLocalConnections",
+                        "ObservedSqlConnectionFactory",
+                        ["?", "?"],
+                        count: 2
+                    ),
+                    NoMember("GeneratedSyncServiceCollectionExtensions", "AddSyncTable"),
+                    NoMember("GeneratedSyncServiceCollectionExtensions", "Decorate"),
                 ]
             ),
             QueryTextRow(
@@ -1132,81 +1156,14 @@ internal static partial class CodegenCases
                                     problems.Add($"{name}: IsVersionless が true でない");
                                 }
 
-                                foreach (var sql in new[] { "ServerChangesSql", "LocalAnchorSql" })
+                                if (ProbeKit.Get(descriptor, "ServerChangesSql") is not "")
                                 {
-                                    if (ProbeKit.Get(descriptor, sql) is not "")
-                                    {
-                                        problems.Add($"{name}: {sql} が未設定でない");
-                                    }
+                                    problems.Add($"{name}: ServerChangesSql が未設定でない");
                                 }
                             }
 
                             return problems;
                         }
-                    ),
-                ]
-            ),
-            QueryTextRow(
-                "code-sync-decorator-journals-unbounded-binary-writes",
-                SyncClass,
-                "SyncDecorator_JournalsUnboundedBinaryWrites",
-                SyncFixtureDefinition.Build,
-                SyncFixtureDefinition.Options,
-                code:
-                [
-                    // 読みは素通し（記録しない）
-                    Member(
-                        "JournalingSyncOrderRepository",
-                        "ReadAttachmentAsync",
-                        "Task<bool> ReadAttachmentAsync(int id, Stream destination, CancellationToken cancellationToken = default(CancellationToken))",
-                        modifiers: "public"
-                    ),
-                    Calls(
-                        "JournalingSyncOrderRepository",
-                        "ReadAttachmentAsync",
-                        "ISyncOrderRemoteRepository.ReadAttachmentAsync",
-                        count: 1
-                    ),
-                    CallArguments(
-                        "JournalingSyncOrderRepository",
-                        "ReadAttachmentAsync",
-                        "ISyncOrderRemoteRepository.ReadAttachmentAsync",
-                        ["id", "destination", "cancellationToken"],
-                        receiver: "_inner"
-                    ),
-                    Calls(
-                        "JournalingSyncOrderRepository",
-                        "ReadAttachmentAsync",
-                        "RecordUnboundedBinaryWriteAsync",
-                        count: 0
-                    ),
-                    // 書きは journal-first で包み、その中で実書き込みを呼ぶ
-                    Member(
-                        "JournalingSyncOrderRepository",
-                        "WriteAttachmentAsync",
-                        "Task<bool> WriteAttachmentAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default(CancellationToken))",
-                        modifiers: "public"
-                    ),
-                    Calls(
-                        "JournalingSyncOrderRepository",
-                        "WriteAttachmentAsync",
-                        "RecordUnboundedBinaryWriteAsync",
-                        count: 1
-                    ),
-                    Calls(
-                        "JournalingSyncOrderRepository",
-                        "WriteAttachmentAsync",
-                        "ISyncOrderRemoteRepository.WriteAttachmentAsync",
-                        count: 1
-                    ),
-                    // 実書き込みは記録の呼び出しの引数（ラムダ）の中で、引数をそのまま内側へ渡す
-                    CallArguments(
-                        "JournalingSyncOrderRepository",
-                        "WriteAttachmentAsync",
-                        "ISyncOrderRemoteRepository.WriteAttachmentAsync",
-                        ["id", "source", "length", "cancellationToken"],
-                        receiver: "_inner",
-                        within: "RecordUnboundedBinaryWriteAsync"
                     ),
                 ]
             ),
@@ -1274,11 +1231,6 @@ internal static partial class CodegenCases
                                 );
                             }
 
-                            if (QueryText_Strings(line, "ReferencingTableNames").Count != 0)
-                            {
-                                problems.Add("SyncOrderLine の ReferencingTableNames が空でない");
-                            }
-
                             if (
                                 ((IEnumerable)ProbeKit.Get(order, "ParentReferences")!)
                                     .Cast<object>()
@@ -1286,15 +1238,6 @@ internal static partial class CodegenCases
                             )
                             {
                                 problems.Add("SyncOrder の ParentReferences が空でない");
-                            }
-
-                            var referencing = QueryText_Strings(order, "ReferencingTableNames");
-
-                            if (!referencing.SequenceEqual(["sync_order_lines", "sync_notes"]))
-                            {
-                                problems.Add(
-                                    $"SyncOrder の ReferencingTableNames が [{string.Join(", ", referencing)}]"
-                                );
                             }
 
                             if (
@@ -1356,22 +1299,6 @@ internal static partial class CodegenCases
                             if (!noSelf.Contains(("sync_orders", (string?)null)))
                             {
                                 problems.Add("ParentOrderId が null の行の親のキーが null でない");
-                            }
-
-                            var referencing = QueryText_Strings(order, "ReferencingTableNames");
-
-                            if (
-                                !referencing.SequenceEqual([
-                                    "sync_order_lines",
-                                    "sync_notes",
-                                    "sync_orders",
-                                    "sync_tags",
-                                ])
-                            )
-                            {
-                                problems.Add(
-                                    $"SyncOrder の ReferencingTableNames が [{string.Join(", ", referencing)}]"
-                                );
                             }
 
                             var unlisted = QueryText_Strings(
@@ -3324,15 +3251,6 @@ internal static partial class CodegenCases
 
     // ===== SyncSupportGenerationTests：宣言・呼び出し・生成するオブジェクト・記述子・SQLite での実行へ移した分 =====
 
-    /// <summary>SyncSupportGenerationTests.SyncSql_DottedTableName_QuotesAtFirstDotOnly の図（sync_orders を dbo.sync.orders へ改名）</summary>
-    private static ErDiagram QueryText_SyncDottedTableDiagram()
-    {
-        var diagram = SyncFixtureDefinition.Build();
-        diagram.Entities.First(entity => entity.TableName == "sync_orders").TableName =
-            "dbo.sync.orders";
-        return diagram;
-    }
-
     /// <summary>名前 <paramref name="typeName"/> の型の宣言の構文木に、単純名 <paramref name="identifier"/> の識別子が 1 つも現れない</summary>
     private static CodeRule QueryText_TypeHasNoIdentifier(string typeName, string identifier) =>
         NoTypes(
@@ -3379,70 +3297,6 @@ internal static partial class CodegenCases
             }
         );
 
-    /// <summary>テーブル名 <paramref name="tableName"/> の記述子の、SQLite 側の SQL（<c>Local*Sql</c>）をすべて実際の SQLite で流す（別 DB を dbo として付けた中に表を作る）</summary>
-    private static ExecCheck QueryText_SyncLocalSqlOnSqlite(string tableName, string quotedTable) =>
-        new(
-            "local-sql-runs-on-sqlite",
-            assembly =>
-            {
-                var descriptor = QueryText_SyncDescriptors(assembly)
-                    .Single(item =>
-                        (string)ProbeKit.Get(item.Descriptor, "TableName")! == tableName
-                    )
-                    .Descriptor;
-                using var connection = new Microsoft.Data.Sqlite.SqliteConnection(
-                    "Data Source=:memory:"
-                );
-                connection.Open();
-
-                void Run(string sql)
-                {
-                    using var command = connection.CreateCommand();
-                    command.CommandText = sql;
-                    command.Parameters.AddWithValue("@key", 1);
-                    command.Parameters.AddWithValue("@keys", 1);
-                    command.ExecuteNonQuery();
-                }
-
-                Run("ATTACH DATABASE ':memory:' AS dbo");
-                Run(
-                    $"CREATE TABLE {quotedTable} (order_id INTEGER PRIMARY KEY, customer_name TEXT, row_ver BLOB, summary TEXT, attachment BLOB)"
-                );
-                var problems = new List<string>();
-
-                foreach (
-                    var property in new[]
-                    {
-                        "LocalAnchorSql",
-                        "LocalRowVersionSql",
-                        "LocalKeysSql",
-                        "LocalExistingKeysSql",
-                        "LocalDeleteAllSql",
-                    }
-                )
-                {
-                    var sql = (string)ProbeKit.Get(descriptor, property)!;
-
-                    if (!sql.Contains(quotedTable, StringComparison.Ordinal))
-                    {
-                        problems.Add($"{property} が表 {quotedTable} を指さない: {sql}");
-                        continue;
-                    }
-
-                    try
-                    {
-                        Run(sql);
-                    }
-                    catch (Microsoft.Data.Sqlite.SqliteException ex)
-                    {
-                        problems.Add($"{property} が SQLite で実行できない（{ex.Message}）: {sql}");
-                    }
-                }
-
-                return problems;
-            }
-        );
-
     /// <summary>引用の要る名前の注文の表の名前（" と ' と空白を含む）</summary>
     private const string QueryText_QuotedOrdersTable = "sync \"o'rd\" ers";
 
@@ -3463,82 +3317,6 @@ internal static partial class CodegenCases
             QueryText_QuotedAttachment;
         return diagram;
     }
-
-    /// <summary>
-    /// 表名 <paramref name="tableName"/> の記述子が別の DB に置いた表を名乗り、ローカルの変更の記録の入口
-    /// （<c>SyncLocalTracking.TriggersFor</c>・<c>SyncLocalTrackingGuard</c> の作成）が <see cref="NotSupportedException"/> で断る
-    /// </summary>
-    private static ExecCheck QueryText_SyncTrackingRefusesAttachedDatabase(string tableName) =>
-        new(
-            "local-tracking-refuses-attached-database",
-            assembly =>
-            {
-                var descriptor = QueryText_SyncDescriptors(assembly)
-                    .Single(item =>
-                        (string)ProbeKit.Get(item.Descriptor, "TableName")! == tableName
-                    )
-                    .Descriptor;
-                var problems = new List<string>();
-                var database = (string?)ProbeKit.Get(descriptor, "LocalDatabaseName");
-                var table = (string)ProbeKit.Get(descriptor, "LocalTableName")!;
-
-                if (database != "dbo")
-                {
-                    problems.Add($"LocalDatabaseName が {database ?? "null"}（期待 dbo）");
-                }
-
-                if (table != "sync.orders")
-                {
-                    problems.Add($"LocalTableName が {table}（期待 sync.orders）");
-                }
-
-                void ExpectRefusal(string entrance, Action call)
-                {
-                    try
-                    {
-                        call();
-                        problems.Add($"{entrance} が断らない");
-                    }
-                    catch (TargetInvocationException ex)
-                        when (ex.InnerException is NotSupportedException refusal)
-                    {
-                        if (
-                            !refusal.Message.Contains($"'{tableName}'", StringComparison.Ordinal)
-                            || !refusal.Message.Contains(
-                                "attached database 'dbo'",
-                                StringComparison.Ordinal
-                            )
-                        )
-                        {
-                            problems.Add(
-                                $"{entrance} の文が表の名前と別の DB に置いた表の趣旨を持たない: {refusal.Message}"
-                            );
-                        }
-                    }
-                }
-
-                var descriptors = QueryText_DescriptorList(assembly, descriptor);
-                ExpectRefusal(
-                    "SyncLocalTracking.TriggersFor",
-                    () =>
-                        ProbeKit.CallStatic(
-                            ProbeKit.Type(assembly, "SyncLocalTracking"),
-                            "TriggersFor",
-                            descriptor
-                        )
-                );
-                ExpectRefusal(
-                    "new SyncLocalTrackingGuard",
-                    () =>
-                        ProbeKit.Create(
-                            ProbeKit.Type(assembly, "SyncLocalTrackingGuard"),
-                            descriptors
-                        )
-                );
-
-                return problems;
-            }
-        );
 
     /// <summary>記述子を <c>ISyncTableDescriptor</c> の配列（<c>IReadOnlyList&lt;ISyncTableDescriptor&gt;</c> として渡せる形）にする</summary>
     private static Array QueryText_DescriptorList(Assembly assembly, params object[] descriptors)
@@ -5311,7 +5089,6 @@ internal static partial class CodegenCases
     {
         const string endpoints = "GeneratedRemoteEndpoints";
         const string extensions = "GeneratedSyncServiceCollectionExtensions";
-        const string journalingBase = "JournalingRepositoryBase<TEntity, TKey>";
 
         return
         [
@@ -5446,28 +5223,6 @@ internal static partial class CodegenCases
                         "SyncNoteEntity,Int32:ISyncServerSource<SyncNoteEntity, int>"
                     ),
                 ]
-            ),
-            QueryTextRow(
-                "exec-sync-dotted-table-name-local-sql-quotes-at-first-dot",
-                SyncClass,
-                "SyncSql_DottedTableName_QuotesAtFirstDotOnly（SQLite 側の SQL を、別 DB を dbo として付けた SQLite で実際に流す：最初のドットだけで分割クォートした表を指す。SQL Server 側の SQL の断片は元に残す）",
-                QueryText_SyncDottedTableDiagram,
-                SyncFixtureDefinition.Options,
-                exec: [QueryText_SyncLocalSqlOnSqlite("dbo.sync.orders", "\"dbo\".\"sync.orders\"")]
-            ),
-            new(
-                "exec-sync-dotted-table-name-local-tracking-refuses-attached-database",
-                null,
-                "最初のドットの前を別の DB の名前とする表（dbo.sync.orders）の記述子は、LocalDatabaseName が dbo・LocalTableName が "
-                    + "sync.orders で、ローカルの変更の記録（SyncLocalTracking.TriggersFor と SyncLocalTrackingGuard の作成）は、"
-                    + "表の名前と別の DB に置いた表である趣旨の文で NotSupportedException を投げる",
-                new CodegenCase(
-                    QueryText_SyncDottedTableDiagram,
-                    SyncFixtureDefinition.Options,
-                    DialectNames.SqlServer,
-                    DiagnosticExpectation.Contains(),
-                    Exec: [QueryText_SyncTrackingRefusesAttachedDatabase("dbo.sync.orders")]
-                )
             ),
             new(
                 "exec-sync-quoted-names-local-tracking-records-on-sqlite",
@@ -5683,164 +5438,28 @@ internal static partial class CodegenCases
                 )
             ),
             QueryTextRow(
-                "code-sync-journaling-decorator-covers-every-write-entry-point",
-                SyncClass,
-                "JournalingDecorator_CoversEveryWriteEntryPoint（全書き込み入口の記録・読み取りの素通し・削除前の読み・per-type の委譲・SyncGraphRecorder の走査。RowState の比較の向きは元に残す）",
-                SyncFixtureDefinition.Build,
-                SyncFixtureDefinition.Options,
-                code:
-                [
-                    Type(journalingBase, kind: "class", modifiers: "public abstract"),
-                    // 書き込み入口の網羅：どの入口も記録と業務書き込みを RecordAndWriteAsync（ローカルの書き込みロックの内側で 1 組）へ渡す
-                    Member(
-                        journalingBase,
-                        "InsertAsync",
-                        "Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default(CancellationToken))",
-                        modifiers: "public async"
-                    ),
-                    Member(
-                        journalingBase,
-                        "UpdateAsync",
-                        "Task<bool> UpdateAsync(TEntity entity, ConcurrencyMode mode = Optimistic, CancellationToken cancellationToken = default(CancellationToken))",
-                        modifiers: "public"
-                    ),
-                    Member(
-                        journalingBase,
-                        "BulkInsertAsync",
-                        "Task<int> BulkInsertAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default(CancellationToken))",
-                        modifiers: "public"
-                    ),
-                    Member(
-                        journalingBase,
-                        "DeleteAsync",
-                        "Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default(CancellationToken))",
-                        modifiers: "public"
-                    ),
-                    Member(journalingBase, "SaveAsync", modifiers: "public", count: 2),
-                    Calls(journalingBase, "InsertAsync", "RecordAndWriteAsync", count: 1),
-                    Calls(journalingBase, "UpdateAsync", "RecordAndWriteAsync", count: 1),
-                    Calls(journalingBase, "BulkInsertAsync", "RecordAndWriteAsync", count: 1),
-                    Calls(journalingBase, "DeleteAsync", "RecordAndWriteAsync", count: 1),
-                    Calls(journalingBase, "SaveAsync", "RecordAndWriteAsync", count: 2),
-                    Calls(
-                        journalingBase,
-                        "RecordUnboundedBinaryWriteAsync",
-                        "RecordAndWriteAsync",
-                        count: 1
-                    ),
-                    Calls(journalingBase, "RecordAndWriteAsync", "WriteExclusiveAsync", count: 1),
-                    // グラフ保存はカスケード閉包の記録（SyncGraphRecorder）を先に呼ぶ
-                    Calls(
-                        journalingBase,
-                        "SaveAsync",
-                        "SyncGraphRecorder.RecordSaveAsync",
-                        count: 1
-                    ),
-                    Calls(journalingBase, "SaveAsync", "SyncGraphRecorder.CollectSave", count: 1),
-                    // 読み取り経路は素通し（記録しない）
-                    Calls(journalingBase, "Query", "Query", count: 1),
-                    // 削除は「行が消える前に読む」ことでミラー版を捕まえ、版ガード付きで再生できるようにする（版ありサブクラス基底の担当）
-                    Calls(
-                        "JournalingRepository<TEntity, TKey>",
-                        "RecordDeleteAsync",
-                        "GetByIdAsync",
-                        count: 1
-                    ),
-                    ReferencesSymbol(
-                        "JournalingRepository<TEntity, TKey>",
-                        "RecordDeleteAsync",
-                        "SyncJournalOperation.Delete"
-                    ),
-                    // per-type はテーブルの記述子と共有レコーダを基底へ渡すだけ
-                    Type(
-                        "JournalingSyncOrderRepository",
-                        kind: "class",
-                        baseType: "JournalingRepository<SyncOrderEntity, int>"
-                    ),
-                    ReferencesSymbol(
-                        "JournalingSyncOrderRepository",
-                        ".ctor",
-                        "GeneratedSyncTables.SyncOrder"
-                    ),
-                    ReferencesSymbol(
-                        "JournalingSyncOrderRepository",
-                        ".ctor",
-                        "GeneratedSyncTables.GraphRecorder"
-                    ),
-                    // テーブル名・キー整形・グラフ記録の委譲は汎用コアが記述子から引く（per-type には出ない）
-                    NoMember("JournalingSyncOrderRepository", "TableName"),
-                    ReferencesSymbol(
-                        "JournalingSyncOrderRepository",
-                        null,
-                        "SyncGraphRecorder.RecordSaveAsync",
-                        present: false
-                    ),
-                    // 重複事前チェックはランタイム共通面の member なので、素通しは汎用コア側が 1 回だけ持つ
-                    NoMember("JournalingSyncOrderRepository", "CheckUniquenessAsync"),
-                    Member(
-                        journalingBase,
-                        "CheckUniquenessAsync",
-                        "Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(TEntity entity, CancellationToken cancellationToken = default(CancellationToken))",
-                        modifiers: "public"
-                    ),
-                    // SyncGraphRecorder：走査は保存側と同じ 1 つの列挙（EntityBaseCore.EnumerateCascadeChildren）で、テーブルごとの再帰メソッドではない
-                    Calls("SyncGraphRecorder", "CollectSave", "EnumerateCascadeChildren", count: 1),
-                    ReferencesSymbol("SyncGraphRecorder", null, "SyncJournalOperation.Delete"),
-                    ReferencesSymbol("SyncGraphRecorder", "CollectSave", "RowState.Removed"),
-                    ReferencesSymbol("SyncGraphRecorder", "CollectSave", "RowState.Unchanged"),
-                    QueryText_TypeHasNoIdentifier("SyncGraphRecorder", "SyncOrderEntity"),
-                ]
-            ),
-            QueryTextRow(
-                "code-sync-session-suppresses-journaling-for-engine-writes",
-                SyncClass,
-                "SyncEngine_SuppressesJournalingForItsOwnWrites（SyncSession の宣言と、エンジンの書き込み経路・ジャーナル記録の双方が参照すること。if / using の文の形は元に残す）",
-                SyncFixtureDefinition.Build,
-                SyncFixtureDefinition.Options,
-                code:
-                [
-                    Type("SyncSession", kind: "class", modifiers: "public static"),
-                    Member(
-                        "SyncSession",
-                        "IsSuppressed",
-                        "bool IsSuppressed { get; }",
-                        modifiers: "public static"
-                    ),
-                    Member(
-                        "SyncSession",
-                        "Suppress",
-                        "IDisposable Suppress()",
-                        modifiers: "public static"
-                    ),
-                    ReferencesSymbol("SyncTableBase<TEntity, TKey>", null, "SyncSession.Suppress"),
-                    ReferencesSymbol(
-                        journalingBase,
-                        "RecordAndWriteAsync",
-                        "SyncSession.IsSuppressed"
-                    ),
-                ]
-            ),
-            QueryTextRow(
                 "code-sync-mixed-diagram-versionless-shapes",
                 SyncClass,
-                "MixedDiagram_EmitsVersionlessShapes（版なしテーブルの記述子・登録・ソース・デコレータの形。サーバーのエンドポイントの選別は行 code-sync-versionless-endpoint-map-with-versionless-table〔同じ図〕が見る。SQL Server の SQL の断片は元に残す）",
+                "MixedDiagram_EmitsVersionlessShapes（版なしテーブルの記述子・登録・ソースの形。サーバーのエンドポイントの選別は行 code-sync-versionless-endpoint-map-with-versionless-table〔同じ図〕が見る。SQL Server の SQL の断片は元に残す）",
                 SyncFixtureDefinition.Build,
                 SyncFixtureDefinition.Options,
                 code:
                 [
-                    // ① 登録側が記述子の版の有無で固定クラスを選ぶ
+                    // ① 登録側は版の有無に依らず、版なしの表も版ありの表も同じ SyncTable<E, K> で作る（表ごとに 1 つ）
                     Creates(
                         extensions,
-                        "AddSyncTable",
-                        "VersionlessSyncTable<TEntity, TKey>",
-                        ["local", "localSqlExecutor", "server", "descriptor", "localSaveHooks"]
+                        "AddGeneratedSyncEngine",
+                        "SyncTable<SyncNoteEntity, int>",
+                        ["GeneratedSyncTables.SyncNote", "?", "rows"]
                     ),
                     Creates(
                         extensions,
-                        "AddSyncTable",
-                        "SyncTable<TEntity, TKey>",
-                        ["local", "localSqlExecutor", "server", "descriptor", "localSaveHooks"]
+                        "AddGeneratedSyncEngine",
+                        "SyncTable<SyncOrderEntity, int>",
+                        ["GeneratedSyncTables.SyncOrder", "?", "rows"]
                     ),
+                    // 同期する 4 表（版なしの sync_notes を含む）を、どれも SyncTable で作る
+                    Creates(extensions, "AddGeneratedSyncEngine", "SyncTable", count: 4),
                     Creates(
                         extensions,
                         "AddDirectSource",
@@ -5859,25 +5478,13 @@ internal static partial class CodegenCases
                         "FromResult<byte[]?>",
                         count: 1
                     ),
-                    // ③ 版なしデコレータは版なし基底を継承し、版ありデコレータは版あり基底を継承する
-                    Type(
-                        "JournalingSyncNoteRepository",
-                        kind: "class",
-                        baseType: "VersionlessJournalingRepository<SyncNoteEntity, int>"
-                    ),
-                    NoMember("JournalingSyncNoteRepository", "ReadRowVersion"),
-                    Type(
-                        "JournalingSyncOrderRepository",
-                        kind: "class",
-                        baseType: "JournalingRepository<SyncOrderEntity, int>"
-                    ),
                 ],
                 exec: [QueryText_SyncVersionShapes()]
             ),
             QueryTextRow(
                 "code-sync-binary-columns-implemented-on-three-surfaces",
                 SyncClass,
-                "SyncBinaryColumns_AreImplementedOnAllThreeSurfaces（除外列のコピー面：記述子のアクセサ・ローカル・直結・HTTP の 3 実装。HTTP の BinaryColumns の条件式は元に残す）",
+                "SyncBinaryColumns_AreImplementedOnAllThreeSurfaces（除外列のコピー面：記述子のアクセサ・直結・HTTP。HTTP の BinaryColumns の条件式は元に残す）",
                 SyncFixtureDefinition.Build,
                 SyncFixtureDefinition.Options,
                 code:
@@ -5894,13 +5501,6 @@ internal static partial class CodegenCases
                         "SyncOrder",
                         "ISyncOrderRemoteRepository.WriteAttachmentAsync",
                         ["id", "source", "length", "cancellationToken"]
-                    ),
-                    // ローカル（記述子側）：同じ表をローカルリポジトリの上で開く
-                    Creates(
-                        "SyncTableBase<TEntity, TKey>",
-                        ".ctor",
-                        "SyncRepositoryBinaryColumns<TEntity, TKey>",
-                        ["descriptor", "local"]
                     ),
                     // 直結サーバー：同じ表をサーバーリポジトリ（＝Writer）の上で開く
                     Creates(

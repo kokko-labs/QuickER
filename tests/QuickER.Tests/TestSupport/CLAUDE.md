@@ -38,7 +38,7 @@
 - 既存の 7 エンジン（同期のモデル・同期計画・実装先の一致・簡易 DSL・名前・ツールの引数・Undo）は、核の部品を通す。変数名・既定の種の数・開始番号は変えていない。
 - 種の解析は `SeedSource`。各エンジンが `SeedSettings` を持つ（`SyncModelRuntimeTests.Seeds`・`SyncModelSignatures.Seeds`・`SyncPlanFuzzTestsBase.SeedSettingsFor`・`BackendParityRuntimeTests.Seeds`・`NameFuzz.SeedSettings`〔簡易 DSL と共有〕）。
 - 既知の失敗は `KnownFailureSet`。一覧を持つクラスの名前は残した。
-  - 同期のモデルの一覧は端末のエンジンごとに持つ。新しいエンジンの端末（決定的なシナリオの Theory と直結の乱数）は `SyncModelKnownFailures.EngineSet`（空）、転送の乱数は `SyncModelEngineTransports.Known`（空）、SQL Server でだけ起きる失敗は `SyncModelEngineTransports.SqlServerOnly`（空）。今のエンジンの端末（控えと直結の乱数）は `SyncModelKnownFailures.Set`：決定的な項目 `Scenarios` の Family から乱数の項目を作り、乱数の項目はどれも再現を保証しない（NotGuaranteed）。
+  - 同期のモデルの一覧：エンジンの端末（決定的なシナリオの Theory と直結の乱数）は `SyncModelKnownFailures.EngineSet`（空）、転送の乱数は `SyncModelEngineTransports.Known`（空）、SQL Server でだけ起きる失敗は `SyncModelEngineTransports.SqlServerOnly`（空）。乱数の項目は決定的な項目の Family（`SyncModelRuntimeTests.Family`）から作る。
   - `SyncPlanFuzzKnownFailures.Set`：範囲は方言。述語は `Source` の `FuzzSeedOutcome` を読む。
   - `BackendParityKnownDifferences.Set`：範囲はシナリオ、署名は「実装先:観点」。受け入れた差は Accepted。
   - `NameFuzzKnownFailures.Set` / `DslFuzzKnownFailures.Set`：観測は `FuzzFailureLog` が集め、項目は `FuzzFailureKey.Known`。

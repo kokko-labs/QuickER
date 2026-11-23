@@ -66,19 +66,6 @@ internal static class SyncModelScenarioParts
         return calls;
     }
 
-    /// <summary>
-    /// その転送の Theory の端末が新しいエンジンか（真の転送の Theory は、今のエンジンだけの印
-    /// <see cref="SyncModelScenario.CurrentEngineOnly"/> のある行を流さない）。どの転送の Theory も新しいエンジンの端末
-    /// （<see cref="SyncModelEngineDevice"/>）で流すので、いつも真。今のエンジンの端末で決定的なシナリオを流すのは控えの Fact
-    /// （<see cref="SyncSupportAdoSqliteCurrentEngineRuntimeTests"/>）だけ
-    /// </summary>
-    public static bool RunsNewEngine(SyncModelTransport transport) => true;
-
-    /// <summary>その転送の Theory がシナリオを流すか</summary>
-    public static bool Runs(SyncModelScenario scenario, SyncModelTransport transport) =>
-        scenario.RunsOn(transport)
-        && !(RunsNewEngine(transport) && scenario.CurrentEngineOnly is not null);
-
     /// <summary>転送で流すシナリオのうち、<paramref name="part"/> 番目（0 から）のクラスが受け持つものの名前</summary>
     public static TheoryData<string> Names(SyncModelTransport transport, int part)
     {
@@ -93,7 +80,7 @@ internal static class SyncModelScenarioParts
         };
         var data = new TheoryData<string>();
         var names = SyncModelScenarios
-            .All.Where(s => Runs(s, transport))
+            .All.Where(s => s.RunsOn(transport))
             .Select(s => s.Name)
             .Where((_, index) => index % parts == part);
 

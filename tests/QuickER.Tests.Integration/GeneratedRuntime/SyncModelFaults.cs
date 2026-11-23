@@ -38,10 +38,6 @@ internal enum ModelFaultKind
     /// 入れずに作り、フックが操作のキーを入れる＝記録はキーの無い形で付き、保存の後に新しいキーへ書き直される）
     /// </summary>
     HookAssignKey,
-
-    /// <summary>端末の同期中の、エンジンがローカルへ行を適用するときの Before フックが false を返す（その行を飛ばす）</summary>
-    /// <remarks>乱数の操作の列には混ぜない（既存の種の操作の列を変えないため）。決定的なシナリオだけが使う。</remarks>
-    ApplySkip,
 }
 
 /// <summary>
@@ -49,10 +45,9 @@ internal enum ModelFaultKind
 /// この時点に来たときに 1 回だけ、実行と別の流れからローカルの書き込みを差し込む。
 /// </summary>
 /// <remarks>
-/// どの点も、エンジンがローカルの書き込みロックを持っていない時点に置く。端末の割り込みの書き込みはジャーナル記録のデコレータの
-/// 書き込みロックを待つので、ロックの中に差し込むと互いに待ち合って止まる（エンジンが行の適用・未送信の読み直しをする区間には
-/// 差し込めない）。洗い替えはロックを持ったまま全体を流すので、端末の割り込みは起きない。サーバーの他者の書き込みはローカルの
-/// ロックを待たないので、洗い替えの取得の前後にも差し込む。
+/// どの点も、エンジンが端末の DB のトランザクションを開いていない時点（サーバーを待つ間）に置く。端末の割り込みの書き込みは
+/// 端末の DB の書き込みのロックを待つので、適用のトランザクションの中に差し込むと互いに待ち合って止まる。端末の書き手も
+/// サーバーの他者も、同期と洗い替えのどちらにも差し込む。
 /// </remarks>
 internal enum ModelInterruptPoint
 {
@@ -131,7 +126,6 @@ internal sealed class SyncModelFaults
     {
         _armed.Clear();
         _emptyFetches.Clear();
-        _applySkips.Clear();
         _hookBlobWrite = null;
 
         lock (_interruptLock)
@@ -151,7 +145,6 @@ internal sealed class SyncModelFaults
         {
             var pending = _armed.Select(armed => armed.Kind.ToString()).ToList();
             pending.AddRange(_emptyFetches.Select(_ => "EmptyFetch"));
-            pending.AddRange(_applySkips.Select(_ => nameof(ModelFaultKind.ApplySkip)));
 
             if (_hookBlobWrite is not null)
             {
@@ -168,7 +161,6 @@ internal sealed class SyncModelFaults
     // 決定的なシナリオだけが仕掛ける口（ModelFaultKind に値を足さない＝生成器は Enum.GetValues で失敗の種類を選ぶので、
     // 足すと種の指紋が変わる）
     private readonly HashSet<(ModelActor Device, string Table)> _emptyFetches = [];
-    private readonly HashSet<(ModelActor Device, string Table, string Key)> _applySkips = [];
     private (
         ModelActor Device,
         int? Target,
@@ -189,30 +181,6 @@ internal sealed class SyncModelFaults
             Syncing is { } device
             && _emptyFetches.Remove((device, ModelTables.TableOf(entityType)))
         )
-        {
-            Fired++;
-
-            return true;
-        }
-
-        return false;
-    }
-
-    /// <summary>端末の同期の適用で、その行の保存をローカルの Before フックが 1 回飛ばす（<see cref="ArmApplySkipOp"/>）</summary>
-    public void ArmApplySkip(ModelActor device, string table, string key) =>
-        _applySkips.Add((device, table, key));
-
-    /// <summary>ローカルの Before フックの入口で呼ぶ（その行の適用の飛ばしが仕掛けてあれば true）</summary>
-    public bool TakeApplySkipFor(object entity)
-    {
-        if (Syncing is not { } device || Writing is not null)
-        {
-            return false;
-        }
-
-        var (table, key) = ModelEntityKeys.Of(entity);
-
-        if (_applySkips.Remove((device, table, key)))
         {
             Fired++;
 
@@ -396,11 +364,6 @@ internal sealed class SyncModelFaults
         Func<Task> Write
     )? _interrupt;
 
-    /// <summary>
-    /// いま洗い替えを流しているか（洗い替えはロックを持ったまま流すので、端末の割り込みを起こさない。サーバーの他者の割り込みは起こす）
-    /// </summary>
-    public bool Refreshing { get; set; }
-
     /// <summary>仕掛けたまま、まだ起きていない割り込みの点（無ければ null）</summary>
     public ModelInterruptPoint? PendingInterrupt
     {
@@ -424,7 +387,7 @@ internal sealed class SyncModelFaults
 
     /// <summary>
     /// 割り込みを仕掛ける（端末の次の同期か洗い替えがその点に来たときに 1 回だけ、<paramref name="write"/> を実行と別の流れで流す。
-    /// 同時に仕掛けられるのは 1 つだけ。<paramref name="writer"/> がその端末なら洗い替えの間は起こさない）
+    /// 同時に仕掛けられるのは 1 つだけ。<paramref name="writer"/> はその端末かサーバーの他者で、同期・洗い替えのどちらでも起こす）
     /// </summary>
     public void ArmInterrupt(
         ModelActor device,
@@ -462,7 +425,6 @@ internal sealed class SyncModelFaults
                 || _interrupt is not { } armed
                 || armed.Device != device
                 || armed.Point != point
-                || Refreshing && armed.Writer != ModelActor.Server
             )
             {
                 return;
@@ -599,11 +561,7 @@ internal sealed class SyncModelHook<TEntity>(
         CancellationToken cancellationToken = default
     )
     {
-        if (
-            faults.TryFireHookSkip(entity)
-            || faults.TryFire(ModelFaultKind.ApplySkip, faults.Syncing)
-            || faults.TakeApplySkipFor(entity)
-        )
+        if (faults.TryFireHookSkip(entity))
         {
             return Task.FromResult(false);
         }
@@ -690,90 +648,4 @@ internal sealed class SyncModelFailingStream(byte[] content) : Stream
 
     public override void Write(byte[] buffer, int offset, int count) =>
         throw new NotSupportedException();
-}
-
-/// <summary>
-/// 外部の <see cref="ISyncTable"/> 実装の代役（公開の面だけを転送する包み）。
-/// </summary>
-/// <remarks>
-/// エンジンの内部の面（internal のインターフェイス・ダウンロードの文脈の internal なメンバー）は持たないので、利用者が
-/// 自分で書いた実装と同じく、公開の面だけで動く。ダウンロードの文脈は公開のメンバー（未送信のキー・受理記録）だけを
-/// 写して渡す。
-/// </remarks>
-internal sealed class SyncModelExternalTable(ISyncTable inner) : ISyncTable
-{
-    public string TableName => inner.TableName;
-
-    public Type EntityType => inner.EntityType;
-
-    public bool IsVersionless => inner.IsVersionless;
-
-    public IReadOnlyList<string> UnboundedBinaryColumnNames => inner.UnboundedBinaryColumnNames;
-
-    public Task<byte[]?> GetChangeCeilingAsync(CancellationToken cancellationToken = default) =>
-        inner.GetChangeCeilingAsync(cancellationToken);
-
-    public Task<int> DownloadAsync(
-        byte[]? ceiling,
-        int batchSize,
-        bool includeUnboundedBinary,
-        CancellationToken cancellationToken = default
-    ) => inner.DownloadAsync(ceiling, batchSize, includeUnboundedBinary, cancellationToken);
-
-    public Task<SyncDownloadOutcome> DownloadAsync(
-        byte[]? ceiling,
-        int batchSize,
-        bool includeUnboundedBinary,
-        SyncDownloadContext context,
-        CancellationToken cancellationToken = default
-    ) =>
-        inner.DownloadAsync(
-            ceiling,
-            batchSize,
-            includeUnboundedBinary,
-            new SyncDownloadContext
-            {
-                PendingKeyTexts = context.PendingKeyTexts,
-                AcknowledgedRowVersions = context.AcknowledgedRowVersions,
-            },
-            cancellationToken
-        );
-
-    public Task<IReadOnlyList<SyncAppliedServerRow>> ApplyServerRowsAsync(
-        IReadOnlyList<string> keyTexts,
-        bool includeUnboundedBinary,
-        CancellationToken cancellationToken = default
-    ) => inner.ApplyServerRowsAsync(keyTexts, includeUnboundedBinary, cancellationToken);
-
-    public Task<IReadOnlyList<string>> PropagateDeletesAsync(
-        IReadOnlySet<string> pendingKeyTexts,
-        CancellationToken cancellationToken = default
-    ) => inner.PropagateDeletesAsync(pendingKeyTexts, cancellationToken);
-
-    public Task<int> DeleteAllLocalAsync(CancellationToken cancellationToken = default) =>
-        inner.DeleteAllLocalAsync(cancellationToken);
-
-    public Task<int> RefreshAsync(
-        byte[]? ceiling,
-        int batchSize,
-        bool includeUnboundedBinary,
-        CancellationToken cancellationToken = default
-    ) => inner.RefreshAsync(ceiling, batchSize, includeUnboundedBinary, cancellationToken);
-
-    public Task<SyncUploadOutcome> UploadAsync(
-        SyncJournalRow entry,
-        SyncMode mode,
-        SyncConflictPolicy policy,
-        bool includeUnboundedBinary,
-        byte[]? acknowledgedRowVersion,
-        CancellationToken cancellationToken = default
-    ) =>
-        inner.UploadAsync(
-            entry,
-            mode,
-            policy,
-            includeUnboundedBinary,
-            acknowledgedRowVersion,
-            cancellationToken
-        );
 }

@@ -17,7 +17,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 破棄など）を生成器が作っていることを、既定の種の数で各理由が 1 回以上返ることで確かめる。
 /// </para>
 /// <para>
-/// 網羅しない組の照合は、直結のクラスの乱数の種を既定の数で流したときだけ行う（範囲 <see cref="SyncModelDimensions.DirectScope"/>）。
+/// 網羅しない組の照合は、直結・新しいエンジンの端末の乱数の種を既定の数で流したときだけ行う（範囲
+/// <see cref="SyncModelDimensions.EngineScope"/>）。
 /// </para>
 /// </remarks>
 internal static class SyncModelOutcomeDimensions
@@ -35,7 +36,6 @@ internal static class SyncModelOutcomeDimensions
     private static readonly string[] ServerWinsChanges =
     [
         nameof(SyncLocalRowChangeReason.DiscardedByServerWins),
-        nameof(SyncLocalRowChangeReason.RemovedBeforeDownload),
     ];
 
     /// <summary>版で弾く競合の理由（後勝ちのランは版を見ずに上書きするので返らない）</summary>
@@ -80,53 +80,10 @@ internal static class SyncModelOutcomeDimensions
             IsValid
         );
 
-    /// <summary>網羅しない組の一覧（範囲は <see cref="SyncModelDimensions.DirectScope"/> だけ）</summary>
-    public static CoverageGapSet Gaps { get; } =
-        CoverageGap.Set(
-            EngineIds.SyncModel,
-            [
-                // DuplicateOnServer・後勝ちの RemovedBeforeDownload・Collect と LocalWins の ReloadedForUniqueValue は、乱数の種で
-                // 作れないか欠けるので、網羅の行（SyncModelCoverageRows）が種の前に流して埋める
-            ]
-        );
-
-    /// <summary>今のエンジンの解決役・段にだけある、実行が自分から変えた行の理由</summary>
-    private static readonly string[] CurrentEngineOnlyChanges =
-    [
-        nameof(SyncLocalRowChangeReason.ReloadedForUniqueValue),
-        nameof(SyncLocalRowChangeReason.RemovedBeforeDownload),
-        nameof(SyncLocalRowChangeReason.RemovedForUniqueValue),
-    ];
-
-    private const string CurrentEngineOnlyReason =
-        "新しいエンジンは、集合の外の行をキーで読みに行く解決役（一意な値の持ち主の読み直し＝ReloadedForUniqueValue・引き留める行の削除＝RemovedForUniqueValue）と、ダウンロードの前の削除伝搬の段（RemovedBeforeDownload）を持たない（取得した集合の中で後回し・回転・同じ適用の削除伝搬で同じ形を収束させる）。この理由はどの実行も返さない";
-
     /// <summary>
-    /// 新しいエンジンの端末の乱数の種の網羅しない組の一覧（範囲は <see cref="SyncModelDimensions.EngineScope"/> だけ）：今の
-    /// エンジンの解決役・段にだけある理由の組
+    /// 新しいエンジンの端末の乱数の種の網羅しない組の一覧（範囲は <see cref="SyncModelDimensions.EngineScope"/> だけ）。空
     /// </summary>
-    public static CoverageGapSet EngineGaps { get; } =
-        CoverageGap.Set(
-            EngineIds.SyncModel,
-            [
-                CoverageGap.AcceptedMatching(
-                    SyncModelDimensions.EngineScope,
-                    "tracked-engine-has-no-resolver",
-                    CurrentEngineOnlyReason,
-                    Outcome,
-                    Mode,
-                    (outcome, _) => CurrentEngineOnlyChanges.Contains(outcome)
-                ),
-                CoverageGap.AcceptedMatching(
-                    SyncModelDimensions.EngineScope,
-                    "tracked-engine-has-no-resolver",
-                    CurrentEngineOnlyReason,
-                    Outcome,
-                    Policy,
-                    (outcome, _) => CurrentEngineOnlyChanges.Contains(outcome)
-                ),
-            ]
-        );
+    public static CoverageGapSet EngineGaps { get; } = CoverageGap.Set(EngineIds.SyncModel, []);
 
     /// <summary>台帳の行</summary>
     public static EngineDescriptor Descriptor { get; } =
@@ -173,7 +130,7 @@ internal static class SyncModelOutcomeDimensions
         assignment.TryGetValue(Policy, out var policy);
         var conflict = outcome is not null && Enum.TryParse<SyncConflictReason>(outcome, out _);
 
-        // ServerWins の破棄・先消しは、ServerWins のランだけが行う
+        // ServerWins の破棄は、ServerWins のランだけが行う
         if (
             outcome is not null
             && ServerWinsChanges.Contains(outcome)

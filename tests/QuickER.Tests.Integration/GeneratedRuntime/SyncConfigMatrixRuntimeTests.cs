@@ -19,6 +19,11 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </summary>
 /// <remarks>
 /// <para>
+/// 同期の登録は、ローカルの接続ファクトリを開くたびの確認つきの包みに差し替えて新しいエンジン（SyncEngine）を組む。
+/// ローカルの書き込みは同期する表のトリガーが記録し、未送信はエンジンの未送信の一覧で読む。トリガーと状態の表は包んだ接続ファクトリの
+/// 最初の接続で張られるので、ローカルの DB にはスキーマだけを先に作り、行は包んだ接続（リポジトリ）でだけ書く。
+/// </para>
+/// <para>
 /// サーバーは実 SQL Server（生成された直結の差分ソースは SQL Server の語彙＝<c>MIN_ACTIVE_ROWVERSION()</c> を使うので、
 /// SQLite の代役では差分ソースの登録を差し替えることになり、登録の形を確かめられない）。HTTP の行は 1 つの Kestrel の
 /// サーバー（同じ SQL Server の DB）を共有する。行ごとにローカルの DB とコンテナを作り、キーは行ごとに別の値を使う
@@ -152,7 +157,7 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
             services,
             localKey,
             local.ReadWriteCreateConnectionString,
-            c.LocalAsInstances
+            c.LocalFactoryAsInstance
         );
 
         if (!c.OverHttp)
@@ -211,7 +216,7 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
             .RegistrationProblems(provider, localKey, serverKey, c.OverHttp, c.ExcludesParent)
             .Should()
             .BeEmpty(
-                "the registration builds the decorated local repositories and the source of the transport"
+                "the registration wraps the local connection factory, keeps the repositories plain, builds the source of the transport, and the first local connection puts triggers on the synchronised tables only"
             );
 
         if (c.ExcludesParent)
@@ -250,16 +255,13 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
                 .BeNull("the download of a new row has nothing to conflict with");
             second
                 .Downloaded.Should()
-                .Be(
-                    1,
-                    "the anchor derived from the mirrored server versions leaves only the new server row"
-                );
+                .Be(1, "the resume point of each table leaves only the new server row");
             (await adapter.ExistsAsync(scope.ServiceProvider, localKey, keys.Server, Ct))
                 .Should()
                 .BeTrue("the server new row reaches the local database in one sync");
         }
 
-        // 洗い替え 1 回（全消し→流し込み）が、同じ登録の形で例外なく終わり、両方の行がローカルにそろう
+        // 洗い替え 1 回（サーバーの行で置き換える）が、同じ登録の形で例外なく終わり、両方の行がローカルにそろう
         await using (var scope = provider.CreateAsyncScope())
         {
             await adapter.RefreshAsync(scope.ServiceProvider, Ct);
@@ -288,13 +290,13 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
 
     /// <summary>
     /// 水準 GraphRemoveParentWithNewChild の段：上げ下げした 2 つの親（ローカルとサーバーの両方にある行）に、キーの無い新しい子
-    /// （Added）を足して親を消すグラフ保存（単数と複数の SaveAsync）と、新しい子だけを MarkRemoved したグラフ保存が、記録の段で
-    /// 投げずに保存され、同期 1 回でサーバーから親が消え、ジャーナルに何も残らない
+    /// （Added）を足して親を消すグラフ保存（単数と複数の SaveAsync）と、新しい子だけを MarkRemoved したグラフ保存が保存され、
+    /// 未送信は 2 つの親の削除だけになり、同期 1 回でサーバーから親が消え、未送信が残らない
     /// </summary>
     /// <remarks>
     /// 版なしの子を持つフィクスチャは、消す親の下に、サーバーに同じキーの行がある新しい版なしの子も入れる（サーバーの行は消さない
-    /// 補助の親の下に置く）。新しい行は保存側の削除で何も消さないので記録されず、後勝ちの同期の無条件の削除がサーバーの同じキーの
-    /// 行を消さない。同期は版なしの表も流す後勝ちのモードで流す。
+    /// 補助の親の下に置く）。新しい行は保存側の削除で DB のどの行も消さないのでトリガーが記録せず、後勝ちの同期の無条件の削除が
+    /// サーバーの同じキーの行を消さない。同期は版なしの表も流す後勝ちのモードで流す。
     /// </remarks>
     private static async Task RemoveParentsWithNewChildrenAsync(
         ISyncConfigFixture adapter,
@@ -355,6 +357,15 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
                 }
             }
 
+            var removed = await adapter.PendingAsync(provider, Ct);
+            removed
+                .Select(row => (row.Table, row.IsDelete))
+                .Should()
+                .Equal(
+                    [(adapter.ParentTableName, true), (adapter.ParentTableName, true)],
+                    "only the deletes of the two saved parents are recorded; a new node deletes no row and leaves nothing"
+                );
+
             await using (var scope = provider.CreateAsyncScope())
             {
                 (await adapter.SyncAsync(scope.ServiceProvider, Ct, lastWriteWins: true))
@@ -378,11 +389,9 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
                     );
             }
 
-            var journal = await adapter.JournalAsync(provider, localKey, Ct);
-            journal.Tables.Should().BeEmpty("the sync sent every recorded delete");
-            journal
-                .UnsetKeyEntries.Should()
-                .Be(0, "a node without a key deletes nothing and is not recorded");
+            (await adapter.PendingAsync(provider, Ct))
+                .Should()
+                .BeEmpty("the sync sent every recorded delete");
         }
         finally
         {
@@ -397,14 +406,16 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
     }
 
     /// <summary>
-    /// 水準 GraphViaExcludedParent の流れ：親の表を構築時に除外した登録で、除外した親の直接の書き込みはジャーナルに何も残さず、
-    /// 除外した親のリポジトリのグラフ保存で足した同期する子は記録され（同じ保存が書き換える除外した親の行は記録しない）、同期 1 回で
-    /// サーバーへ上がりローカルに残る。続けてサーバーの
-    /// 新しい子を同期 1 回で降ろし、洗い替え 1 回で両方の子がローカルにそろう
+    /// 水準 GraphViaExcludedParent の流れ：親の表を構築時に除外した登録で、除外した親の直接の書き込みは未送信に何も残さず、
+    /// 除外した親のリポジトリのグラフ保存で足した同期する子だけが未送信になり（同じ保存が書き換える除外した親の行は残らない）、
+    /// 同期 1 回でサーバーへ上がりローカルに残る。続けてサーバーの新しい子を同期 1 回で降ろし、洗い替え 1 回で両方の子がローカルに
+    /// そろう
     /// </summary>
     /// <remarks>
-    /// エンジンは親の表を降ろさないので、親はテストがサーバーとローカルの両方へ直接入れる。サーバーの DB は全部の行で共有するので、
-    /// 行が足したサーバーの子と親は最後に消す（後の行の最初の同期と洗い替えが、親の無い子を降ろさないようにする）。
+    /// エンジンは親の表を降ろさないので、親はテストがサーバーとローカルの両方へ直接入れる（ローカルへはリポジトリ＝包んだ接続で）。
+    /// 未送信の一覧はエンジンの表の行だけを返すので、除外した親の表に記録の仕組みが無いことは登録の形の検査（トリガーの付いた表）が
+    /// 受け持つ。サーバーの DB は全部の行で共有するので、行が足したサーバーの子と親は最後に消す（後の行の最初の同期と洗い替えが、
+    /// 親の無い子を降ろさないようにする）。
     /// </remarks>
     private static async Task RunExcludedParentAsync(
         ISyncConfigFixture adapter,
@@ -426,11 +437,11 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
                 await adapter.UpdateAsync(scope.ServiceProvider, localKey, parent, Ct);
             }
 
-            var direct = await adapter.JournalAsync(provider, localKey, Ct);
-            direct
-                .Tables.Should()
-                .BeEmpty("a direct write of a table excluded at construction is not recorded");
-            direct.UnsetKeyEntries.Should().Be(0);
+            (await adapter.PendingAsync(provider, Ct))
+                .Should()
+                .BeEmpty(
+                    "a direct write of a table excluded at construction leaves nothing unsent"
+                );
 
             await using (var scope = provider.CreateAsyncScope())
             {
@@ -443,9 +454,9 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
                 );
             }
 
-            var pending = await adapter.JournalAsync(provider, localKey, Ct);
-            pending
-                .Tables.Should()
+            (await adapter.PendingAsync(provider, Ct))
+                .Select(row => row.Table)
+                .Should()
                 .NotBeEmpty(
                     "the graph save through the excluded parent records the synchronised child it adds"
                 )
@@ -453,7 +464,6 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
                     table => table == adapter.ChildTableName,
                     "the rows of the excluded table are not recorded, whichever repository writes them"
                 );
-            pending.UnsetKeyEntries.Should().Be(0);
 
             await using (var scope = provider.CreateAsyncScope())
             {
@@ -468,8 +478,8 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
             (await adapter.ChildExistsAsync(provider, localKey, keys.Local, Ct))
                 .Should()
                 .BeTrue("the sync keeps the recorded child locally");
-            (await adapter.JournalAsync(provider, localKey, Ct))
-                .Tables.Should()
+            (await adapter.PendingAsync(provider, Ct))
+                .Should()
                 .BeEmpty("the sync sent the recorded child and nothing of the excluded table");
 
             await adapter.InsertChildAsync(serverProvider, null, parent, keys.Server, Ct);
@@ -482,7 +492,7 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
                     .BeNull("the download of a new child has nothing to conflict with");
                 second
                     .Downloaded.Should()
-                    .Be(1, "only the new server child is newer than the mirrored versions");
+                    .Be(1, "only the new server child is past the resume point of its table");
                 (await adapter.ChildExistsAsync(scope.ServiceProvider, localKey, keys.Server, Ct))
                     .Should()
                     .BeTrue("the server new child reaches the local database in one sync");

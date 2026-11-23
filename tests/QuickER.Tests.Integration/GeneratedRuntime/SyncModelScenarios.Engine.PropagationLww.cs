@@ -4,8 +4,8 @@ using QuickER.Tests.GeneratedSyncModelFixture;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// SyncRuntimeTestsBase から移したシナリオ（削除伝搬・カスケードのグラフ保存・後勝ちのモード・ラン単位の除外・洗い替えの範囲・
-/// ジャーナルの掃除・ServerWins の破棄の範囲）。表の写し方は <see cref="EngineBasicScenarios"/> の型の注と同じ。
+/// 削除伝搬・カスケードのグラフ保存・後勝ちのモード・ラン単位の除外・洗い替えの範囲・未送信の決着・ServerWins の破棄の範囲の
+/// シナリオ。表の写し方は <see cref="EngineBasicScenarios"/> の型の注と同じ。
 /// </summary>
 internal static partial class SyncModelScenarios
 {
@@ -321,19 +321,6 @@ internal static partial class SyncModelScenarios
                             $"table {ModelTables.Events} *"
                         ),
                     Expect.Rows(D1, L).Absent("L102 *").Contains("L101 *"),
-                ]
-            ),
-            Moved(
-                "rec-journal-cleanup-by-table-and-wholesale",
-                [],
-                [
-                    Folder(D1, 1, name: "a"),
-                    new AddLabelOp(D1, Direct, "L101", 1, "b"),
-                    Expect.Journal(D1).Count("*", 2),
-                    new ClearJournalOp(D1, L),
-                    Expect.Journal(D1).Exact($"{F} key=1 *"),
-                    new ClearJournalOp(D1, null),
-                    Expect.Journal(D1).Empty(),
                 ]
             ),
             Moved(

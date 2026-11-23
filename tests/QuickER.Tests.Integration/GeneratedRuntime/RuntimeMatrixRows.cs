@@ -428,7 +428,7 @@ public static class RuntimeMatrixRows
         ),
         Row(
             RuntimeFeatures.SyncSupport,
-            "双方向同期支援（差分ダウンロード・ジャーナル再生・削除伝搬・競合収集・ループ防止）",
+            "双方向同期支援（差分ダウンロード・トリガーの記録・削除伝搬・競合収集・適用中の印）",
             On(
                 NotApplicable("同期支援はマルチターゲット前提で、EF Core とは生成時に排他"),
                 EfCoreAll

@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -19,8 +18,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </summary>
 /// <remarks>
 /// <para>
-/// ここに残すのは、SyncFixture にしか無い表（NULL を許す一意制約の <c>sync_markers</c>）を使うものと、時間を出力するだけの
-/// 計測の 2 つ。本物の <c>rowversion</c> との噛み合わせ（DB が採番する版・<c>MIN_ACTIVE_ROWVERSION()</c> による上限・版ガードの
+/// ここに置くのは、SyncFixture にしか無い表（NULL を許す一意制約の <c>sync_markers</c>）を使うもの。本物の <c>rowversion</c> との噛み合わせ（DB が採番する版・<c>MIN_ACTIVE_ROWVERSION()</c> による上限・版ガードの
 /// 競合・外部キーエラーの分類・版なしの表の TOP のページング）は、同期のモデルの決定的なシナリオのうち実 SQL Server の転送でも
 /// 流すもの（<see cref="SyncModelSqlServerRuntimeTests"/>）が期待の手で表明し、DI 登録糖衣 <c>AddGeneratedSyncSupport</c> の
 /// 組み上がりは同期の構成の行列（<see cref="SyncConfigMatrixRuntimeTests"/>）が見る。
@@ -30,11 +28,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlServer)]
-[RuntimeCell(RuntimeFeatures.SyncRefresh, RuntimeTarget.AdoSqlServer)]
-public sealed class SyncSqlServerRuntimeTests(
-    SqlServerContainerFixture fixture,
-    ITestOutputHelper output
-) : IAsyncLifetime
+public sealed class SyncSqlServerRuntimeTests(SqlServerContainerFixture fixture) : IAsyncLifetime
 {
     private readonly SqlServerContainerFixture _fixture = fixture;
     private readonly SqliteTempDatabase _sqlite = SqliteTempDatabase.Create();
@@ -60,7 +54,7 @@ public sealed class SyncSqlServerRuntimeTests(
         var services = new ServiceCollection();
         services.AddGeneratedSqlServerRepositories(ServerKey, _fixture.ConnectionString);
         services.AddGeneratedSqliteRepositories(LocalKey, _sqlite.ReadWriteCreateConnectionString);
-        services.AddGeneratedSyncSupport(ServerKey, LocalKey);
+        services.AddGeneratedDirectSyncSources(ServerKey);
         _provider = services.BuildServiceProvider();
     }
 
@@ -71,186 +65,6 @@ public sealed class SyncSqlServerRuntimeTests(
         _sqlite.Dispose();
 
         return ValueTask.CompletedTask;
-    }
-
-    /// <summary>サーバー側（SQL Server）の注文リポジトリ</summary>
-    private ISyncOrderRepository ServerOrders() =>
-        _provider.GetRequiredKeyedService<ISyncOrderRepository>(ServerKey);
-
-    /// <summary>
-    /// 実 SQL Server を相手にした洗い替えと全量ダウンロードの所要時間を 1 回ずつ測る（表明は同値性だけ）。
-    /// </summary>
-    /// <remarks>
-    /// SQLite 同士の計測（<see cref="SyncRefreshBenchmarkRuntimeTests"/>）と同じ方針で、時間は
-    /// <see cref="ITestOutputHelper"/> へ出すだけにする。行数は環境変数
-    /// <c>QUICKER_SYNC_BENCH_ORDERS</c> で上げられる（既定 1,000 件＝合計 2,000 行）。
-    /// </remarks>
-    [Fact(
-        DisplayName = "[Sync/SqlServer] 洗い替えと全量ダウンロードは同じローカル内容を作る（所要時間は出力のみ）"
-    )]
-    public async Task Refresh_AgainstRealSqlServer_MatchesFullDownloadContent()
-    {
-        var orderCount = BenchmarkOrderCount;
-        await SeedServerForBenchmarkAsync(orderCount);
-
-        var batchSize = BenchmarkBatchSize;
-        var download = await MeasureAgainstFreshLocalAsync(engine =>
-            engine.DownloadAsync(
-                new SyncOptions { DownloadBatchSize = batchSize, PropagateDeletes = false },
-                Ct
-            )
-        );
-        var refresh = await MeasureAgainstFreshLocalAsync(engine =>
-            engine.RefreshAsync(
-                new SyncRefreshOptions
-                {
-                    BatchSize = batchSize,
-                    DiscardLocalUnboundedBinaries = true,
-                },
-                Ct
-            )
-        );
-
-        output.WriteLine(
-            $"データセット: 注文 {orderCount:N0} 件 ＋ 明細 {orderCount:N0} 件 = {orderCount * 2:N0} 行"
-                + $"（バッチ {batchSize:N0}・サーバー＝実 SQL Server）"
-        );
-        output.WriteLine($"DownloadAsync {download.Elapsed.TotalMilliseconds, 9:F1} ms");
-        output.WriteLine($"RefreshAsync  {refresh.Elapsed.TotalMilliseconds, 9:F1} ms");
-        output.WriteLine($"倍率: DownloadAsync/Refresh = {download.Elapsed / refresh.Elapsed:F2}x");
-
-        refresh
-            .Digest.Should()
-            .Be(download.Digest, "経路が違っても取り込む内容は同じでなければならない");
-    }
-
-    /// <summary>ベンチマークの注文件数（明細も同数）</summary>
-    private static int BenchmarkOrderCount => Configured("QUICKER_SYNC_BENCH_ORDERS", 1_000);
-
-    /// <summary>ベンチマークのバッチサイズ（両経路とも同じ値で回す）</summary>
-    private static int BenchmarkBatchSize => Configured("QUICKER_SYNC_BENCH_BATCH", 500);
-
-    /// <summary>環境変数の正の整数、無ければ既定値</summary>
-    private static int Configured(string variable, int fallback) =>
-        int.TryParse(Environment.GetEnvironmentVariable(variable), out var value) && value > 0
-            ? value
-            : fallback;
-
-    /// <summary>ベンチマーク用にサーバー（SQL Server）を埋める（版は DB が採番する）</summary>
-    private async Task SeedServerForBenchmarkAsync(int orderCount)
-    {
-        await ServerOrders()
-            .BulkInsertAsync(
-                Enumerable
-                    .Range(1, orderCount)
-                    .Select(id => new SyncOrderEntity
-                    {
-                        OrderId = id,
-                        CustomerName = $"customer-{id:D6}",
-                    })
-                    .ToList(),
-                Ct
-            );
-        await _provider
-            .GetRequiredKeyedService<ISyncOrderLineRepository>(ServerKey)
-            .BulkInsertAsync(
-                Enumerable
-                    .Range(1, orderCount)
-                    .Select(id => new SyncOrderLineEntity
-                    {
-                        LineId = id,
-                        OrderId = id,
-                        Product = $"product-{id:D6}",
-                    })
-                    .ToList(),
-                Ct
-            );
-    }
-
-    /// <summary>まっさらなローカル SQLite を作り、渡された経路を 1 回計測してローカルの内容を要約する</summary>
-    private async Task<(TimeSpan Elapsed, string Digest)> MeasureAgainstFreshLocalAsync(
-        Func<SyncEngine, Task> run
-    )
-    {
-        using var local = SqliteTempDatabase.Create();
-        await local.ApplyDdlAsync(SyncFixtureDefinition.BuildSqliteMirror(), Ct);
-
-        var localFactory =
-            new QuickER.Tests.GeneratedSyncFixture.Repositories.Sqlite.SqlConnectionFactory(
-                local.ReadWriteCreateConnectionString
-            );
-        var localSql = new QuickER.Tests.GeneratedSyncFixture.Repositories.Sqlite.SqlExecutor(
-            localFactory
-        );
-        var journal = new SyncJournal(localSql);
-        await journal.EnsureCreatedAsync(Ct);
-
-        var orders = new JournalingSyncOrderRepository(
-            new QuickER.Tests.GeneratedSyncFixture.Repositories.Sqlite.SyncOrderRepository(
-                localFactory
-            ),
-            journal
-        );
-        var lines = new JournalingSyncOrderLineRepository(
-            new QuickER.Tests.GeneratedSyncFixture.Repositories.Sqlite.SyncOrderLineRepository(
-                localFactory
-            ),
-            journal
-        );
-
-        // 差分ソースは生成された直結実装そのもの（サーバー＝実 SQL Server）
-        var engine = new SyncEngine(
-            [
-                new SyncTable<SyncOrderEntity, int>(
-                    orders,
-                    localSql,
-                    new DirectSyncSource<SyncOrderEntity, int>(
-                        _provider.GetRequiredKeyedService<ISqlExecutor>(ServerKey),
-                        ServerOrders(),
-                        GeneratedSyncTables.SyncOrder
-                    ),
-                    GeneratedSyncTables.SyncOrder
-                ),
-                new SyncTable<SyncOrderLineEntity, int>(
-                    lines,
-                    localSql,
-                    new DirectSyncSource<SyncOrderLineEntity, int>(
-                        _provider.GetRequiredKeyedService<ISqlExecutor>(ServerKey),
-                        _provider.GetRequiredKeyedService<ISyncOrderLineRepository>(ServerKey),
-                        GeneratedSyncTables.SyncOrderLine
-                    ),
-                    GeneratedSyncTables.SyncOrderLine
-                ),
-            ],
-            journal
-        );
-
-        var stopwatch = Stopwatch.StartNew();
-        await run(engine);
-        stopwatch.Stop();
-
-        var orderRows = await orders.GetAllAsync(Ct);
-        var lineRows = await lines.GetAllAsync(Ct);
-        var digest =
-            string.Join(
-                "|",
-                orderRows
-                    .OrderBy(order => order.OrderId)
-                    .Select(order =>
-                        $"{order.OrderId}:{order.CustomerName}:{Convert.ToHexString(order.RowVer ?? [])}"
-                    )
-            )
-            + "#"
-            + string.Join(
-                "|",
-                lineRows
-                    .OrderBy(line => line.LineId)
-                    .Select(line =>
-                        $"{line.LineId}:{line.OrderId}:{line.Product}:{Convert.ToHexString(line.RowVer ?? [])}"
-                    )
-            );
-
-        return (stopwatch.Elapsed, digest);
     }
 
     /// <summary>サーバー側（SQL Server）のマーカーリポジトリ</summary>

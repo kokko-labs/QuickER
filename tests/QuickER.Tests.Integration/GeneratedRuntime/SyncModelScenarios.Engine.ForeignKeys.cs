@@ -219,9 +219,7 @@ internal static partial class SyncModelScenarios
                     Expect
                         .Result(D1)
                         .Count($"truncation {I} *", 1)
-                        .Single(
-                            $"truncation {I} pending=11 missing-parent={F} skipped-by-hook=* truncated-by=-"
-                        ),
+                        .Single($"truncation {I} pending=11 missing-parent={F}"),
                     Expect.Rows(D1, F).Absent("1 *"),
                     Expect.Rows(D1, I).Absent("11 *"),
                     Plain(D1),
@@ -242,27 +240,8 @@ internal static partial class SyncModelScenarios
                     Expect.Pending(D1).Empty(),
                 ]
             ),
-            Moved(
-                "sw-leaves-row-edited-during-the-run",
-                [.. Seed(1, "alice", 11, "widget")],
-                [
-                    Rename(D1, 1, "alice-before"),
-                    new ArmInterruptOp(
-                        D1,
-                        ModelInterruptPoint.BeforeServerFetch,
-                        Rename(D1, 1, "alice-during")
-                    ),
-                    Plain(D1, policy: SyncConflictPolicy.ServerWins),
-                    Expect.Rows(D1, F).Contains("1 parent=null name=alice-during"),
-                    // 内容を戻さなかった行は、実行が読んだ記録（old）も新しい記録（new）と一緒に残る（P5-2 の S2）
-                    Expect.Journal(D1).Count("*", 2).Single("* age=new").Single("* age=old"),
-                    Plain(D1),
-                    Expect.Journal(D1).Empty(),
-                    Expect.Rows(SV, F).Contains("1 parent=null name=alice-during"),
-                ]
-            ),
-            // 同じ形を、エンジンの記録を読まずに確かめる：ServerWins の実行の途中で編集された行は戻さず（サーバーも変えない）、
-            // 次の同期がその編集を競合なしに上げ、その後は送るものが残らない
+            // ServerWins の実行の途中で編集された行は戻さず（サーバーも変えない）、次の同期がその編集を競合なしに上げ、その後は
+            // 送るものが残らない
             Moved(
                 "sw-leaves-row-edited-during-the-run-then-uploads-it",
                 [.. Seed(1, "alice", 11, "widget")],
@@ -308,6 +287,55 @@ internal static partial class SyncModelScenarios
                             "11 folder=1 label=null code=c-11 title=widget-server",
                             "12 folder=2 label=null code=c-12 title=gadget"
                         ),
+                    Expect.Pending(D1).Empty(),
+                ]
+            ),
+            // 親の未送信の削除がサーバーに断られ、サーバーで足された子 21 が保留になっても、その表のダウンロードは止まらず、
+            // 21 より後の版の行 22 が同じ同期で降りる
+            Moved(
+                "fk-delete-refused-on-server-holds-back-child-and-downloads-later-rows",
+                [Folder(SV, 1, name: "alice"), Folder(SV, 2, name: "bob")],
+                [
+                    .. LocallyDeletedFolderWithItemAddedOnServer(),
+                    Line(SV, 22, 2, "added later"),
+                    Plain(D1),
+                    Expect
+                        .Result(D1)
+                        .Count("conflict *", 1)
+                        .Single($"conflict {F} key=1 op=Delete reason=DeleteRefusedOnServer *")
+                        .Contains($"truncation {I} pending=21 missing-parent={F}"),
+                    Expect
+                        .Rows(D1, I)
+                        .Absent("21 *")
+                        .Contains("22 folder=2 label=null code=c-22 title=added later"),
+                    Expect.Pending(D1).Exact($"{F} key=1 row=gone"),
+                ]
+            ),
+            // 受信だけの実行は、未送信の変更があるキーの行を、サーバーで変わった行で上書きしない（端末で編集した行は端末の内容の
+            // まま、端末で消した行は戻さない）。サーバーで変わったほかの行は降りる。続く ServerWins の同期でサーバーの内容に戻る
+            Moved(
+                "dl-download-only-keeps-unsent-keys-of-rows-changed-on-server",
+                [.. Seed(1, "alice", 11, "widget"), .. Seed(2, "bob", 12, "gadget")],
+                [
+                    Rename(D1, 1, "alice-local"),
+                    new DeleteItemOp(D1, Direct, 12),
+                    Rename(SV, 2, "bob-server"),
+                    Rename(SV, 1, "alice-server"),
+                    new UpdateItemOp(SV, Direct, 12, 2, null, "c-12", "gadget-server"),
+                    PlainOnly(D1, ModelSyncKind.Download),
+                    Expect
+                        .Rows(D1, F)
+                        .Contains(
+                            "1 parent=null name=alice-local",
+                            "2 parent=null name=bob-server"
+                        ),
+                    Expect.Rows(D1, I).Absent("12 *"),
+                    Expect.Pending(D1).Unordered($"{F} key=1 row=present", $"{I} key=12 row=gone"),
+                    Plain(D1, policy: SyncConflictPolicy.ServerWins),
+                    Expect.Rows(D1, F).Contains("1 parent=null name=alice-server"),
+                    Expect
+                        .Rows(D1, I)
+                        .Contains("12 folder=2 label=null code=c-12 title=gadget-server"),
                     Expect.Pending(D1).Empty(),
                 ]
             ),
@@ -459,7 +487,7 @@ internal static partial class SyncModelScenarios
                         $"conflict {F} key=1 op=Delete reason=DeleteRefusedOnServer local=* "
                             + "server=parent=null name=alice"
                     )
-                    .Contains($"truncation {I} pending=21 missing-parent={F} *"),
+                    .Contains($"truncation {I} pending=21 missing-parent={F}"),
                 Expect.Rows(D1, I).Absent("21 *"),
                 Expect.Rows(SV, F).Contains("1 *"),
                 Expect.Pending(D1).Exact($"{F} key=1 row=gone"),
@@ -505,8 +533,8 @@ internal static partial class SyncModelScenarios
                     Expect.Pending(D1).Empty(),
                 ]
             ),
-            // ダウンロード：フォルダーの表を先に降ろすとき、ピン留めの先の品目がまだローカルに無いので、親をそろえる解決役が
-            // その品目をサーバーから読み直して先に入れる（打ち切らない）
+            // ダウンロード：フォルダーが指すピン留めの先の品目はまだローカルに無いが、品目の表の行も同じ適用の中で入る
+            // （外部キーは適用の終わりに確かめる。打ち切らない）
             Moved(
                 "cycle-pinned-item-is-read-back-before-folder",
                 [Folder(SV, 770)],

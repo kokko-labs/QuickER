@@ -17,8 +17,10 @@ using Xunit;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// 同期エンジンのモデルベーステスト（端末 2 台か 3 台＋サーバー・直結・サーバー役は SQLite）。乱数の操作の列と、指摘ごとの
-/// 決定的なシナリオを流し、止まらない・収束する・消えないを表明する（表明の中身は <see cref="SyncModelRun"/>）。
+/// 同期エンジンのモデルベーステスト（端末 2 台か 3 台＋サーバー・直結・サーバー役は SQLite・新しいエンジンの端末）。指摘ごとの
+/// 決定的なシナリオを流し、止まらない・収束する・消えないを表明する（表明の中身は <see cref="SyncModelRun"/>）。乱数の操作の列を
+/// 流す本体（<see cref="RunRandomSeedsAsync"/>）と種の決め方もここに置き、新しいエンジンの組
+/// （<see cref="SyncSupportAdoSqliteEngineRuntimeTests"/>）が使う。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -29,15 +31,14 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <para>
 /// 種の数は既定 60（環境変数 <c>QUICKER_SYNC_MODEL_SEEDS</c> で変えられる）。その後に広い世界の種（端末 3 台・端末ごとの
 /// 最初の形＝<see cref="SyncModelWorldShape"/>・<see cref="WideSeeds"/>）を流す。種は 1 つのテストの中で並列に流す
-/// （xUnit は同じクラスの Theory の行を並列に流さない）。世界は種ごとに作り、プロセス全体で共有するものは無い（ローカルの
-/// 書き込みロックはローカルの生 SQL 実行器ごと、抑制の印は非同期フローごと）。
+/// （xUnit は同じクラスの Theory の行を並列に流さない）。世界は種ごとに作り、プロセス全体で共有するものは無い。
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
 [MatrixAxisValue(SyncModelTransportAxis.Name, nameof(SyncModelTransport.Direct))]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlite)]
 [RuntimeCell(RuntimeFeatures.SyncRefresh, RuntimeTarget.AdoSqlite)]
-public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModelTransportTests
+public sealed class SyncModelRuntimeTests : ISyncModelTransportTests
 {
     /// <summary>1 つの種の操作の数</summary>
     public const int StepsPerSeed = 40;
@@ -48,8 +49,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
     /// <summary>
-    /// <see cref="Seeds"/> の夜間の既定の種の数。今の端末の直結の乱数（<see cref="DirectSuite"/>）は夜間も普段の数で流すので、この
-    /// 数で流すテストは無い（新しいエンジンの端末の組の夜間の数の基準）
+    /// <see cref="Seeds"/> の夜間の既定の種の数。この数で流すテストは無い（新しいエンジンの端末の組は夜間の数を
+    /// <see cref="SyncSupportAdoSqliteEngineRuntimeTests.NightlySeedCount"/> へ替えて流す。種の指紋の記録はこの決め方で照合する）
     /// </summary>
     public const int NightlySeedCount = 1200;
 
@@ -277,34 +278,6 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             ? (run.Failures, run.Log)
             : ([.. run.Failures, generatorFailure], run.Log);
     }
-
-    [Fact(
-        DisplayName = "[Sync/モデル] 乱数の操作の列で、止まらず・収束し・消えない（既知の失敗の署名は除く）"
-    )]
-    // 夜間に流さない（今のエンジンは近く消すので、夜間の深さは新しいエンジンに使う。夜間のプロファイルでも普段の種の数で流れる）
-    [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.NotSelected)]
-    public Task RandomSeeds_ConvergeWithoutLoss() => RunRandomSeedsAsync(DirectSuite, output);
-
-    /// <summary>直結・製品の同期エンジンの端末で乱数の種を流すときの組（<see cref="RunRandomSeedsAsync"/> へ渡す）</summary>
-    /// <remarks>
-    /// 種の決め方は <see cref="Seeds"/>・<see cref="WideSeeds"/> の夜間の数を普段の数にしたもの（夜間のプロファイルでも普段の種だけを
-    /// 流す。普段の種が同じなので種の指紋の記録は <see cref="Seeds"/>・<see cref="WideSeeds"/> と共有する）。夜間だけの空振りの守りは
-    /// 持たない（夜間の種の数で流さないので、その照合が起きる種に届かない）
-    /// </remarks>
-    internal static SyncModelRandomSuite DirectSuite { get; } =
-        new(
-            "SyncModel",
-            SyncModelWorldOptions.Direct,
-            SyncModelRandomSuite.WithNightlyCount(Seeds, Seeds.RegularCount),
-            SyncModelRandomSuite.WithNightlyCount(WideSeeds, WideSeeds.RegularCount),
-            SyncModelKnownFailures.Set,
-            SyncModelDimensions.Gaps,
-            SyncModelOutcomeDimensions.Gaps,
-            SyncModelDimensions.DirectScope,
-            RefusalBasisKinds,
-            GuardedRunChecks,
-            []
-        );
 
     /// <summary>
     /// 乱数の種（既存の範囲の種と広い世界の種）と網羅の行を、渡した組の世界で流し、既知の失敗の一覧・網羅しない組・空振りの守りを
@@ -741,15 +714,8 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             var mine = parts
                 .Where(part => part.Calls.Count == 1 && part.Calls[0].Transport == transport)
                 .ToList();
-            // 新しいエンジンの端末で流す転送は、今のエンジンだけの行の一覧に載った行を流さない（一覧をここで直接読む）
             var expected = SyncModelScenarios
-                .All.Where(s =>
-                    s.RunsOn(transport)
-                    && !(
-                        SyncModelScenarioParts.RunsNewEngine(transport)
-                        && SyncModelCurrentEngineOnlyScenarios.All.ContainsKey(s.Name)
-                    )
-                )
+                .All.Where(s => s.RunsOn(transport))
                 .Select(s => s.Name)
                 .ToList();
             var rows = mine.SelectMany(part => part.Rows.Select(row => (string)row.Data)).ToList();
@@ -878,6 +844,35 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             .Select(cell => $"Device/{cell.point}/{cell.policy}/{cell.prelude}/{cell.write}")
             .ToList();
         expectedDevice.Should().HaveCount(35);
+        // 端末の書き手の洗い替えの行：洗い替えはサーバーへ書かない（サーバーへの書き込みの直前の点に来ない）。前段ありは
+        // Force の洗い替えで、形の外し方は同期の行と同じ。前段なしは Force なしの洗い替えで、書き込みは更新・削除・挿入・
+        // サーバーで先に消えた行の削除
+        var refreshPoints = Enum.GetValues<ModelInterruptPoint>()
+            .Where(point => point != ModelInterruptPoint.BeforeServerWrite)
+            .ToList();
+        var expectedRefreshForce = refreshPoints
+            .SelectMany(point =>
+                Enum.GetValues<SyncModelScenarios.InterruptPrelude>()
+                    .SelectMany(prelude =>
+                        Enum.GetValues<SyncModelScenarios.InterruptWrite>()
+                            .Select(write => (point, prelude, write))
+                    )
+            )
+            .Where(cell =>
+                cell.prelude == SyncModelScenarios.InterruptPrelude.Delete
+                    ? cell.write == SyncModelScenarios.InterruptWrite.Recreate
+                    : cell.write != SyncModelScenarios.InterruptWrite.Recreate
+            )
+            .Select(cell => $"DeviceRefreshForce/{cell.point}/{cell.prelude}/{cell.write}")
+            .ToList();
+        expectedRefreshForce.Should().HaveCount(14);
+        var expectedRefreshClean = refreshPoints
+            .SelectMany(point =>
+                Enum.GetValues<SyncModelScenarios.InterruptCleanWrite>()
+                    .Select(write => $"DeviceRefreshClean/{point}/{write}")
+            )
+            .ToList();
+        expectedRefreshClean.Should().HaveCount(8);
         // サーバーの書き手：サーバーへの書き込みの直前の点は来ない（端末が送るものの無い形）／消した行は端末で編集できない
         var expectedServer = Enum.GetValues<ModelInterruptPoint>()
             .SelectMany(point =>
@@ -909,8 +904,19 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                             )
                 )
             )
-            // 次の取得の失敗は、割り込まれた同期が取得の後の点のバッチ（古い写し）を書いてから同じ表のダウンロードを例外で
-            // 終える窓の水準なので、取得の後の点・更新・同期の組にだけある
+            // 次の取得の失敗は、割り込まれた同期が取得の後の点のバッチを取得してから同じ表の次の取得で例外になる窓の水準なので、
+            // 取得の後の点・更新・同期の組にだけある。そのうち前段 parent-after-child-* × 編集してから同期は起こり得ない：対象の
+            // 行（親のフォルダー）は実行の前の端末に無く、取得が失敗した実行は何も適用しないので、実行の後も端末に無く編集できない
+            // （前段 unique-holder-after-taker の対象の行は初期データにあって前から端末に在る）。塊を確定した後に次の取得が失敗する
+            // 窓は、塊ごとに確定する経路にだけあり、table:SyncEngineFixed の行
+            // chunk-failure-between-chunks-keeps-first-chunk-and-next-sync-resumes・
+            // chunk-failure-after-carry-keeps-resume-point-before-carried-row・
+            // chunk-stale-row-then-fetch-failure-then-device-edit-collect-reports-conflict・
+            // chunk-stale-row-then-fetch-failure-then-device-edit-serverwins-restores が持つ。この外し方は、取得が失敗した
+            // 1 回で全部の道の実行は何も適用しない、という仕様に依る（この仕様が変わると、この組は起こり得るようになる）。
+            // 仕様を守る行は table:SyncEngineFixed の sync-fetch-failure-leaves-device-as-before（同期）と
+            // refresh-fetch-failure-leaves-device-as-before（洗い替え）で、取得の失敗の後の端末の行・未送信・行の状態の表・
+            // 再開点が実行の前と同じであることを表明する
             .Where(cell =>
                 cell.point != ModelInterruptPoint.BeforeServerWrite
                 && !(
@@ -922,17 +928,22 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                     || cell.point == ModelInterruptPoint.AfterServerFetchBeforeApply
                         && cell.write == SyncModelScenarios.ServerInterruptWrite.Update
                         && cell.run == SyncModelScenarios.InterruptRun.Sync
+                        && !(
+                            cell.followUp == SyncModelScenarios.InterruptFollowUp.EditThenSync
+                            && cell.prelude
+                                != SyncModelScenarios.ServerInterruptPrelude.UniqueHolderAfterTaker
+                        )
                 )
             )
             .Select(cell =>
                 $"Server/{cell.point}/{cell.policy}/{cell.prelude}/{cell.write}/{cell.run}/{cell.followUp}/{cell.fault}"
             )
             .ToList();
-        expectedServer.Should().HaveCount(84);
+        expectedServer.Should().HaveCount(80);
         var expected = Enum.GetValues<SyncModelScenarios.InterruptWriter>()
             .SelectMany(writer =>
                 writer == SyncModelScenarios.InterruptWriter.Device
-                    ? expectedDevice
+                    ? [.. expectedDevice, .. expectedRefreshForce, .. expectedRefreshClean]
                     : expectedServer
             )
             .ToList();
@@ -945,6 +956,26 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                     )
                 )
                 .Select(cell => $"Device/{cell.Point}/{cell.Policy}/{cell.Prelude}/{cell.Write}")
+                .Concat(
+                    SyncModelScenarios
+                        .RefreshForceInterruptCells.Where(cell =>
+                            declared.Contains(
+                                (cell.Name, cell.Point, SyncModelScenarios.InterruptWriter.Device)
+                            )
+                        )
+                        .Select(cell =>
+                            $"DeviceRefreshForce/{cell.Point}/{cell.Prelude}/{cell.Write}"
+                        )
+                )
+                .Concat(
+                    SyncModelScenarios
+                        .RefreshCleanInterruptCells.Where(cell =>
+                            declared.Contains(
+                                (cell.Name, cell.Point, SyncModelScenarios.InterruptWriter.Device)
+                            )
+                        )
+                        .Select(cell => $"DeviceRefreshClean/{cell.Point}/{cell.Write}")
+                )
                 .Concat(
                     SyncModelScenarios
                         .ServerInterruptCells.Where(cell =>
@@ -1014,6 +1045,31 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
                 .Should()
                 .Be(cell.Run == SyncModelScenarios.InterruptRun.Sync, cell.Name);
         }
+
+        // 端末の書き手の洗い替えの行は、割り込まれる実行が宣言どおりの洗い替え（前段ありは Force・前段なしは Force なし）で、
+        // 後段の同期は Collect で流れることまで見る
+        foreach (
+            var (name, force) in SyncModelScenarios
+                .RefreshForceInterruptCells.Select(cell => (cell.Name, true))
+                .Concat(
+                    SyncModelScenarios.RefreshCleanInterruptCells.Select(cell => (cell.Name, false))
+                )
+        )
+        {
+            var ops = SyncModelScenarios.Get(name).Ops;
+            var arm = ops.OfType<ArmInterruptOp>().Single();
+            arm.Writes.Should().OnlyContain(write => write.Actor == arm.Device, name);
+            var interrupted = ops.Skip(ops.ToList().IndexOf(arm) + 1)
+                .First(op => op is ModelSyncOp or ModelRefreshOp or RefreshWithOptionsOp);
+            interrupted
+                .Should()
+                .BeOfType<RefreshWithOptionsOp>(name)
+                .Which.Force.Should()
+                .Be(force, name);
+            ops.OfType<ModelSyncOp>()
+                .Should()
+                .OnlyContain(sync => sync.Policy == SyncConflictPolicy.Collect, name);
+        }
     }
 
     [Theory(
@@ -1024,8 +1080,7 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
 
     /// <summary>
     /// 決定的なシナリオを直結・新しいエンジンの端末（<see cref="SyncModelEngineDevice"/>）で流し、既知の失敗の一覧
-    /// （<see cref="SyncModelKnownFailures.EngineSet"/>）に載った署名の組どおりに失敗することを表明する。今のエンジンの端末の
-    /// 結果は控え（<see cref="SyncSupportAdoSqliteCurrentEngineRuntimeTests"/>）が受け持つ。流した結果は
+    /// （<see cref="SyncModelKnownFailures.EngineSet"/>）に載った署名の組どおりに失敗することを表明する。流した結果は
     /// <see cref="SyncModelDirectRuns"/> を通して転送の Theory と共有する（違反の無い結果だけ。違反のある行は必ずこの行が自分で流す）
     /// </summary>
     internal static async Task AssertFailsExactlyAsListed(string name)
@@ -1113,10 +1168,7 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             ]
         );
 
-        var (failures, _) = await scenario.RunAsync(
-            Ct,
-            SyncModelEngineDevice.On(SyncModelWorldOptions.Direct)
-        );
+        var (failures, _) = await scenario.RunAsync(Ct);
 
         failures.Select(f => f.Signature).Should().Contain("3/blob-empty:model_items");
     }
@@ -1181,10 +1233,7 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
             ]
         );
 
-        var (failures, _) = await scenario.RunAsync(
-            Ct,
-            SyncModelEngineDevice.On(SyncModelWorldOptions.Direct)
-        );
+        var (failures, _) = await scenario.RunAsync(Ct);
 
         failures.Select(f => f.Signature).Should().Contain("3/blob-empty:model_items");
     }
@@ -1320,10 +1369,14 @@ public sealed class SyncModelRuntimeTests(ITestOutputHelper output) : ISyncModel
     public void KnownFailures_AreWellFormed()
     {
         // 指摘の番号・署名の有無・重複は、一覧（KnownFailureSet）が構築時に検査する
-        SyncModelKnownFailures.Set.Entries.Should().NotBeNull();
+        SyncModelKnownFailures.EngineSet.Entries.Should().NotBeNull();
         var names = SyncModelScenarios.All.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
 
-        foreach (var known in SyncModelKnownFailures.Scenarios)
+        foreach (
+            var known in SyncModelKnownFailures.EngineSet.Entries.Where(entry =>
+                entry.Scope != SyncModelKnownFailures.RandomScope
+            )
+        )
         {
             names.Should().Contain(known.Scope);
             known.Match.Should().Be(KnownMatch.ExactSignature);

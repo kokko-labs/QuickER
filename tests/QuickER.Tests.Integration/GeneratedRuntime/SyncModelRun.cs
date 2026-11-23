@@ -26,7 +26,7 @@ internal sealed record ModelFailure(string Signature, string Detail);
 /// <para>表明は 4 つ。</para>
 /// <list type="number">
 ///   <item><b>止まらない</b>: 注入した失敗の無い同期が例外を投げない。最後の静止化（端末を交互に、Versioned＋Collect →
-///   Versioned＋ServerWins → LastWriteWins の 3 段を安定するまで回す。いずれも全表・blob を運ぶ）が、例外なく、ジャーナル・
+///   Versioned＋ServerWins → LastWriteWins の 3 段を安定するまで回す。いずれも全表・blob を運ぶ）が、例外なく、未送信・
 ///   競合・打ち切りを残さずに終わる。</item>
 ///   <item><b>収束</b>: 静止化の後、端末 2 台とサーバーの全表の行と blob が一致する。</item>
 ///   <item><b>消失なし</b>: キーごとに書き込みの履歴を持つ。最終値は初期値か、誰かが実際に書いた値でなければならない。
@@ -111,32 +111,10 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
 
     private ModelDbState _initial = new();
 
-    private SyncModelRun(SyncModelWorld world, bool passesNotRunnableThrough, CancellationToken ct)
+    private SyncModelRun(SyncModelWorld world, CancellationToken ct)
     {
         _world = world;
-        _passesNotRunnableThrough = passesNotRunnableThrough;
         _ct = ct;
-    }
-
-    /// <summary>「流せない」の例外を素通しにするか（<see cref="SyncModelWorldOptions.PassesNotRunnableThrough"/>）</summary>
-    private readonly bool _passesNotRunnableThrough;
-
-    /// <summary>
-    /// 例外を、違反として記録せずにシナリオの外へ素通しにするか（素通しの印が真で、「流せない」の例外のときだけ）
-    /// </summary>
-    private bool PassesThrough(Exception exception) =>
-        _passesNotRunnableThrough && SyncModelDevice.StopsScenario(exception);
-
-    /// <summary>
-    /// 適用の行をローカルの Save フックに飛ばさせる失敗の注入（ApplySkip）を仕掛ける前に、端末のエンジンの適用がフックを通るかを
-    /// 確かめる（通らないエンジンでは注入が働かないので、仕掛ける前に「流せない」で断る）
-    /// </summary>
-    private void RequireSaveHookApply(ModelActor device)
-    {
-        if (!_world.Device(device).Sync.AppliesThroughSaveHooks)
-        {
-            throw SyncModelDevice.Unsupported(nameof(ModelFaultKind.ApplySkip), "engine");
-        }
     }
 
     /// <summary>実行した操作の列（人が読める 1 行 1 操作）</summary>
@@ -168,13 +146,9 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     )
     {
         options ??= SyncModelWorldOptions.Direct;
-        var run = new SyncModelRun(
-            await SyncModelWorld.CreateAsync(options, ct),
-            options.PassesNotRunnableThrough,
-            ct
-        );
+        var run = new SyncModelRun(await SyncModelWorld.CreateAsync(options, ct), ct);
 
-        // 世界を作った後の準備が例外で抜けたら（「流せない」の例外を含む）、世界（一時の DB・サーバー役）を破棄してから投げる
+        // 世界を作った後の準備が例外で抜けたら、世界（一時の DB・サーバー役）を破棄してから投げる
         try
         {
             await SetUpAsync(run, setup, options, preloads, ct);
@@ -197,11 +171,6 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         CancellationToken ct
     )
     {
-        foreach (var device in options.ExternalTables)
-        {
-            run._log.Add($"setup: {device} uses external ISyncTable implementations");
-        }
-
         foreach (var op in setup)
         {
             run._log.Add("setup: " + op.Describe());
@@ -439,11 +408,6 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 return await WriteAsync(write) && _world.Faults.Fired == fired;
 
             case ArmFaultOp arm:
-                if (arm.Kind == ModelFaultKind.ApplySkip)
-                {
-                    RequireSaveHookApply(arm.Device);
-                }
-
                 _world.Faults.Arm(arm.Kind, arm.Device);
                 break;
 
@@ -466,32 +430,6 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                     interrupt.Writer,
                     () => InterruptWriteAsync(interrupt)
                 );
-                break;
-
-            case LegacyKeyTextsOp legacy:
-                // 製品のジャーナルの表を生の SQL で書き換える手（持たない端末では SQL を流す前に断る）
-                _ = _world.Device(legacy.Device).RequireJournal(nameof(LegacyKeyTextsOp));
-
-                foreach (
-                    var table in new[]
-                    {
-                        "quicker_sync_journal",
-                        "quicker_sync_ack",
-                        "quicker_sync_blob_pending",
-                    }
-                )
-                {
-                    await _world
-                        .Device(legacy.Device)
-                        .Sql.ExecuteSqlAsync(
-                            $"UPDATE {table} SET key_text = key_text || @suffix WHERE table_name = @tableName",
-                            new { suffix = legacy.Suffix, tableName = legacy.Table },
-                            _ct
-                        );
-                }
-
-                // エンジンの記録を直接変える手（照合 4 はこの表を決められないとして数える）
-                NoteRecordTouched(legacy.Device, legacy.Table, null);
                 break;
 
             case ExpectPayloadOp expect:
@@ -532,82 +470,6 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                                     ", ",
                                     reported.Select(c => $"{c.TableName}/{c.KeyText}/{c.Reason}")
                                 )
-                        )
-                    );
-                }
-
-                break;
-            }
-
-            case LeftoverUnsetKeyEntryOp leftover:
-            {
-                var device = _world.Device(leftover.Device);
-                var journal = device.RequireJournal(nameof(LeftoverUnsetKeyEntryOp));
-                var pendingBefore = await journal.CountPendingAsync(_ct);
-
-                // エンジンの記録を直接作る手（照合 4 はこのキーを決められないとして数える）
-                NoteRecordTouched(leftover.Device, leftover.Table, SyncJournal.UnsetKeyText);
-                await device.Sql.ExecuteSqlAsync(
-                    "INSERT INTO quicker_sync_journal (table_name, key_text, operation, "
-                        + "original_row_version, unbounded_binary_columns, recorded_at) "
-                        + "VALUES (@tableName, @keyText, 'Upsert', NULL, NULL, '2026-11-01T00:00:00')",
-                    new { tableName = leftover.Table, keyText = SyncJournal.UnsetKeyText },
-                    _ct
-                );
-
-                if (
-                    (await journal.ReadAllAsync(_ct)).Any(entry =>
-                        entry.KeyText == SyncJournal.UnsetKeyText
-                    )
-                    || await journal.CountPendingAsync(_ct) != pendingBefore
-                )
-                {
-                    _failures.Add(
-                        new(
-                            $"5/unset-key-read:{leftover.Table}",
-                            $"{leftover.Describe()}: the journal readers return the entry"
-                        )
-                    );
-                }
-
-                break;
-            }
-
-            case ExpectNoUnsetKeyEntryOp expect:
-            {
-                // 製品のジャーナルの表を生の SQL で読む手（持たない端末では SQL を流す前に断る）
-                _ = _world.Device(expect.Device).RequireJournal(nameof(ExpectNoUnsetKeyEntryOp));
-                var left = await _world
-                    .Device(expect.Device)
-                    .Sql.ExecuteScalarSqlAsync<long>(
-                        "SELECT COUNT(*) FROM quicker_sync_journal WHERE key_text = @keyText",
-                        new { keyText = SyncJournal.UnsetKeyText },
-                        _ct
-                    );
-
-                if (left != 0)
-                {
-                    _failures.Add(
-                        new("5/unset-key-left", $"{expect.Describe()}: {left} entries are left")
-                    );
-                }
-
-                break;
-            }
-
-            case ExpectNoAckOp expect:
-            {
-                var acks = await _world
-                    .Device(expect.Device)
-                    .RequireJournal(nameof(ExpectNoAckOp))
-                    .ReadAcksAsync(expect.Table, _ct);
-
-                if (acks.ContainsKey(expect.KeyText))
-                {
-                    _failures.Add(
-                        new(
-                            $"5/expect-no-ack:{expect.Table}",
-                            $"{expect.Describe()}: an ack is recorded"
                         )
                     );
                 }
@@ -694,11 +556,6 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
 
                     // 洗い替えの結果は自分から変えた行を名指ししない（空として照らす）
                     await EndRunAsync(frame, [], [], threw: false);
-                }
-                catch (Exception ex) when (PassesThrough(ex))
-                {
-                    // 素通しの印が真の世界（控えの Fact）では、「流せない」はシナリオをこの端末で流せないことの知らせ（そのまま外へ出す）
-                    throw;
                 }
                 catch (Exception ex) when (ConsumeExpectedThrow(refresh.Device, ex))
                 {
@@ -803,14 +660,9 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 );
             }
         }
-        catch (Exception ex) when (PassesThrough(ex))
-        {
-            // 素通しの印が真の世界（控えの Fact）では、「流せない」はシナリオをこの端末で流せないことの知らせ（そのまま外へ出す）
-            throw;
-        }
         catch (Exception ex) when (op.ExpectFailure || InjectedFaultException.IsInjected(ex))
         {
-            // 失敗する書き込み・注入した失敗。ジャーナルの記録だけが残る（journal-first）
+            // 失敗する書き込み・注入した失敗。トリガーの記録は書き込みと一緒に巻き戻る
             _log.Add($"  -> write failed: {ex.GetType().Name}");
             applied = false;
         }
@@ -937,15 +789,6 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         ModelSyncOutcome outcome;
         var fired = _world.Faults.Fired;
 
-        if (!quiescing)
-        {
-            _journalAtLastSync[op.Device] = (
-                await _world.Device(op.Device).State.ReadPendingAsync(_ct)
-            )
-                .SelectMany(row => row.ChangeMarks)
-                .ToHashSet();
-        }
-
         // 消された品目をこの同期が上げ直したか（挿入の経路になった）を、サーバーの行の有無の前後で見る
         var serverItemsBefore = before
             ?.Server.Rows(ModelTables.Items)
@@ -954,11 +797,6 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         try
         {
             outcome = await _world.SyncAsync(op, _ct);
-        }
-        catch (Exception ex) when (PassesThrough(ex))
-        {
-            // 素通しの印が真の世界（控えの Fact）では、「流せない」はシナリオをこの端末で流せないことの知らせ（そのまま外へ出す）
-            throw;
         }
         catch (Exception ex)
             when (InjectedFaultException.IsInjected(ex)
@@ -1102,7 +940,6 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             _log.Add(
                 $"  -> truncated {ModelTables.Short(truncation.TableName)} "
                     + $"pending={truncation.PendingKeyText ?? "-"} "
-                    + $"by={truncation.TruncatedByTableName ?? "-"} "
                     + $"parent={(truncation.MissingParentTableName is { } parent ? ModelTables.Short(parent) : "-")}"
             );
         }
@@ -1244,7 +1081,7 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     }
 
     /// <summary>
-    /// Versioned＋ServerWins の実行は、その範囲の未送信のジャーナルを送らずに捨て、サーバーの行で上書きする（この端末の
+    /// Versioned＋ServerWins の実行は、その範囲の未送信の行を送らずに捨て、サーバーの行で上書きする（この端末の
     /// ローカルの変更を捨てると頼む操作）。捨てる行は、競合を報告された行と同じく、その端末の書き込みを期待値から外す。
     /// </summary>
     private async Task RecordServerWinsDiscardsAsync(ModelSyncOp op)
@@ -2997,39 +2834,18 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         var frames = FrameRegex
             .Matches(ex.StackTrace ?? "")
             .Select(m => Frame(m.Groups["path"].Value))
-            // 外部の ISyncTable 実装の代役は転送するだけ＝署名から外す（包むかどうかで署名が割れないように）
-            .Where(f => !f.StartsWith("SyncModelExternalTable.", StringComparison.Ordinal))
             .ToList();
 
         var inner = frames.FirstOrDefault() ?? "?";
-        // 新しいエンジンの型（TrackedSync で始まる型と、表の部品の型を消した面 ITrackedSyncTable）も、今のエンジンの型と同じ
-        // 「同期の型」として数える
+        // 同期の型は Sync で始まる型（SyncEngine・表の SyncTable とその派生・エンジンの内部の型ほか）
         var sync =
-            frames.FirstOrDefault(f =>
-                f.StartsWith("Sync", StringComparison.Ordinal)
-                || f.StartsWith("VersionlessSync", StringComparison.Ordinal)
-                || f.StartsWith("TrackedSync", StringComparison.Ordinal)
-                || f.StartsWith("ITrackedSyncTable.", StringComparison.Ordinal)
-            ) ?? "?";
+            frames.FirstOrDefault(f => f.StartsWith("Sync", StringComparison.Ordinal)) ?? "?";
 
-        // 表の公開の入口（ダウンロード・ServerWins の適用・洗い替え・アップロード・削除伝搬のどれから来たか）。表の型
-        // （版あり・版なし）は落とす＝同じ不具合が表の種類で別の署名へ割れないように。新しいエンジンは表ごとの入口を持たず、
-        // エンジンの段（取得と適用・送信・洗い替え）が入口に当たる
+        // 入口（取得と適用・送信・洗い替えのどれから来たか）。エンジンは表ごとの入口を持たず、エンジンの段が入口に当たる
         var entry =
             frames.LastOrDefault(f =>
-                (
-                    (
-                        f.StartsWith("SyncTableBase.", StringComparison.Ordinal)
-                        || f.StartsWith("SyncTable.", StringComparison.Ordinal)
-                        || f.StartsWith("VersionlessSyncTable.", StringComparison.Ordinal)
-                    ) && EntryMethods.Contains(f[(f.IndexOf('.', StringComparison.Ordinal) + 1)..])
-                )
-                || (
-                    f.StartsWith("TrackedSyncEngine.", StringComparison.Ordinal)
-                    && TrackedEntryMethods.Contains(
-                        f[(f.IndexOf('.', StringComparison.Ordinal) + 1)..]
-                    )
-                )
+                f.StartsWith("SyncEngine.", StringComparison.Ordinal)
+                && EntryMethods.Contains(f[(f.IndexOf('.', StringComparison.Ordinal) + 1)..])
             ) ?? sync;
         // 公開の入口の本体を分けた内部メソッド（〜CoreAsync）は、公開の名前へそろえる（実装の分け方で署名が割れないように）
         var entryMethod = entry[(entry.IndexOf('.', StringComparison.Ordinal) + 1)..]
@@ -3039,21 +2855,11 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         return sync == inner ? path : $"{path}>{inner}";
     }
 
-    private static readonly HashSet<string> EntryMethods = new(StringComparer.Ordinal)
-    {
-        "DownloadAsync",
-        "ApplyServerRowsAsync",
-        "ApplyServerRowsCoreAsync",
-        "RefreshAsync",
-        "RefreshCoreAsync",
-        "UploadAsync",
-    };
-
     /// <summary>
-    /// 新しいエンジン（TrackedSyncEngine）の入口として名指しするメソッド：エンジンの段（取得と適用・送信）と、公開の入口の
+    /// エンジン（SyncEngine）の入口として名指しするメソッド：エンジンの段（取得と適用・送信）と、公開の入口の
     /// 単独の取得・送信・洗い替え。同期の実行（SyncAsync）は段を順に呼ぶだけなので数えない（段の名前が入口になる）
     /// </summary>
-    private static readonly HashSet<string> TrackedEntryMethods = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> EntryMethods = new(StringComparer.Ordinal)
     {
         "DownloadAsync",
         "DownloadCoreAsync",

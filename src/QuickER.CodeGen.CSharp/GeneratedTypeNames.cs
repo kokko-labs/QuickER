@@ -77,7 +77,6 @@ public static class GeneratedTypeNames
         yield return $"Http{repositoryName}RemoteRepository";
         yield return $"InMemory{repositoryName}Repository";
         yield return $"EfCore{repositoryName}Repository";
-        yield return $"Journaling{repositoryName}Repository";
         yield return $"{repositoryName}RepositoryBinaryStreamExtensions";
         yield return $"{repositoryName}UniquenessConstraints";
     }

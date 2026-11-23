@@ -14,7 +14,7 @@ namespace QuickER.Tests.CodeGen.CSharp.CodegenConfig.Judges;
 ///   <item>表ごとに <c>{幹}Entity</c>（常に）・<c>{幹}EditModel</c>・<c>{幹}Mapper</c>（各オプション）。型名は docs「Generated type names」。</item>
 ///   <item>Repository 契約 <c>I{幹}Repository</c> は契約を生成するとき単一主キーの表だけ（docs「What gets generated」の前提）。
 ///   QuickER 版の実装 <c>{幹}Repository</c> は方言ごとに 1 つ（方言の名前空間）、<c>EfCore{幹}Repository</c>・<c>InMemory{幹}Repository</c>・
-///   <c>I{幹}RemoteRepository</c>・<c>Http{幹}RemoteRepository</c>・<c>Journaling{幹}Repository</c> は各機能（CLAUDE.md「DB アクセスの排他と単独出力」
+///   <c>I{幹}RemoteRepository</c>・<c>Http{幹}RemoteRepository</c> は各機能（CLAUDE.md「DB アクセスの排他と単独出力」
 ///   「リモート契約生成」「HTTP クライアントのバケット分離」・docs「Bidirectional sync support」）。</item>
 ///   <item>同期の記述子 <c>GeneratedSyncTables</c>、EF Core の <c>QuickErDbContext</c> と主キーを持つ表ごとの <c>DbSet</c>（Fluent の構成の中身は見ない）。</item>
 ///   <item>DI の拡張メソッド：<c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedSqliteRepositories</c>（方言ごと）・
@@ -102,7 +102,6 @@ internal static class SemanticJudge
             );
             ExpectTypes($"I{stem}RemoteRepository", If(remote && single, namespaces.Contract));
             ExpectTypes($"Http{stem}RemoteRepository", If(services && single, namespaces.Http));
-            ExpectTypes($"Journaling{stem}Repository", If(sync && single, namespaces.Sync));
         }
 
         ExpectTypes("GeneratedSyncTables", If(sync, namespaces.Sync));

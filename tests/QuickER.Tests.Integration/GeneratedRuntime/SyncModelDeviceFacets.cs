@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using QuickER.Tests.GeneratedSyncModelFixture;
@@ -9,8 +8,8 @@ using QuickER.Tests.GeneratedSyncModelFixture;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// 端末のエンジンの面。同期のモデルが端末の同期・洗い替えを流す入口（製品の <c>SyncEngine</c> を直接呼ばず、この面を通す）。
-/// 既定の実装は <see cref="ProductModelDeviceSync"/>（製品の <c>SyncEngine</c> を呼ぶ）。別のエンジンはこの面を実装して差し替える。
+/// 端末のエンジンの面。同期のモデルが端末の同期・洗い替えを流す入口（エンジンを直接呼ばず、この面を通す）。
+/// 実装は <see cref="EngineModelDeviceSync"/>（<c>SyncEngine</c> を呼ぶ）。判定役の包みはこの面を実装して差し替える。
 /// </summary>
 internal interface IModelDeviceSync
 {
@@ -29,34 +28,6 @@ internal interface IModelDeviceSync
     /// 判定役は、真のエンジンだけ、持ち越した決定の内容をサーバーへ書くことを違反にし、果たされた決定をその行の期待から外す
     /// </summary>
     bool CarriesServerWinsDecision { get; }
-
-    /// <summary>
-    /// サーバーの行の適用が、端末のローカルの Save フックを通るエンジンか（真＝適用はリポジトリのグラフ保存で書き、フックが行を
-    /// 飛ばせる。偽＝適用はフックを呼ばない）。偽のエンジンの端末では、適用の行をフックに飛ばさせる失敗の注入（ApplySkip）を
-    /// 仕掛ける手を「流せない」で断る
-    /// </summary>
-    bool AppliesThroughSaveHooks { get; }
-
-    /// <summary>
-    /// ダウンロードの再開点を、端末のローカルの行の版の列（ミラー版）の最大値から導くエンジンか（真＝版の列を書くのは
-    /// ダウンロードだけで、ServerWins で戻した行の版の列は据え置く。偽＝再開点は表ごとに別に持ち、戻した行の版の列は
-    /// サーバーの版になる）。決まった形の行の期待の手 <see cref="WhenEngineDeclaresOp"/> が枝を選ぶ
-    /// </summary>
-    bool DerivesResumePointFromLocalVersions { get; }
-
-    /// <summary>
-    /// 同期と洗い替えの取得で保留して取り残した行を、同じ実行の中で上限を取り直してもう 1 回取得するエンジンか（真＝1 回目の
-    /// 適用で保留した行と、その間にサーバーで変わった行が同じ実行に入る。偽＝取り残した行は後の実行が降ろす）。決まった形の行の
-    /// 期待の手 <see cref="WhenEngineDeclaresOp"/> が枝を選ぶ
-    /// </summary>
-    bool RefetchesHeldRowsInSameRun { get; }
-
-    /// <summary>
-    /// 1 回の取得が降ろす行が <c>SyncOptions.DownloadRowLimit</c> を超え、範囲の表に未送信の変更があるとき、何も適用せずに
-    /// <c>SyncDownloadTooLargeException</c> で断るエンジンか（真＝断る。偽＝上限を見ずに降ろす）。決まった形の行の期待の手
-    /// <see cref="WhenEngineDeclaresOp"/> が枝を選ぶ
-    /// </summary>
-    bool RefusesDownloadOverRowLimit { get; }
 }
 
 /// <summary>
@@ -67,8 +38,7 @@ internal interface IModelDeviceSync
 /// <param name="HasUpsert">追加か更新を含むか</param>
 /// <param name="HasDelete">削除を含むか</param>
 /// <param name="ServerKnowsRow">
-/// サーバーがこの行を知っているか（偽＝行はサーバーに届いていない。版なしの表は常に真。版を持つ削除の記録か受理記録が
-/// あれば真）。エンジンが送らずに捨てる行かの判定の根拠
+/// サーバーがこの行を知っているか（偽＝行はサーバーに届いていない。版なしの表は常に真）。エンジンが送らずに捨てる行かの判定の根拠
 /// </param>
 /// <param name="ChangeMarks">
 /// 変わる印（この行の未送信の変更 1 つごとの識別子。順序つき）。同期の前後で印のどれかが残っているかで、その行の未送信が
@@ -89,157 +59,28 @@ internal sealed record ModelPendingRow(
     public IReadOnlyList<string> Operations { get; init; } = [];
 }
 
-/// <summary>端末の同期の状態の面。未送信の行の事実を返す。既定の実装は <see cref="JournalModelDeviceSyncState"/></summary>
+/// <summary>端末の同期の状態の面。未送信の行の事実を返す。実装は <see cref="EngineModelDeviceSyncState"/></summary>
 internal interface IModelDeviceSyncState
 {
     /// <summary>未送信の行の一覧（記録された順＝各行の最初の変更の順）</summary>
     Task<IReadOnlyList<ModelPendingRow>> ReadPendingAsync(CancellationToken ct);
 
-    /// <summary>未送信の変更の件数（行の数ではなく、記録の数）</summary>
+    /// <summary>未送信の変更の件数</summary>
     Task<int> CountPendingAsync(CancellationToken ct);
-}
-
-/// <summary>製品の <c>SyncEngine</c> を呼ぶ既定の実装（もとの <c>SyncModelWorld</c> の組み立てをそのまま移した）</summary>
-internal sealed class ProductModelDeviceSync(SyncEngine engine) : IModelDeviceSync
-{
-    /// <summary>製品のエンジンは、戻せなかった行の記録を残し、後の実行がその行を送る（持ち越さない）</summary>
-    public bool CarriesServerWinsDecision => false;
-
-    /// <summary>製品のエンジンは、サーバーの行をリポジトリのグラフ保存で適用する（ローカルの Save フックが走る）</summary>
-    public bool AppliesThroughSaveHooks => true;
-
-    /// <summary>製品のエンジンは、再開点をローカルの行のミラー版の最大値から導く</summary>
-    public bool DerivesResumePointFromLocalVersions => true;
-
-    /// <summary>製品のエンジンは、取得を同じ実行の中で取り直さない（打ち切った行は後の実行が降ろす）</summary>
-    public bool RefetchesHeldRowsInSameRun => false;
-
-    /// <summary>製品のエンジンは、降ろす行の数の上限を読まない（上限を超えても未送信があっても降ろす）</summary>
-    public bool RefusesDownloadOverRowLimit => false;
-
-    public async Task<ModelSyncOutcome> RunAsync(
-        ModelSyncKind kind,
-        SyncOptions options,
-        CancellationToken ct
-    )
-    {
-        switch (kind)
-        {
-            case ModelSyncKind.Sync:
-            {
-                var result = await engine.SyncAsync(options, ct);
-
-                return new ModelSyncOutcome(result.Conflicts, result.Truncations)
-                {
-                    LocalRowChanges = result.LocalRowChanges,
-                    Uploaded = result.Uploaded,
-                    Downloaded = result.Downloaded,
-                    DeletedLocally = result.DeletedLocally,
-                    Discarded = result.Discarded,
-                    ReportedFlags = (result.HasConflicts, result.HasTruncations),
-                };
-            }
-
-            case ModelSyncKind.Upload:
-            {
-                var conflicts = new List<SyncConflict>();
-                var (uploaded, discarded) = await engine.UploadAsync(options, conflicts, ct);
-
-                return new ModelSyncOutcome(conflicts, [])
-                {
-                    Uploaded = uploaded,
-                    Discarded = discarded,
-                };
-            }
-
-            case ModelSyncKind.Download:
-            {
-                var (downloaded, deletedLocally) = await engine.DownloadAsync(options, ct);
-
-                return new ModelSyncOutcome([], [])
-                {
-                    Downloaded = downloaded,
-                    DeletedLocally = deletedLocally,
-                };
-            }
-
-            default:
-                throw new ArgumentOutOfRangeException(nameof(kind), kind, null);
-        }
-    }
-
-    public Task<SyncRefreshResult> RefreshAsync(
-        SyncRefreshOptions? options,
-        CancellationToken ct
-    ) => engine.RefreshAsync(options, ct);
-}
-
-/// <summary>
-/// 製品のジャーナル（<c>SyncJournal</c>）の記録と受理記録から、未送信の行の事実を導く既定の実装。
-/// </summary>
-/// <remarks>
-/// 同じ（表, 記録のキー）の記録を 1 行にまとめる。<see cref="ModelPendingRow.ServerKnowsRow"/> は、行が無く削除の記録がある行を
-/// エンジンが送らずに捨てるかの判定（docs の「送る操作の決め方」の表の「Gone｜Otherwise＝行はサーバーに届いていない」の写し）の
-/// 否定：版を持つ表で、削除の記録のどれも版を持たず、受理記録も無いときだけ偽（版なしの表は常に真）。
-/// </remarks>
-internal sealed class JournalModelDeviceSyncState(SyncJournal journal) : IModelDeviceSyncState
-{
-    public async Task<IReadOnlyList<ModelPendingRow>> ReadPendingAsync(CancellationToken ct)
-    {
-        var acknowledged = new HashSet<(string Table, string KeyText)>();
-
-        foreach (var table in ModelTables.All)
-        {
-            foreach (var keyText in (await journal.ReadAcksAsync(table, ct)).Keys)
-            {
-                acknowledged.Add((table, keyText));
-            }
-        }
-
-        return
-        [
-            .. (await journal.ReadAllAsync(ct))
-                .GroupBy(entry => (entry.TableName, entry.KeyText))
-                .Select(group => new ModelPendingRow(
-                    group.Key.TableName,
-                    group.Key.KeyText,
-                    group.Any(e => e.Operation == nameof(SyncJournalOperation.Upsert)),
-                    group.Any(e => e.Operation == nameof(SyncJournalOperation.Delete)),
-                    !group.All(entry =>
-                        entry.TableName != ModelTables.Labels
-                        && (
-                            entry.Operation != nameof(SyncJournalOperation.Delete)
-                            || entry.OriginalRowVersion is null
-                        )
-                        && !acknowledged.Contains((entry.TableName, entry.KeyText))
-                    ),
-                    [.. group.Select(e => e.Id)]
-                )
-                {
-                    Operations = [.. group.Select(e => e.Operation)],
-                }),
-        ];
-    }
-
-    public async Task<int> CountPendingAsync(CancellationToken ct) =>
-        (await journal.ReadAllAsync(ct)).Count;
 }
 
 /// <summary>端末の作り方（<see cref="SyncModelWorldOptions.CreateDevice"/>）へ渡す、端末 1 台の注文</summary>
 /// <param name="Actor">端末</param>
 /// <param name="Server">端末の差分ソース 4 つ（直結か HTTP 越し）</param>
 /// <param name="Faults">失敗の注入（ローカルの Save フックが見る）</param>
-/// <param name="ExternalTables">表を外部の <see cref="ISyncTable"/> 実装の代役で包むか</param>
 internal sealed record SyncModelDeviceRequest(
     ModelActor Actor,
     ISyncModelSources Server,
-    SyncModelFaults Faults,
-    bool ExternalTables
+    SyncModelFaults Faults
 );
 
 /// <summary>
-/// 別のエンジンの端末が <see cref="SyncModelDevice.Install"/> へ渡す部品。リポジトリはジャーナル記録デコレータで包まなくてよい
-/// （包まないなら Raw 系は省略して同じものを使う）。エンジンの面と状態の面は別の実装を持てる。今の端末の部品は
+/// 端末の作り方が <see cref="SyncModelDevice.Install"/> へ渡す部品。エンジンの面と状態の面は別の実装を持てる。今の端末の部品は
 /// <see cref="SyncModelDevice.CurrentParts"/> で読める（包みは一部だけ差し替えて載せ直す）。
 /// </summary>
 internal sealed record SyncModelDeviceParts
@@ -252,15 +93,6 @@ internal sealed record SyncModelDeviceParts
 
     public required IModelEventRepository Events { get; init; }
 
-    /// <summary>記録しないフォルダーのリポジトリ（省略なら <see cref="Folders"/>）</summary>
-    public IModelFolderRepository? RawFolders { get; init; }
-
-    /// <summary>記録しないラベルのリポジトリ（省略なら <see cref="Labels"/>）</summary>
-    public IModelLabelRepository? RawLabels { get; init; }
-
-    /// <summary>記録しない品目のリポジトリ（省略なら <see cref="Items"/>）</summary>
-    public IModelItemRepository? RawItems { get; init; }
-
     public required IModelDeviceSync Sync { get; init; }
 
     public required IModelDeviceSyncState State { get; init; }
@@ -269,20 +101,23 @@ internal sealed record SyncModelDeviceParts
     /// 記録しない書き込みを流す関数を受け取り、流す間は端末の未送信の記録が残らないように流す口。口は接続を開き、製品の
     /// 記録しない書き込みの API（<c>SyncLocalTracking.WriteUntrackedAsync</c>）の上で、その接続を関数へ渡す（関数は渡された
     /// 接続の SQL か <c>ILocalRowStore</c> だけで書く）。第 3 引数が真なら外部キーの検査を切った接続を渡す。前からある未送信の
-    /// 記録は変えない（記録を消すのは <see cref="ClearPendingRecordsAsync"/> の別の手順）。省略なら、接続の無い関数
-    /// （<see cref="SyncModelDevice.WriteUntrackedAsync"/> が null を渡す）をそのまま流す（記録デコレータの内側のリポジトリ・
-    /// 生の SQL が記録を作らない端末）
+    /// 記録は変えない（記録を消すのは <see cref="ClearPendingRecordsAsync"/> の別の手順）
     /// </summary>
-    public Func<
+    public required Func<
         Func<DbConnection, Task>,
         CancellationToken,
         bool,
         Task
-    >? WriteUntrackedAsync { get; init; }
+    > WriteUntrackedAsync { get; init; }
 
     /// <summary>
     /// 1 行（表の名前とキーのテキスト）の未送信の記録を全部消す口（判定役の対照の行の包みが、エンジンが記録を捨てた結果を作るのに
-    /// 使う）。省略なら製品のジャーナルの表からその行の記録を消す（<see cref="SyncModelDevice.ClearPendingRecordsAsync"/>）
+    /// 使う）
     /// </summary>
-    public Func<string, string, CancellationToken, Task>? ClearPendingRecordsAsync { get; init; }
+    public required Func<
+        string,
+        string,
+        CancellationToken,
+        Task
+    > ClearPendingRecordsAsync { get; init; }
 }

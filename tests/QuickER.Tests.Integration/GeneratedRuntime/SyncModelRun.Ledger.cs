@@ -14,7 +14,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <para>
 /// 台帳と照合 1〜3、照合 4 のモデルの観測は、書き込みの手の履歴・実行の前後の端末とサーバーの DB の内容・実行の公開の結果
 /// （競合・<see cref="SyncLocalRowChange"/>）だけから作る。端末の同期の状態の面（<see cref="IModelDeviceSyncState"/>）・
-/// ジャーナル・受理記録は読まない（エンジンの自己申告と一緒に間違えないため）。照合 4 が状態の面から読むのは、比べる相手の
+/// 端末の状態の表は読まない（エンジンの自己申告と一緒に間違えないため）。照合 4 が状態の面から読むのは、比べる相手の
 /// <see cref="ModelPendingRow.ServerKnowsRow"/> と、比べる行を選ぶための「端末に行が無く削除の未送信がある行」だけ。
 /// </para>
 /// <para>
@@ -788,34 +788,6 @@ internal sealed partial class SyncModelRun
         }
     }
 
-    /// <summary>
-    /// 利用者が記録を捨てる手（<see cref="ClearJournalOp"/>）の範囲の表の、その端末の持ち分と戻せなかった行の決定を下ろす
-    /// （表が null なら全部の表）
-    /// </summary>
-    private void ForgetDiscardedRecords(ModelActor device, string? table)
-    {
-        bool InRange(string t) => table is null || RowKey((t, "")).Table == table;
-
-        foreach (
-            var key in _holdings.Keys.Where(k => k.Device == device && InRange(k.Table)).ToList()
-        )
-        {
-            _holdings.Remove(key);
-        }
-
-        foreach (
-            var key in _carried.Keys.Where(k => k.Device == device && InRange(k.Table)).ToList()
-        )
-        {
-            _carried.Remove(key);
-        }
-
-        _mayHoldRecord.RemoveWhere(k => k.Device == device && InRange(k.Table));
-
-        ForgetDeletedBlobsWithoutRow(device);
-        CheckLedgerInvariant(device, $"clearing the journal of {table ?? "every table"}");
-    }
-
     /// <summary>エンジンの記録を直接作る・変える手が触れたキーを控える（照合 4 だけが決められないとして数える）</summary>
     private void NoteRecordTouched(ModelActor device, string? table, string? key) =>
         _recordTouched.Add((device, table, key));
@@ -1583,7 +1555,7 @@ internal sealed partial class SyncModelRun
             );
 
         var sent = conflicts
-            .Where(c => c.Operation == SyncJournalOperation.Upsert)
+            .Where(c => c.Operation == SyncOperation.Upsert)
             .Select(c =>
                 (c.TableName, CanonicalKey(c.TableName, c.KeyText), $"conflict {c.Reason}")
             )

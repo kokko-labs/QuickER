@@ -1915,22 +1915,22 @@ internal static partial class SyncPlanExpectationRows
                     r.LiveSql(
                             SyncAuxItemSql
                                 + SyncAuxTablesSql
-                                + "CREATE TRIGGER \"quicker_sync_trg_ax_item_insert\" AFTER INSERT ON \"ax_item\" BEGIN "
-                                + "INSERT INTO quicker_sync_journal (table_name, key_text, operation, recorded_at) "
-                                + "VALUES ('ax_item', NEW.\"id\", 'insert', 't'); END;"
+                                + "CREATE TRIGGER \"quicker_sync_trg_ax_item_ai\" AFTER INSERT ON \"ax_item\" BEGIN "
+                                + "INSERT INTO quicker_sync_row (table_name, \"key\", dirty, deleted, change_seq) "
+                                + "VALUES ('ax_item', NEW.\"id\", 1, 0, 2); END;"
                         )
                         .Query("trigger", "SELECT name FROM sqlite_master WHERE type = 'trigger';")
                         .Query("fire", "INSERT INTO \"ax_item\" (\"id\") VALUES (2);")
-                        .Query("journal", "SELECT count(*) FROM quicker_sync_journal;")
+                        .Query("rows", "SELECT count(*) FROM quicker_sync_row;")
                         .Expect(e =>
                         {
                             e.Outcome.Exact("committed");
                             e.Warnings.Absent("TableChangeBreaksDependentTrigger*");
                             e.Excluded.Empty();
                             e.After.Single("col ax_item.extra INTEGER *");
-                            e.Probe("trigger").Exact("quicker_sync_trg_ax_item_insert");
+                            e.Probe("trigger").Exact("quicker_sync_trg_ax_item_ai");
                             e.Probe("fire").Empty();
-                            e.Probe("journal").Exact("2");
+                            e.Probe("rows").Exact("2");
                         })
                 ),
             // 補助のトリガーが使う列の削除：補助の表を写しに入れて判定するので、列の削除を外してトリガーを名指しする
@@ -1950,26 +1950,26 @@ internal static partial class SyncPlanExpectationRows
                     r.LiveSql(
                             SyncAuxItemSql
                                 + SyncAuxTablesSql
-                                + "CREATE TRIGGER \"quicker_sync_trg_ax_item_note\" AFTER INSERT ON \"ax_item\" BEGIN "
-                                + "INSERT INTO quicker_sync_journal (table_name, key_text, operation, recorded_at) "
-                                + "VALUES ('ax_item', NEW.\"note\", 'insert', 't'); END;"
+                                + "CREATE TRIGGER \"quicker_sync_trg_ax_item_ai\" AFTER INSERT ON \"ax_item\" BEGIN "
+                                + "INSERT INTO quicker_sync_row (table_name, \"key\", dirty, deleted, change_seq) "
+                                + "VALUES ('ax_item', NEW.\"note\", 1, 0, 2); END;"
                         )
                         .Query(
                             "fire",
                             "INSERT INTO \"ax_item\" (\"id\", \"note\") VALUES (2, 'n');"
                         )
-                        .Query("journal", "SELECT count(*) FROM quicker_sync_journal;")
+                        .Query("rows", "SELECT count(*) FROM quicker_sync_row;")
                         .Expect(e =>
                         {
                             e.Outcome.Exact("committed");
                             e.Warnings.Single(
-                                "TableChangeBreaksDependentTrigger(ax_item): quicker_sync_trg_ax_item_note"
+                                "TableChangeBreaksDependentTrigger(ax_item): quicker_sync_trg_ax_item_ai"
                             );
                             e.Excluded.Exact("DropColumn ax_item.note");
                             e.After.Contains("col ax_item.note *");
                             e.After.Single("col ax_item.extra INTEGER *");
                             e.Probe("fire").Empty();
-                            e.Probe("journal").Exact("2");
+                            e.Probe("rows").Exact("2");
                         })
                 ),
         ];
@@ -2636,56 +2636,48 @@ internal static partial class SyncPlanExpectationRows
         + "INSERT INTO \"ax_item\" (\"id\", \"note\", \"extra\") VALUES (1, 'a', '7');";
 
     /// <summary>
-    /// 双方向同期の補助の 4 表（生成テンプレート <c>_10_Sync.scriban</c> の <c>SyncJournal</c> が作る文の写し）と、各表の 1 行
+    /// 双方向同期の補助の 3 表（生成テンプレート <c>_10_Sync.scriban</c> の <c>SyncLocalTracking</c> が作る文の写し）と、各表の 1 行
     /// </summary>
     private const string SyncAuxTablesSql =
-        "CREATE TABLE IF NOT EXISTS quicker_sync_journal ("
-        + "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "CREATE TABLE IF NOT EXISTS quicker_sync_state ("
+        + "id INTEGER PRIMARY KEY CHECK (id = 1), "
+        + "format INTEGER NOT NULL, "
+        + "db_id TEXT NOT NULL, "
+        + "applying INTEGER NOT NULL, "
+        + "next_seq INTEGER NOT NULL);"
+        + "CREATE TABLE IF NOT EXISTS quicker_sync_row ("
         + "table_name TEXT NOT NULL, "
-        + "key_text TEXT NOT NULL, "
-        + "operation TEXT NOT NULL, "
-        + "original_row_version BLOB NULL, "
-        + "unbounded_binary_columns TEXT NULL, "
-        + "recorded_at TEXT NOT NULL);"
-        + "CREATE TABLE IF NOT EXISTS quicker_sync_ack ("
-        + "table_name TEXT NOT NULL, "
-        + "key_text TEXT NOT NULL, "
-        + "server_row_version BLOB NOT NULL, "
-        + "PRIMARY KEY (table_name, key_text));"
-        + "CREATE TABLE IF NOT EXISTS quicker_sync_blob_pending ("
-        + "table_name TEXT NOT NULL, "
-        + "key_text TEXT NOT NULL, "
-        + "column_name TEXT NOT NULL, "
-        + "PRIMARY KEY (table_name, key_text, column_name));"
-        + "CREATE TABLE IF NOT EXISTS quicker_sync_row_pending ("
-        + "table_name TEXT NOT NULL, "
-        + "key_text TEXT NOT NULL, "
-        + "PRIMARY KEY (table_name, key_text));"
-        + "INSERT INTO quicker_sync_journal (table_name, key_text, operation, recorded_at) VALUES ('ax_item', '1', 'update', 't');"
-        + "INSERT INTO quicker_sync_ack (table_name, key_text, server_row_version) VALUES ('ax_item', '1', X'0000000000000001');"
-        + "INSERT INTO quicker_sync_blob_pending (table_name, key_text, column_name) VALUES ('ax_item', '1', 'note');"
-        + "INSERT INTO quicker_sync_row_pending (table_name, key_text) VALUES ('ax_item', '1');";
+        + "\"key\", "
+        + "dirty INTEGER NOT NULL, "
+        + "deleted INTEGER NOT NULL, "
+        + "blob_columns TEXT NOT NULL DEFAULT '', "
+        + "change_seq INTEGER NOT NULL, "
+        + "base_version BLOB NULL, "
+        + "known INTEGER NOT NULL DEFAULT 0, "
+        + "sw_seq INTEGER NULL, "
+        + "blob_owed TEXT NOT NULL DEFAULT '', "
+        + "applied_version BLOB NULL, "
+        + "PRIMARY KEY (table_name, \"key\"));"
+        + "CREATE TABLE IF NOT EXISTS quicker_sync_table ("
+        + "table_name TEXT NOT NULL PRIMARY KEY, "
+        + "anchor BLOB NULL);"
+        + "INSERT INTO quicker_sync_state (id, format, db_id, applying, next_seq) VALUES (1, 1, '00', 0, 2);"
+        + "INSERT INTO quicker_sync_row (table_name, \"key\", dirty, deleted, change_seq) VALUES ('ax_item', 1, 1, 0, 1);"
+        + "INSERT INTO quicker_sync_table (table_name, anchor) VALUES ('ax_item', X'0000000000000001');";
 
     /// <summary>補助の表の数と各表の行の数を読む問い合わせ（面の行は <see cref="SyncAuxStateLines"/>）</summary>
     private const string SyncAuxStateQuery =
         "SELECT 'tables=' || (SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'quicker\\_sync\\_%' ESCAPE '\\') "
-        + "UNION ALL SELECT 'quicker_sync_journal=' || (SELECT count(*) FROM quicker_sync_journal) "
-        + "UNION ALL SELECT 'quicker_sync_ack=' || (SELECT count(*) FROM quicker_sync_ack) "
-        + "UNION ALL SELECT 'quicker_sync_blob_pending=' || (SELECT count(*) FROM quicker_sync_blob_pending) "
-        + "UNION ALL SELECT 'quicker_sync_row_pending=' || (SELECT count(*) FROM quicker_sync_row_pending);";
+        + "UNION ALL SELECT 'quicker_sync_state=' || (SELECT count(*) FROM quicker_sync_state) "
+        + "UNION ALL SELECT 'quicker_sync_row=' || (SELECT count(*) FROM quicker_sync_row) "
+        + "UNION ALL SELECT 'quicker_sync_table=' || (SELECT count(*) FROM quicker_sync_table);";
 
     /// <summary>
-    /// 補助の 4 表が残り、どの表も入れた 1 行を持つときの <see cref="SyncAuxStateQuery"/> の行（行の表を作る静的な初期化から
+    /// 補助の 3 表が残り、どの表も入れた 1 行を持つときの <see cref="SyncAuxStateQuery"/> の行（行の表を作る静的な初期化から
     /// 読むので、初期化の順に依らないプロパティにする）
     /// </summary>
     private static string[] SyncAuxStateLines =>
-        [
-            "quicker_sync_ack=1",
-            "quicker_sync_blob_pending=1",
-            "quicker_sync_journal=1",
-            "quicker_sync_row_pending=1",
-            "tables=4",
-        ];
+        ["quicker_sync_row=1", "quicker_sync_state=1", "quicker_sync_table=1", "tables=3"];
 
     /// <summary>ビューの行の表（id・note・extra と 1 行）</summary>
     private const string ViewItemSql =

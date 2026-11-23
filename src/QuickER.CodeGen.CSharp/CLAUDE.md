@@ -483,7 +483,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 1. 同じ綴りの型名を 2 つ以上の出どころが作る組はエラー
    - 出どころはテーブルごとに 1 つ。値オブジェクトの名前は作る列が何本あっても 1 つ（同じ綴りの列は型を共有する設計）
    - 出どころの組が同じ名前は 1 件にまとめる（`customer` / `customers` は名前を並べた 1 件）
-   - `EnsureSuffix` は名前がすでに接尾辞で終わっていれば付け足さない。表 `order_edit_model` は `order` の EditModel と同じ `OrderEditModel` になり、`i_order`・`in_memory_order`・`ef_core_order`・`journaling_order` は `order` の Repository の名前を重ねる
+   - `EnsureSuffix` は名前がすでに接尾辞で終わっていれば付け足さない。表 `order_edit_model` は `order` の EditModel と同じ `OrderEditModel` になり、`i_order`・`in_memory_order`・`ef_core_order` は `order` の Repository の名前を重ねる（`journaling_order` は重ねない＝生成コードに `Journaling` の名前の型が無い。行 `compile-type-names-distinct-*` が見る）
 2. 固定の型名と同じ名前はエラー（表 `raw_sql` の `RawSqlMapper`・列 `sql_parameter` の `SqlParameterValue`）
 3. リモートのルート名（`ToRemoteRouteName`＝エンティティのクラス名から `Entity` を外したもの）が大文字小文字だけ違う表（`order_item` と `orderitem`）はエラー（ASP.NET のルーティングが大小を区別しない）
 4. エラーにならずに残る型名のうち、大文字小文字だけ違う綴りの組は Warning（`CodeGen_Warning_GeneratedTypeNamesDifferOnlyInCase`。止めない）。エラーにした名前と、ルート名でエラーにした表の名前は除く
@@ -495,7 +495,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - 大小を区別せずに比べると、表ごとに綴りの違う列（`user_id` と `userid`）の値オブジェクトを理由なく断る
   - ルート名はリモートを生成しない構成でも止める（後からリモートを有効にしても図が壊れない）
 - 名簿 `ForTable` は生成器の命名規則の写しなので、`GeneratedTypeNameDriftTests` が実際の出力と一致し続けることを固定する
-- ガード：`CodegenCaseTests` の行 `diag-type-name-collision-*`（表 `order` とぶつかる 8 つの表 × 出力の形 3 つ＝1 ファイル・分割・層別。`diag-type-name-collision-singular-plural` も）・`diag-type-name-reserved-*`（固定の型名・出力の形 3 つ）・`diag-type-name-route-case-collision-*`（出力の形 3 つ。エラーだけで警告を重ねない）・`diag-type-name-case-only-warning`（大小違いの警告がちょうど 1 件で、生成物はコンパイルできる）・`diag-type-name-not-warned-*`・`compile-type-names-distinct-*`（ぶつからない組は出力の形 3 つとも診断なしでコンパイルできる）。mutation 実証済み
+- ガード：`CodegenCaseTests` の行 `diag-type-name-collision-*`（表 `order` とぶつかる 7 つの表 × 出力の形 3 つ＝1 ファイル・分割・層別。`diag-type-name-collision-singular-plural` も）・`diag-type-name-reserved-*`（固定の型名・出力の形 3 つ）・`diag-type-name-route-case-collision-*`（出力の形 3 つ。エラーだけで警告を重ねない）・`diag-type-name-case-only-warning`（大小違いの警告がちょうど 1 件で、生成物はコンパイルできる）・`diag-type-name-not-warned-*`・`compile-type-names-distinct-*`（ぶつからない組は出力の形 3 つとも診断なしでコンパイルできる）。mutation 実証済み
 
 ### エンティティのメンバー名の大文字小文字
 
@@ -532,9 +532,9 @@ SQL 側（動的 SQL・`--` コメント・型文字列・名前の入口検証�
   - `EscapeNameForCSharpString`（名前用。空白のみを空へ畳まない）
   - `EscapeForCSharpString`（説明用）
   - `EscapeForCSharpInterpolatedString`（`$"…"` のリテラル部。波括弧も二重化）
-- 適用面：`[Table]` / `[Column]` / `[NavigationReference]` の 4 引数 / EF Core の `ToTable` / `HasColumnName` / `SyncTableDescriptor.TableName` / `Journal.RecordAsync` / インメモリのサンプル値式
+- 適用面：`[Table]` / `[Column]` / `[NavigationReference]` の 4 引数 / EF Core の `ToTable` / `HasColumnName` / `SyncTableDescriptor.TableName` / インメモリのサンプル値式
   - 同期 SQL の識別子は `CSharpGenerationModelBuilder.Sync.QuoteIdentifier`（終端クォート二重化）を通す
-  - 同期の表ごとの記述子は、ローカルの変更の記録（`SyncLocalTracking`）のために `LocalTableName`・`LocalDatabaseName`・`LocalKeyColumnName`・`LocalUnboundedBinaryColumnNames` の 4 つを、引用していない生の名前（スキーマ修飾名は `SchemaQualifiedName` で分けた表の部分と DB の部分）として焼き込む。クォートはトリガーの SQL が実行時に自分で行う。ガード：`CodegenCaseTests` の行 `exec-sync-dotted-table-name-local-tracking-refuses-attached-database`・`exec-sync-quoted-names-local-tracking-records-on-sqlite`（→ `src/QuickER.Runtime.Sync/CLAUDE.md`「ローカルの変更の記録（SyncLocalTracking）」）
+  - 同期の表ごとの記述子は、ローカルの変更の記録（`SyncLocalTracking`）のために `LocalTableName`・`LocalKeyColumnName`・`LocalUnboundedBinaryColumnNames` の 3 つを、引用していない生の名前として焼き込む。クォートはトリガーの SQL が実行時に自分で行う。名前がスキーマ修飾の表（`SchemaQualifiedName.TrySplit` が真。判定の正本は `CSharpGenerationModelBuilder.IsSchemaQualifiedTable`）は、SQLite では別の DB の表になりトリガーを付けられないので、同期の対象にも参照元（`LocalReferences`・`UnlistedReferencingTableNames`）にも数えず、Warning `CodeGen_Warning_SyncSchemaQualifiedTables` で名指しする（同期できる表が 1 つも無い判定もこの判定を通す）。ガード：`CodegenCaseTests` の行 `diag-sync-schema-qualified-table-excluded-with-warning`・`diag-sync-only-schema-qualified-tables-is-error`・`diag-sync-schema-qualified-table-without-sync-support-no-warning`・`exec-sync-quoted-names-local-tracking-records-on-sqlite`（→ `src/QuickER.Runtime.Sync/CLAUDE.md`「ローカルの変更の記録（SyncLocalTracking）」）
 - 改行の畳み込みは、`ReplaceLineEndings` が改行にする集合全部（CR / LF / NEL U+0085 / FF U+000C / U+2028 / U+2029）を対象にする（`FoldNewLines`）
   - C# 言語仕様の new-line 5 種に絞ると、描画後のレンダラーの `ReplaceLineEndings` が FF を実改行へ変え、説明 1 つで XmlDoc・リテラルが行をまたぐ
   - ガード：`CodegenCaseTests` の行 `code-xmldoc-form-feed-collapses-and-no-injected-member`（説明の出口＝XmlDoc・`[DbColumnMeta]` の引数・EditModel の表示名のリテラルが畳んだ 1 行のまま残り、注入した名前のメンバーがどこにも無く、コンパイルできる）・`NameTrustBoundaryGenerationTests`（生成テキストのどのファイルにも生の FF が残らない）

@@ -423,10 +423,10 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 
 ### `SyncSupport`
 
-双方向同期支援（差分ダウンロード・ジャーナル再生・削除伝搬・競合収集・ループ防止）
+双方向同期支援（差分ダウンロード・トリガーの記録・削除伝搬・競合収集・適用中の印）
 
 - QuickER 版 SQL Server：担当＝`SyncConfigMatrixRuntimeTests`・`SyncModelSqlServerRuntimeTests`・`SyncSqlServerRuntimeTests`・`SyncSupportAdoSqlServerScenarioPart2RuntimeTests`
-- QuickER 版 SQLite：担当＝`SyncConstructionExclusionTests`・`SyncKeyTextRuntimeTests`・`SyncLocalSaveHookRegistrationTests`・`SyncModelRuntimeTests`・`SyncModelRuntimeTestsPart2`・`SyncNullKeyRuntimeTests`・`SyncSqliteRuntimeTests`・`SyncSupportAdoSqliteCurrentEngineRuntimeTests`・`SyncSupportAdoSqliteEngineRuntimeTests`・`SyncSupportAdoSqliteTriggerRuntimeTests`・`SyncVoRuntimeTests`
+- QuickER 版 SQLite：担当＝`SyncKeyTextRuntimeTests`・`SyncModelRuntimeTests`・`SyncModelRuntimeTestsPart2`・`SyncSupportAdoSqliteEngineRuntimeTests`・`SyncSupportAdoSqliteTriggerRuntimeTests`
 - EF Core SQL Server：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core SQLite：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core PostgreSQL：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
@@ -439,15 +439,15 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 
 洗い替え（全消し＋サーバー全行の流し込み・未送信変更の拒否と force・FK 順・アンカーの継続）
 
-- QuickER 版 SQL Server：担当＝`SyncModelSqlServerRuntimeTests`・`SyncSqlServerRuntimeTests`
-- QuickER 版 SQLite：担当＝`SyncModelRuntimeTests`・`SyncRefreshBenchmarkRuntimeTests`・`SyncSqliteRuntimeTests`・`SyncSupportAdoSqliteEngineRuntimeTests`
+- QuickER 版 SQL Server：担当＝`SyncModelSqlServerRuntimeTests`
+- QuickER 版 SQLite：担当＝`SyncModelRuntimeTests`・`SyncSupportAdoSqliteEngineRuntimeTests`
 - EF Core SQL Server：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core SQLite：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core PostgreSQL：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core MySQL：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core Oracle：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - インメモリ：非該当＝洗い替えはサーバー DB の全行でローカル DB を作り直す操作で、インメモリには作り直す先の実 DB が無い
-- リモート：担当＝`SyncHttpRuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTests`（サーバー：QuickER 版 SQLite）
+- リモート：担当＝`SyncModelHttpRuntimeTests`（サーバー：QuickER 版 SQLite）
 
 ### `DialectPortability`
 
