@@ -23,11 +23,11 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 内容のある品目で、削除ではない）。blob の内容が削除（null）になるのは行の削除だけなので、削除の blob の持ち分は行の持ち分に
 /// 従う：その品目の行の持ち分が下りたら、どの経路でも一緒に下ろす。台帳の見張りとして、削除の blob の持ち分があるのに、その品目の
 /// 行の持ち分が削除でない（無い、または内容がある）状態を <c>5/ledger-invariant:model_items:payload</c> で名指しする（台帳を変える
-/// 手・実行・記録を捨てる手の終わりに確かめる）。
+/// 手・実行の終わりに確かめる）。
 /// </para>
 /// <list type="bullet">
 ///   <item>立てる：記録つきの書き込みの手の前後の差分（割り込みの書き込みも同じ経路）。blob の書き込みは行の持ち分も立てる
-///   （再生は行を丸ごと送る）。追跡しない行への最初の記録つきの書き込みは、行と blob の両方を立てる（挿入として全列を送る）。
+///   （blob の書き込みも行の変更として記録され、エンジンは行を丸ごと送る）。追跡しない行への最初の記録つきの書き込みは、行と blob の両方を立てる（挿入として全列を送る）。
 ///   実行で立てるのは 1 つの形だけ：その実行でその端末が、サーバーに無かった品目の行（行の持ち分あり）を入れ、blob がまだサーバーに
 ///   届いていないとき、端末の blob を持ち分として立てる（挿入は全列を送る）。</item>
 ///   <item>成功した記録つきの書き込みの手（失敗・注入した失敗・フックの飛ばしの無い手）は、内容が変わらなくても、手が名指しする
@@ -41,16 +41,16 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 ///   下ろす（blob は端末の内容のまま届いていないので、blob の持ち分は残す）。その実行がそのキー（blob の品目はその行）の競合を
 ///   報告したときは、同じ内容になっても下ろさない（版で比べるので内容が同じでも競合になり、Collect は記録を残す）。
 ///   (2) 実行が <see cref="SyncLocalRowChange"/> でそのキーを報告した。(3) 照合 3 が判定した（内容が端末からもサーバーからも
-///   消えた）。(4) 利用者が記録を捨てる手（<see cref="ClearJournalOp"/>）の範囲の表。(5) 行が「あった」と言えない持ち分
+///   消えた）。(4) 行が「あった」と言えない持ち分
 ///   （立てたときに端末に行が無く、その後のどの実行の後にも端末とサーバーの両方に同じ内容の行があると観測していない）が削除で
 ///   終わった（差し引き何も書いていない。blob の品目も行と一緒に下ろす）。「あった」の決め方は <see cref="Holding"/> の
-///   Existed。(6) 実行の間の割り込みの書き込みで、書き手がサーバーの他者のとき、書く直前のサーバーのそのキーの内容が、ある端末の
+///   Existed。(5) 実行の間の割り込みの書き込みで、書き手がサーバーの他者のとき、書く直前のサーバーのそのキーの内容が、ある端末の
 ///   そのキーの持ち分の内容と同じなら（届いた後の上書き）、その端末のその持ち分を下ろす（blob の品目も同じ規則）。</item>
 ///   <item>控え「記録が残っているかもしれないキー」（端末・表・キー。行のキー）：持ち分を下ろしたが、エンジンの記録は残りうるキー。
-///   立てるのは、下ろす規則 (5) で下ろしたとき（差し引きは何も書いていないが、挿入と削除の記録は残る）と、例外で終わった実行で
+///   立てるのは、下ろす規則 (4) で下ろしたとき（差し引きは何も書いていないが、挿入と削除の記録は残る）と、例外で終わった実行で
 ///   下ろす規則 (1) が下ろしたとき（エンジンが記録を送る前に止まっていることがある）。外すのは、その端末の、例外の無い、
 ///   ダウンロードだけでない実行（洗い替えを含む）で、その表が範囲にあり、そのキーの競合が報告されず、その表が打ち切られなかった
-///   とき・その実行が LocalRowChanges でそのキーを報告したとき・記録を捨てる手の範囲の表。照合 8 だけが使う。</item>
+///   とき・その実行が LocalRowChanges でそのキーを報告したとき。照合 8 だけが使う。</item>
 ///   <item>控え「例外で終わった実行が持ち込んだ行」（端末・表・キー。行のキー）：例外で終わったその端末の実行の前に端末に行が無く、
 ///   後にサーバーと同じ内容の行があり、その実行でその行の blob の読み出しの失敗が当たったキー（実行の前後の DB と、失敗の注入の
 ///   控え <see cref="SyncModelFaults.BlobReadHitsSince"/> で決める。行を書いた後・受理記録を書く前に blob のコピーの失敗で例外に
@@ -85,7 +85,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 ///   <item><c>5/local-discard:{表}</c>：実行の始めに持ち分があり、実行の後にその内容が端末にもサーバーにも無く、その消え方が
 ///   許されていない。許されるのは、その実行がそのキーを <see cref="SyncLocalRowChange"/> で報告した・Force の洗い替え・単独の
 ///   UploadAsync の ServerWins でその表が範囲（SyncAsync の ServerWins は報告で決める。docs の LocalRowChanges の説明＝実行が
-///   自分から変えたローカルの行を名指しし、入れるのは SyncAsync だけ）・実行の間にそのキーへ書いた手・（宣言が真のエンジン）
+///   変更を捨てたローカルの行を名指しし、入れるのは SyncAsync だけ）・実行の間にそのキーへ書いた手・（宣言が真のエンジン）
 ///   果たされた決定。競合の報告だけでは許さない（docs の「競合」の節＝Collect は競合を報告し、ローカルの行はその場に残る）。
 ///   戻された（端末の行とサーバーの行が持ち分と違う同じ内容になった）形は、例外で終わった実行・ダウンロードだけの実行でも判定する
 ///   （実行の前後の DB で分かる）。それ以外の消え方は、例外で終わり結果の一覧を運ばなかった実行では判定しない。ただし例外で
@@ -133,11 +133,8 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 ///   <see cref="CheckServerWritesInScope"/>。</item>
 ///   <item><c>5/unowned-send:{表}</c>：実行が、追加・更新の競合か DiscardedByServerWins を報告したキーに、実行の始めに端末の
 ///   持ち分が無かった。実行の始めの控え「記録が残っているかもしれないキー」にあるキーは持ち分ありとみなす（端末が一度も
-///   書いていないキーの報告は違反のまま）。実行の間の割り込みのキーと、エンジンの記録を直接作る・変える手が触れたキーと、モデルが仕掛けた Before
-///   フックの飛ばしが当たった行（失敗の注入の控えに載った行だけ。飛ばした保存の記録が残る）は外す。例外で終わった ServerWins の
-///   実行が戻した行の控えにあるキーは、照合 1 と同じく別の種類で数える。DiscardedByServerWins の
-///   報告は、実行の始めに端末とサーバーが同じ内容（どちらも無いを含む）で実行の後も端末が変わらないキーなら外す（根拠は
-///   <see cref="CheckUnownedSends"/>）。</item>
+///   書いていないキーの報告は違反のまま）。実行の間の割り込みのキーと、エンジンの記録を直接作る・変える手が触れたキーは外す。
+///   例外で終わった ServerWins の実行が戻した行の控えにあるキーは、照合 1 と同じく別の種類で数える。</item>
 /// </list>
 /// </remarks>
 internal sealed partial class SyncModelRun
@@ -380,15 +377,8 @@ internal sealed partial class SyncModelRun
     )> _restoredByThrownServerWins = [];
 
     /// <summary>
-    /// 書き込みの手の間に、モデルが仕掛けた Before フックの飛ばし（<see cref="ModelFaultKind.HookSkip"/>）が当たった行
-    /// （端末・表・キー。失敗の注入の控え <see cref="SyncModelFaults.HookSkipHitsSince"/> から取る）。飛ばした保存の記録は
-    /// 残り、行は書かれないので、照合 8 から外す
-    /// </summary>
-    private readonly HashSet<(ModelActor Device, string Table, string Key)> _hookSkipped = [];
-
-    /// <summary>
     /// 記録が残っているかもしれないキー：（端末・表・キー。行のキー）。持ち分を下ろしたが、エンジンの記録は残りうるキー（下ろす
-    /// 規則 (5) で下ろした・例外で終わった実行で下ろす規則 (1) が下ろした）。照合 8 だけが「持ち分あり」とみなすのに使う
+    /// 規則 (4) で下ろした・例外で終わった実行で下ろす規則 (1) が下ろした）。照合 8 だけが「持ち分あり」とみなすのに使う
     /// </summary>
     private readonly HashSet<(ModelActor Device, string Table, string Key)> _mayHoldRecord = [];
 
@@ -683,7 +673,7 @@ internal sealed partial class SyncModelRun
     }
 
     /// <summary>
-    /// 下ろす (6)：サーバーの他者の割り込みの書き込みが変えたキー（blob の品目も同じ規則）で、書く直前のサーバーの内容が、ある端末の
+    /// 下ろす (5)：サーバーの他者の割り込みの書き込みが変えたキー（blob の品目も同じ規則）で、書く直前のサーバーの内容が、ある端末の
     /// そのキーの持ち分の内容と同じなら（端末の書き込みが届いた後の上書き）、その端末のその持ち分を下ろす
     /// </summary>
     /// <param name="changed">割り込みの書き込みが変えたキー</param>
@@ -942,7 +932,7 @@ internal sealed partial class SyncModelRun
         CheckStaleOverwrite(frame, serverAfter, carries);
         CheckUnreportedOverwrite(frame, serverAfter, conflicted, carries);
         CheckServerWritesInScope(frame, serverAfter);
-        CheckUnownedSends(frame, conflicts, changes, localAfter, carries);
+        CheckUnownedSends(frame, conflicts, changes, carries);
 
         // 照合 3 の窓の判定が使う、実行の始めの値（この実行の分を台帳へ足す前）：端末がそのキーを最後に見た後に、ほかの書き手が
         // サーバーのその行を変えていたキーと、この実行でこの端末の blob の読み出しの失敗が当たった品目
@@ -1462,9 +1452,9 @@ internal sealed partial class SyncModelRun
     /// </para>
     /// <para>
     /// 照合 7：Versioned で ServerWins の実行（ダウンロード以外）は、サーバーのどの行も変えない。出典は docs/code-generation.ja.md の
-    /// 「競合」の節のポリシーの表の <c>ServerWins</c> の行（ランのスコープ内のジャーナルを捨て、その各行をサーバーから読み直して
-    /// ローカルへ上書きする）。記録を捨てて読み直すので、版で守る ServerWins の実行はサーバーへ書かない、と読む。後勝ち＋ServerWins は
-    /// 対象の外。
+    /// 「競合」の節のポリシーの表の <c>ServerWins</c> の行（<c>Versioned</c> のランは何も送らず、範囲のテーブルの未送信の変更を
+    /// 全部捨てて、その各行をサーバーの行で戻す）。後勝ち＋ServerWins は対象の外（同じ行が、<c>LastWriteWins</c> のランはいつも
+    /// どおり送ると書く）。
     /// </para>
     /// </remarks>
     private void CheckServerWritesInScope(
@@ -1525,35 +1515,13 @@ internal sealed partial class SyncModelRun
     /// （行か blob の品目）があったか（<c>5/unowned-send:{表}</c>）。実行の間の割り込みのキーと、エンジンの記録を直接作る・変える手が
     /// 触れたキー（エンジンの外から記録を作った形で、端末の書き込みではない）は外す
     /// </summary>
-    /// <remarks>
-    /// DiscardedByServerWins の報告は、実行の始めに端末の行とサーバーの行が同じ内容（どちらも無いを含む）で、実行の後も端末の行が
-    /// 変わらないキーなら数えない（着地しなかった・差し引きの無い意図の記録を捨てただけ）。根拠は docs/code-generation.ja.md の
-    /// DiscardedByServerWins の定義（ServerWins の実行が、その行の未送信の変更を捨て、サーバーの内容で戻した。サーバーに行が無ければ、
-    /// 削除伝搬に任せた）と、フックが止めた削除の説明（フックが止めた削除は何もしなくて構いません。行がまだあるので、アップロードが
-    /// その記録を捨てます）。端末の行が古い写しでサーバーと違うキー（持ち分の無い行の古い内容の送信）は外れない。追加・更新の競合の
-    /// 報告は外さない
-    /// </remarks>
     private void CheckUnownedSends(
         RunFrame frame,
         IReadOnlyList<SyncConflict> conflicts,
         IReadOnlyList<SyncLocalRowChange>? changes,
-        IReadOnlyDictionary<(string Table, string Key), string> localAfter,
         bool carries
     )
     {
-        // 実行の始めに端末とサーバーが同じ内容で、実行の後も端末が変わらないキー（差し引きの無い意図の記録を捨てただけ）
-        bool SettledIntent(string table, string key) =>
-            string.Equals(
-                frame.LocalBefore.GetValueOrDefault((table, key)),
-                frame.ServerBefore.GetValueOrDefault((table, key)),
-                StringComparison.Ordinal
-            )
-            && string.Equals(
-                localAfter.GetValueOrDefault((table, key)),
-                frame.LocalBefore.GetValueOrDefault((table, key)),
-                StringComparison.Ordinal
-            );
-
         var sent = conflicts
             .Where(c => c.Operation == SyncOperation.Upsert)
             .Select(c =>
@@ -1562,7 +1530,6 @@ internal sealed partial class SyncModelRun
             .Concat(
                 (changes ?? [])
                     .Where(c => c.Reason == SyncLocalRowChangeReason.DiscardedByServerWins)
-                    .Where(c => !SettledIntent(c.TableName, CanonicalKey(c.TableName, c.KeyText)))
                     .Select(c =>
                         (
                             c.TableName,
@@ -1576,11 +1543,7 @@ internal sealed partial class SyncModelRun
 
         foreach (var (table, key, what) in sent)
         {
-            if (
-                WrittenDuringRun((table, key))
-                || RecordTouched(frame.Device, table, key)
-                || _hookSkipped.Contains((frame.Device, table, key))
-            )
+            if (WrittenDuringRun((table, key)) || RecordTouched(frame.Device, table, key))
             {
                 continue;
             }
@@ -2161,7 +2124,7 @@ internal sealed partial class SyncModelRun
     /// 照合 3 で、持ち分の内容が端末から消えてよい実行か：その実行がそのキー（blob の品目はその行）を
     /// <see cref="SyncLocalRowChange"/> で報告した・Force の洗い替え・単独の UploadAsync の ServerWins でその表が範囲にある。
     /// 競合の報告だけでは免除しない（docs の「競合」の節：Collect は競合を報告し、ローカルの行はその場に残る）。SyncAsync の
-    /// ServerWins は、範囲の表というだけでは免除せず報告で決める（docs の LocalRowChanges の説明：実行が自分から変えた
+    /// ServerWins は、範囲の表というだけでは免除せず報告で決める（docs の LocalRowChanges の説明：実行が変更を捨てた
     /// ローカルの行を名指しし、入れるのは SyncAsync だけ）
     /// </summary>
     private static bool MayDiscard(

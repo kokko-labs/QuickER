@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Model;
 using QuickER.Tests.TestSupport.Engines;
@@ -82,9 +84,38 @@ internal interface ISyncConfigFixture : IMatrixAdapter
     /// <summary>AddGeneratedSyncEngine を呼ぶ（<paramref name="excludeParent"/> なら親の表を excludeFromSync へ渡す）</summary>
     void AddSyncEngine(IServiceCollection services, object? localKey, bool excludeParent);
 
+    /// <summary>同期の専用のエンドポイントの操作名（生成の <c>RemoteSyncOperations</c> の、版ありの表の 3 つ）</summary>
+    IReadOnlyList<string> SyncOperationRoutes { get; }
+
+    /// <summary>親の表の除外した無制限バイナリ列のルート（ルートの接頭辞より後ろ。例 <c>SyncOrder/Attachment</c>）</summary>
+    string UnboundedBinaryRoute { get; }
+
     /// <summary>サーバー（SQL Server のリポジトリ・直結の差分ソース・同期のエンドポイント）を Kestrel で起動する</summary>
+    /// <param name="connectionString">サーバーの DB の接続文字列</param>
+    /// <param name="ct">取り消し</param>
+    /// <param name="configure">Kestrel の追加の設定（HTTPS で待ち受けるときに渡す。省略可）</param>
+    /// <param name="requests">届いた要求を、ほかのミドルウェアより外側で記録する先（省略可）</param>
     Task<InProcessRemoteServer> StartRemoteServerAsync(
         string connectionString,
+        CancellationToken ct,
+        Action<WebApplicationBuilder>? configure = null,
+        SyncConfigRequestLog? requests = null
+    );
+
+    /// <summary>親の表の除外した無制限バイナリ列を、リポジトリのストリームのアクセサで書く（行が無ければ例外）</summary>
+    Task WriteUnboundedBinaryAsync(
+        IServiceProvider provider,
+        object? key,
+        int id,
+        byte[] content,
+        CancellationToken ct
+    );
+
+    /// <summary>親の表の除外した無制限バイナリ列を、リポジトリのストリームのアクセサで読む（行が無いか NULL なら null）</summary>
+    Task<byte[]?> ReadUnboundedBinaryAsync(
+        IServiceProvider provider,
+        object? key,
+        int id,
         CancellationToken ct
     );
 
@@ -212,10 +243,12 @@ internal interface ISyncConfigFixture : IMatrixAdapter
     /// <param name="provider">サービスプロバイダ</param>
     /// <param name="ct">取り消し</param>
     /// <param name="lastWriteWins">後勝ちモード（版なしの表も同期する）で流すか（既定は版ありのモード）</param>
+    /// <param name="includeUnboundedBinary">除外した無制限バイナリ列も運ぶか（<c>SyncOptions.IncludeUnboundedBinary</c>）</param>
     Task<(string? Problem, int Downloaded)> SyncAsync(
         IServiceProvider provider,
         CancellationToken ct,
-        bool lastWriteWins = false
+        bool lastWriteWins = false,
+        bool includeUnboundedBinary = false
     );
 
     /// <summary>
@@ -244,6 +277,46 @@ internal interface ISyncConfigFixture : IMatrixAdapter
 /// <param name="IsDelete">行の最後の変更が削除か</param>
 internal sealed record SyncConfigPendingRow(string Table, string KeyText, bool IsDelete);
 
+/// <summary>サーバーに届いた要求（メソッド・パス・<c>HttpContext.Request.Protocol</c>）</summary>
+/// <param name="Method">HTTP のメソッド</param>
+/// <param name="Path">パス（クエリを含まない）</param>
+/// <param name="Protocol">要求が届いた版（例 <c>HTTP/2</c>）</param>
+internal sealed record SyncConfigRequest(string Method, string Path, string Protocol);
+
+/// <summary>
+/// in-process のサーバーに届いた要求の記録。サーバーは行をまたいで共有するので、行の前の件数を <see cref="Count"/> で控え、
+/// 行の後に <see cref="Since"/> でその行の要求だけを取り出す（行は 1 本ずつ流れる）
+/// </summary>
+internal sealed class SyncConfigRequestLog
+{
+    private readonly ConcurrentQueue<SyncConfigRequest> _requests = new();
+
+    /// <summary>これまでに届いた要求の数</summary>
+    public int Count => _requests.Count;
+
+    /// <summary>
+    /// 届いた要求を、ほかのミドルウェアより外側で記録するミドルウェアを足す（エンドポイントのマップより前に呼ぶ。要求の処理を
+    /// 始める前に記録するので、クライアントが応答を受け取った時点で記録は済んでいる）
+    /// </summary>
+    public void Attach(WebApplication app) =>
+        app.Use(
+            async (context, next) =>
+            {
+                _requests.Enqueue(
+                    new SyncConfigRequest(
+                        context.Request.Method,
+                        context.Request.Path.Value ?? "",
+                        context.Request.Protocol
+                    )
+                );
+                await next(context);
+            }
+        );
+
+    /// <summary><paramref name="count"/> 件目より後に届いた要求を、届いた順に</summary>
+    public IReadOnlyList<SyncConfigRequest> Since(int count) => [.. _requests.Skip(count)];
+}
+
 /// <summary>同期の構成の行列のフィクスチャの軸</summary>
 /// <remarks>
 /// 正本の値はここに置き、次元表（<see cref="SyncConfigDimensions.Table"/>）の Fixture の水準はこれから作る（次元表の行は軸の
@@ -268,6 +341,92 @@ internal static class SyncConfigFixtures
 
     /// <summary>開くたびの確認つきの接続ファクトリの型の名前（生成物の SQLite の側の型）</summary>
     private const string ObservedFactoryName = "ObservedSqlConnectionFactory";
+
+    /// <summary>
+    /// 送信が通る CRUD・保存のエンドポイントの操作名（生成のサーバーの固定部 <c>RemoteServerEngine.MapCrud</c> のルートの末尾。
+    /// 同期の送信はネットワークを越えられる書き込みだけを使う）
+    /// </summary>
+    private static readonly string[] WriteOperationRoutes =
+    [
+        "Insert",
+        "Update",
+        "Delete",
+        "Save",
+        "SaveMany",
+    ];
+
+    /// <summary>
+    /// HTTP/2 の行で HTTPS のサーバーに届いた要求の食い違い：どの要求も <c>HTTP/2</c> で届き、同期の専用のエンドポイント
+    /// （<paramref name="syncOperationRoutes"/> のどれも）と CRUD・保存の書き込みの要求が 1 つ以上あり、
+    /// <paramref name="unboundedBinarySynced"/> なら除外した無制限バイナリ列の PUT（送信）と GET（写し）も 1 つ以上ある
+    /// </summary>
+    /// <param name="requests">その行の間に HTTPS のサーバーに届いた要求</param>
+    /// <param name="prefix">リモートサービスのルートの接頭辞</param>
+    /// <param name="syncOperationRoutes">同期の専用のエンドポイントの操作名</param>
+    /// <param name="unboundedBinaryRoute">除外した無制限バイナリ列のルート（接頭辞より後ろ）</param>
+    /// <param name="unboundedBinarySynced">その行が無制限バイナリ列を運ぶ同期を流したか</param>
+    public static IReadOnlyList<string> Http2Problems(
+        IReadOnlyList<SyncConfigRequest> requests,
+        string prefix,
+        IReadOnlyList<string> syncOperationRoutes,
+        string unboundedBinaryRoute,
+        bool unboundedBinarySynced
+    )
+    {
+        var problems = new List<string>();
+
+        foreach (var request in requests.Where(request => request.Protocol != "HTTP/2"))
+        {
+            problems.Add(
+                $"{request.Method} {request.Path} arrived over {request.Protocol}, not HTTP/2"
+            );
+        }
+
+        foreach (var operation in syncOperationRoutes)
+        {
+            if (
+                !requests.Any(request =>
+                    request.Path.EndsWith($"/{operation}", StringComparison.Ordinal)
+                )
+            )
+            {
+                problems.Add($"no {operation} request reached the HTTPS server");
+            }
+        }
+
+        if (
+            !requests.Any(request =>
+                WriteOperationRoutes.Any(operation =>
+                    request.Path.EndsWith($"/{operation}", StringComparison.Ordinal)
+                )
+            )
+        )
+        {
+            problems.Add(
+                $"no save or CRUD write request ({string.Join(", ", WriteOperationRoutes)}) reached the HTTPS server"
+            );
+        }
+
+        if (unboundedBinarySynced)
+        {
+            var path = $"{prefix}/{unboundedBinaryRoute}";
+
+            foreach (var method in new[] { "PUT", "GET" })
+            {
+                if (
+                    !requests.Any(request =>
+                        request.Method == method
+                        && string.Equals(request.Path, path, StringComparison.Ordinal)
+                    )
+                )
+                {
+                    problems.Add($"no {method} {path} request reached the HTTPS server");
+                }
+            }
+        }
+
+        return problems;
+    }
 
     /// <summary>
     /// 接続を開き（包んだ接続ファクトリの接続なら、開くたびの確認がトリガーを張る）、名前が <see cref="TriggerPrefix"/> で
@@ -317,7 +476,7 @@ internal static class SyncConfigFixtures
     /// <param name="serverConnectionFactory">サーバーの接続ファクトリ（HTTP の行では null）</param>
     /// <param name="triggerTables">ローカルの接続を 1 回開いた後にトリガーの付いた表（<see cref="TriggerTables"/>）</param>
     /// <param name="synchronisedTables">トリガーが付くはずの表（同期する表から構築時に除外した表を除いたもの）</param>
-    /// <param name="overHttp">サーバーが HTTP の向こうにいるか</param>
+    /// <param name="overHttp">サーバーが HTTP の向こうにいるか（HTTP/2 の水準を含む HTTP の 3 水準）</param>
     /// <param name="parentExcluded">親の表を構築時に除外したか</param>
     /// <param name="expectedLocalRepository">ローカルの注文のリポジトリの生成の型（SQLite の側）</param>
     /// <param name="expectedLocalChildRepository">ローカルの明細のリポジトリの生成の型（SQLite の側）</param>

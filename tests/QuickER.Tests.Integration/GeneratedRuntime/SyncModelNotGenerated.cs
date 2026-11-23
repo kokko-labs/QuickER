@@ -29,7 +29,7 @@ internal static class SyncModelNotGenerated
                 NotGenerated.Accepted(
                     "null-unique-values",
                     "一意な値の null",
-                    "同期のモデルの図の一意な列（model_folders.name・model_items.code）は NOT NULL で、null を作るには図を変える必要がある。docs の「SQL Server なら NULL も値として数える」の約束は SyncFixture の実 SQL Server のテストが持つ",
+                    "同期のモデルの図の一意な列（model_folders.name・model_items.code）は NOT NULL で、null を作るには図を変える必要がある。docs の「競合」の節の「サーバーが SQL Server なら NULL も値として数える」の約束は SyncFixture の実 SQL Server のテストが持つ",
                     "`SyncSqlServerRuntimeTests.NullUniqueValueTakenOnServer_IsReportedOrSettled`・`SyncSqlServerRuntimeTests.ServerCheckUniqueness_ComparesNullsAsValues`・`SyncSqlServerHttpRuntimeTests.NullUniqueValueTakenOnServer_IsReportedOverHttp`"
                 ),
                 NotGenerated.Accepted(
@@ -42,13 +42,14 @@ internal static class SyncModelNotGenerated
                 NotGenerated.Accepted(
                     "mode-policy-switch-within-seed",
                     "1 つの種の中でモード・ポリシーを切り替える",
-                    "モードとポリシーは種の番号から決めて種の中で固定する（24 種ごとに全積）。前の実行の設定が残る壊し方は今の種の列で赤になる（後勝ちの実行が受理記録を残さない・ポリシーやモードを最初の実行のまま使い回す）。種の中の切り替えは、静止化が毎周 Collect → ServerWins → 後勝ちへ切り替えることが受け持つ",
+                    "モードとポリシーは種の番号から決めて種の中で固定する（24 種ごとに全積）。前の実行の設定が残る壊し方は今の種の列で赤になる（後勝ちの実行が送った行の基準の版を行の状態に書かない・ポリシーやモードを最初の実行のまま使い回す）。種の中の切り替えは、静止化が毎周 Collect → ServerWins → 後勝ちへ切り替えることが受け持つ",
                     Random + "・`SyncModel/Outcomes`"
                 ),
-                NotGenerated.Accepted(
+                NotGenerated.Pending(
                     "cross-table-cycle-writes",
                     "表どうしの循環（フォルダーが品目を指す列）を書く手",
-                    "並行の書き手が行の循環を作るのを生成器は防げず（端末 1 がフォルダーを品目にピン留めし、端末 2 がその品目をそのフォルダーの下へ移す）、サーバーで消えた循環の行は端末に残る（docs の既知の割り切り）ので、静止化が終わらない種が出て、受け入れの署名で外すとその種の後ろの不具合を隠す。表の循環の経路は決まった形の行が持つ",
+                    "R3 の後の生成器の区切り",
+                    "生成器は書き手の DB で成功する手だけを選び、循環に入った行の削除は書き手の DB の外部キーが断るので、循環の列を書く手を足すには、消す前に循環を外す手を選ぶ規則も要る（並行の書き手が行の循環を作るのは防げない）。今のエンジンは循環の行を 1 つの適用で降ろし、削除伝搬も外部キーの検査を切った同じ適用で流す（src/QuickER.Runtime.Sync/CLAUDE.md「段の順と適用」）ので、作らない事実の理由は無い。表の循環の経路は決まった形の行が持つ",
                     Random
                         + " の行 `cycle-pin-to-new-item-uploads-in-rounds` / `cycle-pinned-item-is-read-back-before-folder` / `cycle-serverwins-restores-folder-pinned-to-new-item` / `refresh-empties-tables-in-a-foreign-key-cycle` / `refresh-force-in-a-foreign-key-cycle`"
                 ),
@@ -61,13 +62,14 @@ internal static class SyncModelNotGenerated
                 NotGenerated.Accepted(
                     "blobs-not-carried",
                     "実行ごとに blob を運ぶかを変える",
-                    "docs の割り切り（運ぶかは端末ごとにそろえる）で、運ばない実行を挟むと収束の表明が成り立たない。乱数の列は常に運び、運ばない実行は対照のシナリオが持つ",
+                    "docs の「無制限バイナリ列」の節（列を運ぶかどうかは端末ごとに決め、変えない）で、運ばない実行を挟むと収束の表明が成り立たない。乱数の列は常に運び、運ばない実行は対照のシナリオが持つ",
                     "`SyncModelRuntimeTests.EmptyBlobWithoutConflict_IsStillAViolation`"
                 ),
-                NotGenerated.Accepted(
+                NotGenerated.Pending(
                     "exact-unique-swap",
                     "一意な値の厳密な入れ替え（循環）",
-                    "同じバッチの入れ替えは docs の既知の割り切りで、静止化が終わらないことを受け入れている。付け替えの形は値を空けた後に取る順だけを作る",
+                    "R3 の後の生成器の区切り",
+                    "付け替えの形は値を空けた後に取る順だけを作り、2 行以上が互いの値を持ち合う形は作らない。docs の「競合」の節は、一意な値を入れ替えた行・回転した行が 1 回の適用で降りると約束し、決まった形の行がそれを表明するので、作らない事実の理由は無い。乱数の列へ入れるには、入れ替えを作る手と、端末の入れ替えを送るときの期待を判定役に足す必要がある",
                     Random
                         + " の行 `swap-codes-settles-in-one-sync` / `swap-folder-names-settles-in-one-sync`"
                 ),
@@ -80,25 +82,26 @@ internal static class SyncModelNotGenerated
                 NotGenerated.Accepted(
                     "untracked-rows-with-server-keys",
                     "Repository を通らずに端末へ入れた行で、サーバーにあるキーを持つもの（古いサーバーの写しの持ち込み）",
-                    "docs の既知の割り切り（Repository を通らない書き込みは記録されない）は、そうして入れた行をサーバーに無いキーの行として、次の実行で削除伝搬が消すとだけ約束する。サーバーにあるキーの行の削除・編集の結果を期待として書く根拠が docs に無い。生成器は追跡しない行のキーを端末のキーの範囲の別の帯に置く",
+                    "docs の「既知の割り切り」の最初の項目は、記録を通らずに入った行（端末にもサーバーにも同じ行がある行）へ書く前に、同期か洗い替えを 1 回流すよう求める。最初の形 Untracked の端末は最初の同期の前に書くので、サーバーにあるキーの行を作ると docs の使い方の外の書き込みになる。その書き込みの結果（更新は Collect の同期のたびに DuplicateOnServer、削除は送られずにサーバーの行が戻る）は同期のエンジンの決まった形の行 stateless-* が固定する。生成器は追跡しない行のキーを端末のキーの範囲の別の帯に置く",
                     Random
                 ),
-                NotGenerated.Accepted(
+                NotGenerated.Pending(
                     "imported-mirror-versions",
                     "ミラー版つきの行を端末へ持ち込む形",
-                    "docs の再開点の節は、再開点を保存せず順序付きの流れのミラー版から導くと約束し、流れの外から書いた版は端末がまだ見ていない行を再開点の下に永久に残すと書く。外から書いたミラー版は再開点の前提の外",
+                    "R3 の後の生成器の区切り",
+                    "再開点はテーブルごとに保存してローカルの行から導かない（docs の「どこに何を作るか」）ので、行の版の列は再開点に関わらない。版の列は、送信の段が、エンジンが最後に入れた他者の内容の版と比べて元の版を選ぶ入力になり、その振る舞いは docs の「取得の前に読んだ実体の保存」が書くので、作らない事実の理由は無い。生成器に、記録させずに版の列を書く手が無い",
                     NotGenerated.Unguarded
                 ),
                 NotGenerated.Accepted(
                     "copied-device-databases",
-                    "別の端末やバックアップの DB の写し（ジャーナル・受理記録・ミラー版ごと）で始める端末",
-                    "docs に約束が無い。受理記録は端末ごとの記録で、生成されるランタイムは端末の識別子を持たないので、複製した 2 台は同じ記録を二重に上げ、時間を戻した端末の受理記録は古い",
+                    "別の端末やバックアップの DB の写し（行の状態の表・再開点の表ごと）で始める端末",
+                    "docs に約束が無い。行の状態の表（未送信の印・基準の版）と表ごとの再開点は端末の DB の中の記録で、サーバーは端末ごとの状態を持たず、生成されるランタイムは端末の識別子を持たないので、複製した 2 台は同じ未送信の変更を二重に上げ、時間を戻した端末の基準の版と再開点は古い",
                     NotGenerated.Unguarded
                 ),
                 NotGenerated.Accepted(
                     "four-or-more-devices",
                     "端末 4 台以上の世界",
-                    "同期のエンジンが分岐に読むのは、その端末の手元の記録（ジャーナル・ミラー版・受理記録・blob のコピー待ち）とサーバーの行と版だけで、サーバーは端末ごとの状態を持たない。3 台でどの端末にもほかの端末が 2 台そろい、その 2 台の書き込みが重なる形が生まれ、4 台目でエンジンが新しく読むものは無い",
+                    "同期のエンジンが分岐に読むのは、その端末の手元の記録（行の状態の表＝未送信の印・基準の版・blob の写し待ち、表ごとの再開点、端末の行の版の列）とサーバーの行と版だけで、サーバーは端末ごとの状態を持たない。3 台でどの端末にもほかの端末が 2 台そろい、その 2 台の書き込みが重なる形が生まれ、4 台目でエンジンが新しく読むものは無い",
                     Random
                 ),
                 NotGenerated.Accepted(

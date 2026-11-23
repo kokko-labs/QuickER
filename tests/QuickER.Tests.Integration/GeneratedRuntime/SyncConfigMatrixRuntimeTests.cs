@@ -25,9 +25,16 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </para>
 /// <para>
 /// サーバーは実 SQL Server（生成された直結の差分ソースは SQL Server の語彙＝<c>MIN_ACTIVE_ROWVERSION()</c> を使うので、
-/// SQLite の代役では差分ソースの登録を差し替えることになり、登録の形を確かめられない）。HTTP の行は 1 つの Kestrel の
-/// サーバー（同じ SQL Server の DB）を共有する。行ごとにローカルの DB とコンテナを作り、キーは行ごとに別の値を使う
+/// SQLite の代役では差分ソースの登録を差し替えることになり、登録の形を確かめられない）。HTTP の行は、フィクスチャごとに
+/// 平文の Kestrel のサーバーを 1 つ共有し、HTTP/2 の水準の行は HTTPS で待ち受ける別の Kestrel のサーバー（テストの中で作る
+/// 自己署名の証明書 <see cref="TestHttpsCertificate"/>・Kestrel の既定のまま HTTP/1.1 と HTTP/2 を ALPN で交渉する）を 1 つ
+/// 共有する（どちらも同じ SQL Server の DB）。行ごとにローカルの DB とコンテナを作り、キーは行ごとに別の値を使う
 /// （サーバーの DB は全部の行で共有する）。
+/// </para>
+/// <para>
+/// HTTP/2 の水準の行は、洗い替えの後に、両側で書いた無制限バイナリ列を運ぶ同期を 1 回流し（親の表を除外した行は除く）、
+/// 行の終わりに、その行の間に HTTPS のサーバーへ届いた要求がどれも HTTP/2 で、同期の専用のエンドポイント・CRUD と保存の書き込み・
+/// blob の PUT と GET を含むことを確かめる（サーバーは共有なので、行の前の要求の数を控えてその後の要求だけを見る）。
 /// </para>
 /// <para>
 /// 既知の失敗は <see cref="SyncConfigDimensions.Known"/>（厳格＝載っていない失敗も、載っているのに起きない失敗も赤）。
@@ -66,7 +73,7 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
             await fixture.ApplyDdlAsync(adapter.ServerDiagram, Ct);
         }
 
-        var servers = new Dictionary<string, InProcessRemoteServer>(StringComparer.Ordinal);
+        var servers = new RemoteServers();
 
         try
         {
@@ -74,9 +81,20 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
                 var adapter in SyncConfigFixtures.Axis.Adapters.Where(a => a.HasRemoteServices)
             )
             {
-                servers[adapter.AxisValue] = await adapter.StartRemoteServerAsync(
+                servers.Plain[adapter.AxisValue] = await adapter.StartRemoteServerAsync(
                     fixture.ConnectionString,
                     Ct
+                );
+
+                // HTTP/2 の水準の行が共有する HTTPS のサーバー（Kestrel の既定のまま＝HTTP/1.1 と HTTP/2 を ALPN で交渉する）。
+                // 届いた要求の版を記録する
+                var requests = new SyncConfigRequestLog();
+                servers.Http2Requests[adapter.AxisValue] = requests;
+                servers.Http2[adapter.AxisValue] = await adapter.StartRemoteServerAsync(
+                    fixture.ConnectionString,
+                    Ct,
+                    TestHttpsCertificate.UseOn,
+                    requests
                 );
             }
 
@@ -98,7 +116,14 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
 
                 try
                 {
+                    // サーバーは行をまたいで共有するので、行の前の件数を控えて、その行の間に届いた要求だけを見る
+                    var requestsBefore = c.OverHttp2 ? servers.Http2Requests[c.Fixture].Count : 0;
                     await RunAsync(c, keys, servers);
+
+                    if (c.OverHttp2)
+                    {
+                        CheckHttp2Requests(c, servers.Http2Requests[c.Fixture], requestsBefore);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -125,10 +150,38 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
         }
         finally
         {
-            foreach (var server in servers.Values)
+            foreach (var server in servers.Plain.Values.Concat(servers.Http2.Values))
             {
                 await server.DisposeAsync();
             }
+        }
+    }
+
+    /// <summary>
+    /// HTTP/2 の行の終わりに、その行の間に HTTPS のサーバーへ届いた要求がどれも HTTP/2 で、同期の専用のエンドポイント・
+    /// CRUD と保存の書き込み・（無制限バイナリ列を運ぶ同期を流した行では）blob の PUT と GET を含むことを確かめる（食い違えば例外）
+    /// </summary>
+    private static void CheckHttp2Requests(
+        SyncConfigCase c,
+        SyncConfigRequestLog log,
+        int requestsBefore
+    )
+    {
+        var adapter = SyncConfigFixtures.Axis.Get(c.Fixture);
+        var requests = log.Since(requestsBefore);
+        var problems = SyncConfigFixtures.Http2Problems(
+            requests,
+            adapter.RemotePrefix,
+            adapter.SyncOperationRoutes,
+            adapter.UnboundedBinaryRoute,
+            c.SyncsUnboundedBinary
+        );
+
+        if (problems.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"requests to the HTTPS server ({requests.Count}): {string.Join("; ", problems)}"
+            );
         }
     }
 
@@ -138,11 +191,11 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
     /// 行のキー（Local＝ローカルの新しい行・Server＝サーバーの新しい行・Extra＝サーバーだけに置く補助の親。サーバーの DB は全部の行で
     /// 共有するので行ごとに別の値）
     /// </param>
-    /// <param name="servers">フィクスチャごとの HTTP のサーバー</param>
+    /// <param name="servers">フィクスチャごとの HTTP のサーバー（平文と HTTPS）</param>
     private async Task RunAsync(
         SyncConfigCase c,
         (int Local, int Server, int Extra) keys,
-        IReadOnlyDictionary<string, InProcessRemoteServer> servers
+        RemoteServers servers
     )
     {
         var adapter = SyncConfigFixtures.Axis.Get(c.Fixture);
@@ -181,15 +234,23 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
                 case SyncConfigDimensions.HttpAddress:
                     adapter.AddHttpSources(
                         services,
-                        servers[c.Fixture].BaseAddress(adapter.RemotePrefix)
+                        servers.Plain[c.Fixture].BaseAddress(adapter.RemotePrefix)
                     );
                     break;
                 case SyncConfigDimensions.HttpClientFactory:
                     // 呼び出し側が持つ HttpClient を渡す形（ファクトリは解決のたびに呼ばれる。クライアントは行の終わりに捨てる）
                     var address = new Uri(
-                        servers[c.Fixture].BaseAddress(adapter.RemotePrefix) + "/"
+                        servers.Plain[c.Fixture].BaseAddress(adapter.RemotePrefix) + "/"
                     );
                     adapter.AddHttpSources(services, _ => clients.Add(address));
+                    break;
+                case SyncConfigDimensions.HttpClientFactoryHttp2:
+                    // 同じファクトリの形で、HTTPS のサーバーへ、HTTP/2 と RequestVersionOrLower にした HttpClient を渡す
+                    // （docs が勧める HTTP/2 の構成。テストの証明書だけを受け入れる）
+                    var http2Address = new Uri(
+                        servers.Http2[c.Fixture].BaseAddress(adapter.RemotePrefix) + "/"
+                    );
+                    adapter.AddHttpSources(services, _ => clients.AddHttp2(http2Address));
                     break;
                 default:
                     adapter.AddDirectSources(services, serverKey);
@@ -276,6 +337,12 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
             }
         }
 
+        // 無制限バイナリ列の段は、次の段が親を消す前に流す（GraphRemoveParentWithNewChild の段は 2 つの親を消す）
+        if (c.SyncsUnboundedBinary)
+        {
+            await ExchangeUnboundedBinariesAsync(adapter, keys, localKey, provider, serverProvider);
+        }
+
         if (c.RemovesParentWithNewChild)
         {
             await RemoveParentsWithNewChildrenAsync(
@@ -286,6 +353,79 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
                 serverProvider
             );
         }
+    }
+
+    /// <summary>
+    /// HTTP/2 の行の無制限バイナリ列の段：洗い替えでそろった 2 つの親（ローカルとサーバーの両方にある行）のうち、ローカルの新しい行に
+    /// ローカルのリポジトリで、サーバーの新しい行にサーバーのリポジトリで、除外した無制限バイナリ列を書き、列を運ぶ同期 1 回で、
+    /// それぞれの側が相手の側の書いた内容を持ち、未送信が残らない（列の送信は blob の PUT、写しは blob の GET で HTTP を通る）
+    /// </summary>
+    /// <remarks>
+    /// ローカルの書き込みはストリームのアクセサで、トリガーが列の名前つきで記録する。親の表を構築時に除外した行
+    /// （GraphViaExcludedParent）はこの段を流さない：どちらのフィクスチャも除外列を持つのは親の表だけで、その行では同期する表に
+    /// 除外列が無い（<see cref="SyncConfigCase.SyncsUnboundedBinary"/>）。
+    /// </remarks>
+    private static async Task ExchangeUnboundedBinariesAsync(
+        ISyncConfigFixture adapter,
+        (int Local, int Server, int Extra) keys,
+        object? localKey,
+        IServiceProvider provider,
+        IServiceProvider serverProvider
+    )
+    {
+        byte[] localContent = [0x4C, 0x01, (byte)(keys.Local % 256)];
+        byte[] serverContent = [0x53, 0x02, (byte)(keys.Server % 256)];
+
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            await adapter.WriteUnboundedBinaryAsync(
+                scope.ServiceProvider,
+                localKey,
+                keys.Local,
+                localContent,
+                Ct
+            );
+        }
+
+        await adapter.WriteUnboundedBinaryAsync(
+            serverProvider,
+            null,
+            keys.Server,
+            serverContent,
+            Ct
+        );
+
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            (await adapter.SyncAsync(scope.ServiceProvider, Ct, includeUnboundedBinary: true))
+                .Problem.Should()
+                .BeNull("each side wrote the binary column of a different row");
+        }
+
+        (await adapter.ReadUnboundedBinaryAsync(serverProvider, null, keys.Local, Ct))
+            .Should()
+            .Equal(localContent, "the sync that carries the binary columns uploads the local one");
+
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            (
+                await adapter.ReadUnboundedBinaryAsync(
+                    scope.ServiceProvider,
+                    localKey,
+                    keys.Server,
+                    Ct
+                )
+            )
+                .Should()
+                .Equal(
+                    serverContent,
+                    "the sync that carries the binary columns copies the server one down"
+                );
+        }
+
+        (await adapter.PendingAsync(provider, Ct))
+            .Should()
+            .BeEmpty("the sync sent the recorded binary column");
     }
 
     /// <summary>
@@ -522,15 +662,36 @@ public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixtu
         }
     }
 
+    /// <summary>フィクスチャごとの HTTP のサーバー（全部の行で共有する）</summary>
+    private sealed class RemoteServers
+    {
+        /// <summary>平文の HTTP のサーバー（水準 HttpAddress・HttpClientFactory）</summary>
+        public Dictionary<string, InProcessRemoteServer> Plain { get; } =
+            new(StringComparer.Ordinal);
+
+        /// <summary>HTTPS のサーバー（水準 HttpClientFactoryHttp2）</summary>
+        public Dictionary<string, InProcessRemoteServer> Http2 { get; } =
+            new(StringComparer.Ordinal);
+
+        /// <summary>HTTPS のサーバーに届いた要求の記録</summary>
+        public Dictionary<string, SyncConfigRequestLog> Http2Requests { get; } =
+            new(StringComparer.Ordinal);
+    }
+
     /// <summary>行の中で HttpClient のファクトリが作ったクライアント（行の終わりに捨てる）</summary>
     private sealed class OwnedClients : IDisposable
     {
         private readonly List<HttpClient> _clients = [];
 
-        public HttpClient Add(Uri baseAddress)
-        {
-            var client = new HttpClient { BaseAddress = baseAddress };
+        /// <summary>既定の HttpClient（HTTP/1.1）</summary>
+        public HttpClient Add(Uri baseAddress) => Own(new HttpClient { BaseAddress = baseAddress });
 
+        /// <summary>テストの証明書だけを受け入れ、HTTP/2 と RequestVersionOrLower で送る HttpClient</summary>
+        public HttpClient AddHttp2(Uri baseAddress) =>
+            Own(TestHttpsCertificate.CreateHttp2Client(baseAddress));
+
+        private HttpClient Own(HttpClient client)
+        {
             lock (_clients)
             {
                 _clients.Add(client);

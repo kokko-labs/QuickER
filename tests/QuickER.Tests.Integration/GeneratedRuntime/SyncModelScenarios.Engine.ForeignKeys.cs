@@ -5,7 +5,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
 /// SyncRuntimeTestsBase から移したシナリオ（外部キーで同期が止まらないこと＝祖先を残す削除伝搬・ServerWins の適用順・
-/// サーバーの拒否の報告と後勝ち＋ServerWins の決着、同期の実行中のローカルの書き込み、失敗した書き込みの記録の取り消し）。
+/// サーバーの拒否の報告と後勝ち＋ServerWins の決着、同期の実行中のローカルの書き込み、失敗した書き込みが記録を残さないこと＝トリガーの記録は書き込みと一緒に巻き戻る）。
 /// 表の写し方は <see cref="EngineBasicScenarios"/> の型の注と同じ。
 /// </summary>
 internal static partial class SyncModelScenarios
@@ -548,7 +548,7 @@ internal static partial class SyncModelScenarios
                 ]
             ),
             // ServerWins の読み直し（単独の UploadAsync＝後にダウンロードが続かないので、捨てる行を自分で読み直す）：読み直した
-            // フォルダーが指す品目がまだローカルに無いので、解決役が先に入れる
+            // フォルダーが指す品目はまだローカルに無い（その行をどう戻すかはエンジンの宣言で分かれる。下の枝）
             Moved(
                 "cycle-serverwins-restores-folder-pinned-to-new-item",
                 [Folder(SV, 780)],

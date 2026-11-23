@@ -38,6 +38,10 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 生成された HTTP のリモート実装を使う。500 のフックは、生成したグループへ後から
 /// <see cref="RemoteErrorDetailPolicy"/> を付けて観測する（エンドポイントのメタデータは最後のものが使われる）。
 /// </para>
+/// <para>
+/// HTTP/2 の行のうち、平文の行はサーバーを HTTP/2 だけで待ち受け、ALPN の行は HTTPS（テストの中で作る自己署名の証明書
+/// <see cref="TestHttpsCertificate"/>）で Kestrel の既定のまま待ち受ける。
+/// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
 [RuntimeCell(
@@ -244,7 +248,10 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
             throw new NotSupportedException();
     }
 
-    /// <summary>生成クライアントの要求の版の作り方（サーバーは HTTP/1.1 以外なら HTTP/2 だけを受ける）</summary>
+    /// <summary>
+    /// 生成クライアントの要求の版の作り方とサーバーの待ち受け方（平文の 3 つは、サーバーが HTTP/1.1 以外なら HTTP/2 だけを受ける。
+    /// <c>ViaAlpn</c> の 2 つは、サーバーが HTTPS で Kestrel の既定＝HTTP/1.1 と HTTP/2 を受け、版を ALPN で交渉する）
+    /// </summary>
     public enum Protocol
     {
         /// <summary>既定の HttpClient（HTTP/1.1）</summary>
@@ -259,7 +266,28 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
         /// 従わなければ HTTP/2 で届かない）
         /// </summary>
         Http2ViaClientDefaults,
+
+        /// <summary>
+        /// HTTPS のサーバー（Kestrel の既定で HTTP/1.1 と HTTP/2 を受ける）へ、既定の HttpClient（HTTP/1.1）で送る（ALPN で
+        /// HTTP/1.1 に決まる。<see cref="Http2ViaAlpn"/> の対照）
+        /// </summary>
+        Http11ViaAlpn,
+
+        /// <summary>
+        /// HTTPS のサーバー（Kestrel の既定で HTTP/1.1 と HTTP/2 を受ける）へ、HttpClient の
+        /// <see cref="HttpClient.DefaultRequestVersion"/> を HTTP/2・<see cref="HttpClient.DefaultVersionPolicy"/> を
+        /// <see cref="HttpVersionPolicy.RequestVersionOrLower"/> にして送る（ALPN で HTTP/2 に決まる。docs が勧める形）
+        /// </summary>
+        Http2ViaAlpn,
     }
+
+    /// <summary>その作り方の要求がサーバーに届くときの版（<c>HttpContext.Request.Protocol</c>）</summary>
+    private static string ExpectedProtocol(Protocol protocol) =>
+        protocol is Protocol.Http11 or Protocol.Http11ViaAlpn ? "HTTP/1.1" : "HTTP/2";
+
+    /// <summary>サーバーが HTTPS で待ち受け、版を ALPN で交渉する作り方か</summary>
+    private static bool IsAlpn(Protocol protocol) =>
+        protocol is Protocol.Http11ViaAlpn or Protocol.Http2ViaAlpn;
 
     /// <summary>ホストの構成</summary>
     private sealed record HostOptions
@@ -398,7 +426,12 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
                 builder.Logging.AddProvider(log);
                 builder.Logging.SetMinimumLevel(LogLevel.Debug);
 
-                if (options.Protocol != Protocol.Http11)
+                if (IsAlpn(options.Protocol))
+                {
+                    // Protocols は設定しない（Kestrel の既定の HTTP/1.1 と HTTP/2 を ALPN で交渉する）
+                    TestHttpsCertificate.UseOn(builder);
+                }
+                else if (options.Protocol != Protocol.Http11)
                 {
                     builder.WebHost.ConfigureKestrel(kestrel =>
                         kestrel.ConfigureEndpointDefaults(listen =>
@@ -415,6 +448,11 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
         HttpClient CreateClient()
         {
             var sockets = new SocketsHttpHandler();
+
+            if (IsAlpn(options.Protocol))
+            {
+                TestHttpsCertificate.Trust(sockets);
+            }
 
             if (options.ExpectContinueTimeout is { } expectContinueTimeout)
             {
@@ -435,6 +473,12 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
                     DefaultRequestVersion = HttpVersion.Version20,
                     DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact,
                 },
+                Protocol.Http2ViaAlpn => new HttpClient(sockets)
+                {
+                    BaseAddress = clientBaseAddress,
+                    DefaultRequestVersion = HttpVersion.Version20,
+                    DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
+                },
                 _ => new HttpClient(sockets) { BaseAddress = clientBaseAddress },
             };
         }
@@ -447,7 +491,12 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
         {
             Server = server,
             Client = client,
-            Raw = new HttpClient { BaseAddress = new Uri(baseAddress + "/") },
+            Raw = IsAlpn(options.Protocol)
+                ? new HttpClient(TestHttpsCertificate.CreateHandler())
+                {
+                    BaseAddress = new Uri(baseAddress + "/"),
+                }
+                : new HttpClient { BaseAddress = new Uri(baseAddress + "/") },
             Log = log,
             Hooks = hooks,
             Completed = completed,
@@ -705,19 +754,26 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
     }
 
     /// <summary>
-    /// HTTP/2 の構成で、JSON の要求（挿入）・blob の書き込み・blob の読み取りがどれも HTTP/2 でサーバーへ届き、blob が往復する。
+    /// HTTP/2 の構成で、JSON の要求（挿入）・blob の書き込み・blob の読み取りがどれも HTTP/2 でサーバーへ届き、blob が往復する
+    /// （ALPN の対照の行は、同じ要求がどれも HTTP/1.1 で届く）。
     /// </summary>
     /// <remarks>
     /// 行は要求の版の作り方。<see cref="Protocol.Http2ViaClientDefaults"/> の行は HttpClient の設定だけで HTTP/2 にするので、
     /// 生成クライアントが自分で作る要求（blob の書き込みの PUT）がその設定を写さないと、その要求だけが HTTP/1.1 で出て、
     /// HTTP/2 だけを受けるサーバーに届かないか、HTTP/1.1 として記録される。
     /// <see cref="Protocol.Http2ViaHandler"/> の行はどの要求の版もハンドラーが書き換えるので、作り方に依らず HTTP/2 になる。
+    /// <see cref="Protocol.Http2ViaAlpn"/> の行は、HTTPS のサーバーが Kestrel の既定のまま（HTTP/1.1 と HTTP/2 の両方）で、
+    /// HttpClient の設定（HTTP/2・<see cref="HttpVersionPolicy.RequestVersionOrLower"/>）だけで ALPN が HTTP/2 に決まる
+    /// （PUT が設定を写さないと、その要求だけが HTTP/1.1 で届いて赤）。<see cref="Protocol.Http11ViaAlpn"/> はその対照で、
+    /// 同じサーバーが HTTP/1.1 のクライアントを HTTP/1.1 で受ける（サーバーが両方を受けていることの確かめ）。
     /// </remarks>
     [Theory(
-        DisplayName = "[RemoteHost] HTTP/2: JSON の要求と blob の読み書きがどれも HTTP/2 で届き、blob が往復する"
+        DisplayName = "[RemoteHost] HTTP/2: JSON の要求と blob の読み書きがどれも要求の版の作り方の期待の版で届き、blob が往復する"
     )]
     [InlineData(Protocol.Http2ViaHandler)]
     [InlineData(Protocol.Http2ViaClientDefaults)]
+    [InlineData(Protocol.Http11ViaAlpn)]
+    [InlineData(Protocol.Http2ViaAlpn)]
     public async Task Http2_BlobRoundTrips(Protocol protocol)
     {
         await using var host = await StartAsync(new HostOptions { Protocol = protocol });
@@ -745,10 +801,11 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
                 ["POST", "PUT", "GET"],
                 "JSON の要求・blob の書き込み・blob の読み取りがサーバーへ届いた"
             );
+        var expected = ExpectedProtocol(protocol);
         host.Requests.Should()
             .OnlyContain(
-                request => request.Protocol == "HTTP/2",
-                "どの要求も HttpClient の版の設定どおり HTTP/2 で届く"
+                request => request.Protocol == expected,
+                $"どの要求も、その行の要求の版の作り方どおり {expected} で届く"
             );
     }
 
@@ -945,8 +1002,8 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
     /// <para>
     /// 生成クライアントのアップロードは <c>Expect: 100-continue</c> を付け、サーバーがヘッダーを受け付けるまで本文を送らない。
     /// HTTP/1.1 では、本文の送信中にサーバーが接続を閉じると 413 がリセットで失われるのを、これが防ぐ。行は要求の版の作り方で、
-    /// HTTP/2（ハンドラーで書き換える形と HttpClient の設定だけの形）でも同じ 413 になることを見る（各行の PUT が
-    /// その版で届いたことも記録で見る）。
+    /// HTTP/2（ハンドラーで書き換える形と HttpClient の設定だけの形・HTTPS で ALPN が HTTP/2 に決まる形）と、HTTPS で ALPN が
+    /// HTTP/1.1 に決まる形でも同じ 413 になることを見る（各行の PUT がその版で届いたことも記録で見る）。
     /// </para>
     /// <para>
     /// 100 Continue の待ち時間はハンドラーの設定で、既定の 1 秒を過ぎると本文が送られて同じ競合が戻り得る。全件の並列実行で
@@ -960,6 +1017,8 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
     [InlineData(Protocol.Http11)]
     [InlineData(Protocol.Http2ViaHandler)]
     [InlineData(Protocol.Http2ViaClientDefaults)]
+    [InlineData(Protocol.Http11ViaAlpn)]
+    [InlineData(Protocol.Http2ViaAlpn)]
     public async Task OversizedUpload_IsRefusedWith413(Protocol protocol)
     {
         await using var host = await StartAsync(
@@ -988,10 +1047,7 @@ public sealed class RemoteTransportRemoteAdoSqliteHostConfigurationRuntimeTests(
             .Should()
             .ContainSingle("上限を超える書き込みの PUT がサーバーへ届いた")
             .Which.Protocol.Should()
-            .Be(
-                protocol == Protocol.Http11 ? "HTTP/1.1" : "HTTP/2",
-                "PUT はその行の要求の版で届く"
-            );
+            .Be(ExpectedProtocol(protocol), "PUT はその行の要求の版で届く");
         (await ReadPayloadAsync(host)).Should().Equal([1, 2, 3]);
     }
 }

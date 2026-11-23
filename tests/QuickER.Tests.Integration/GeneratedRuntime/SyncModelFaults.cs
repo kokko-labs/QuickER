@@ -258,50 +258,12 @@ internal sealed class SyncModelFaults
         return false;
     }
 
-    // HookSkip の飛ばしが当たった（端末・表・キー）。判定役の照合 8 が、飛ばした保存の記録が残った行を見分ける
-    private readonly List<(ModelActor Device, string Table, string Key)> _hookSkipHits = [];
-
     /// <summary>
-    /// ローカルの Before フックの入口で呼ぶ（書き込み中の端末に HookSkip が仕掛けてあれば、飛ばす行を控えて true）
+    /// ローカルの Before フックの入口で呼ぶ（書き込み中の端末に HookSkip が仕掛けてあれば true。飛ばした保存は行を書かず、
+    /// トリガーも記録しない）
     /// </summary>
-    /// <param name="entity">フックが受けた行</param>
-    public bool TryFireHookSkip(object entity)
-    {
-        if (Writing is not { } device || !TryFire(ModelFaultKind.HookSkip, device))
-        {
-            return false;
-        }
-
-        var (table, key) = ModelEntityKeys.Of(entity);
-
-        lock (_hookSkipHits)
-        {
-            _hookSkipHits.Add((device, table, key));
-        }
-
-        return true;
-    }
-
-    /// <summary>これまでに HookSkip の飛ばしが当たった（端末・表・キー）の数</summary>
-    public int HookSkipHitCount
-    {
-        get
-        {
-            lock (_hookSkipHits)
-            {
-                return _hookSkipHits.Count;
-            }
-        }
-    }
-
-    /// <summary><paramref name="from"/> 番目から後に HookSkip の飛ばしが当たった（端末・表・キー）</summary>
-    public IReadOnlyList<(ModelActor Device, string Table, string Key)> HookSkipHitsSince(int from)
-    {
-        lock (_hookSkipHits)
-        {
-            return [.. _hookSkipHits.Skip(from)];
-        }
-    }
+    public bool TryFireHookSkip() =>
+        Writing is { } device && TryFire(ModelFaultKind.HookSkip, device);
 
     // BlobDownload の失敗が当たった（端末・品目のキー）。判定役の照合 3 が、例外で終わった ServerWins の同期が戻した行の窓を見分ける
     private readonly List<(ModelActor Device, string Key)> _blobReadHits = [];
@@ -561,7 +523,7 @@ internal sealed class SyncModelHook<TEntity>(
         CancellationToken cancellationToken = default
     )
     {
-        if (faults.TryFireHookSkip(entity))
+        if (faults.TryFireHookSkip())
         {
             return Task.FromResult(false);
         }
