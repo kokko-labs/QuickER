@@ -1068,6 +1068,29 @@ internal static partial class DialectDdlRows
                         CnShipLine("FK_custom")
                     )
                 ),
+            DialectDdlRow
+                .Ddl(
+                    "ddl-fk-unnamed-same-columns-twice-after-default-gets-number",
+                    "名前の無い同じ組で子の列も同じ 2 本目・3 本目は、2 本目が子の列名つきの名前になり、3 本目はその名前を取らずに番号を足した名前になる（一意にした名前も使用済みに数える）",
+                    E.ForeignKey,
+                    F.ConstraintName,
+                    d =>
+                    {
+                        var (diagram, customers, orders) = CnCustomersOrders(d);
+                        diagram.Relationships.Add(CnLink(customers, orders, "bill_customer_id"));
+                        diagram.Relationships.Add(CnLink(customers, orders, "ship_customer_id"));
+                        diagram.Relationships.Add(CnLink(customers, orders, "ship_customer_id"));
+
+                        return diagram;
+                    }
+                )
+                .ExpectAll(e =>
+                    e.Lines(
+                        CnBillLine("FK_orders_customers"),
+                        CnShipLine("FK_orders_customers_ship_customer_id"),
+                        CnShipLine("FK_orders_customers_ship_customer_id_2")
+                    )
+                ),
         ];
 
     /// <summary>上限のある 4 方言</summary>
