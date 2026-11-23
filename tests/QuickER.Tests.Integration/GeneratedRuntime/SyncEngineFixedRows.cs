@@ -266,6 +266,14 @@ internal static partial class SyncEngineFixedRows
                 ChunkRouteCellsAsync
             ),
             Row(
+                "chunk-write-transactions-leave-gap-for-other-writers",
+                "塊の経路のトランザクション（削除の段・塊・最後の段）は、前のコミットから既定の隙間（170 ms）がたっていなければ残りを"
+                    + "待ってから始まる（止まった時計では塊の経路のトランザクションの数 − 1 回、どれも 170 ms を頼む。時刻が隙間ぶん"
+                    + "進む時計と隙間 0 では待たない）。同期と Force の洗い替えのどちらも、結果は隙間の有無で変わらない。既定の閾値は"
+                    + " 2 万行",
+                ChunkWriteGapAsync
+            ),
+            Row(
                 "untracked-write-is-not-recorded-and-keeps-earlier-records",
                 "記録しない書き込み（SyncLocalTracking.WriteUntrackedAsync）が渡した接続で書いた行は記録されず、前からある"
                     + "未送信の記録・変更の連番・適用中の印は変わらない。その後の普通の書き込みは記録され、同期で送られる",
@@ -1863,11 +1871,15 @@ internal static partial class SyncEngineFixedRows
     /// <summary>塊の経路の行で、観測が投げる取得の失敗の文</summary>
     private const string InjectedFetchFailure = "Injected fetch failure between chunks.";
 
-    /// <summary>エンジンの塊へ入る閾値と塊の大きさを、小さい塊の端末と同じ値にする</summary>
+    /// <summary>
+    /// エンジンの塊へ入る閾値と塊の大きさを、小さい塊の端末と同じ値にする（塊の間の隙間も小さい塊の端末と同じく 0。隙間は結果を
+    /// 変えず、行 <c>chunk-write-transactions-leave-gap-for-other-writers</c> が見る）
+    /// </summary>
     private static SyncEngine SmallChunks(SyncEngine engine)
     {
         engine.ChunkThreshold = SyncModelEngineDevice.SmallChunkThreshold;
         engine.ChunkSize = SyncModelEngineDevice.SmallChunkSize;
+        engine.ChunkWriteGap = TimeSpan.Zero;
 
         return engine;
     }
@@ -2254,6 +2266,145 @@ internal static partial class SyncEngineFixedRows
         Describe(await h.ReadLocalAsync(ct))
             .Should()
             .Be(Describe(await h.ReadServerAsync(ct)), "端末とサーバーの内容が同じ");
+    }
+
+    /// <summary>
+    /// 塊の経路のトランザクションの間の隙間：形（同期・Force の洗い替え）× 時計（止まった時計・隙間ぶん進む時計・隙間 0）ごとに別の
+    /// 端末とサーバー役を作り、閾値と塊の大きさを 2 行にしたエンジンで流す。待ちの回数と頼んだ長さを偽の時計（
+    /// <see cref="RecordingTimeProvider"/>）で数え（時間は表明しない）、結果は形ごとに 3 つの時計で同じ
+    /// </summary>
+    private static async Task ChunkWriteGapAsync(SyncEngineFixedHarness h, CancellationToken ct)
+    {
+        // 既定値は決定のとおり（2026-11-23）：閾値は 1 回で全部の道の 1 トランザクションを遅い機械でも 2 秒の内に収める 2 万行、
+        // 隙間は Microsoft.Data.Sqlite の 150 ms おきの取り直しに Windows の眠りの粒度を足して超える 170 ms
+        var defaults = h.CreateEngine();
+        defaults.ChunkThreshold.Should().Be(20_000, "塊へ入る閾値の既定は 2 万行");
+        var gap = defaults.ChunkWriteGap;
+        gap.Should()
+            .Be(
+                TimeSpan.FromMilliseconds(170),
+                "塊の経路のトランザクションの間の隙間の既定は 170 ms"
+            );
+
+        // サーバーのフォルダーは取得の順に 11（親は 10）・1・2・3・10（11 の後に書き直した）。2 行の塊は [11, 1]・[2, 3]・[10]。
+        // 同期（空の端末）は最初の塊が 11 を親の無い行として持ち越し、最後の段で書く：削除の段 1・塊 3・最後の段 1 の 5 つ。
+        // 洗い替え（端末は 10 を持つ）は持ち越さず、塊が持ってこなかった捨てる行も無い：削除の段 1・塊 3 の 4 つ
+
+        foreach (var refresh in new[] { false, true })
+        {
+            var shape = refresh ? "Force の洗い替え" : "同期";
+            string? first = null;
+
+            foreach (var clockName in new[] { "frozen", "advancing", "no-gap" })
+            {
+                await using var cell = await SyncEngineFixedHarness.CreateAsync(ct);
+                await InsertServerFoldersAsync(
+                    cell,
+                    ct,
+                    (10, null, "p10"),
+                    (11, 10, "c11"),
+                    (1, null, "f1"),
+                    (2, null, "f2"),
+                    (3, null, "f3")
+                );
+                await RenameServerFolderAsync(cell, 10, "p10-renamed", ct);
+
+                if (refresh)
+                {
+                    // 端末をそろえてから、捨てる行（未送信の編集）を 1 つ作る（1 回で全部の道で降ろす＝隙間を数えない端末のエンジン）
+                    await cell.SyncAsync(null, ct);
+                    await cell.ExecuteLocalAsync(
+                        "UPDATE model_folders SET name = 'local-1' WHERE folder_id = 1",
+                        ct
+                    );
+                }
+
+                var clock = new RecordingTimeProvider(
+                    clockName == "advancing" ? gap : TimeSpan.Zero
+                );
+                var routes = new List<SyncDownloadRoute>();
+                var carried = 0;
+                var engine = cell.CreateEngine();
+                engine.ChunkThreshold = SyncModelEngineDevice.SmallChunkThreshold;
+                engine.ChunkSize = SyncModelEngineDevice.SmallChunkSize;
+                engine.TimeProvider = clock;
+                engine.DownloadRouteObserved = routes.Add;
+                engine.CarriedRowsApplied = count => carried += count;
+
+                if (clockName == "no-gap")
+                {
+                    engine.ChunkWriteGap = TimeSpan.Zero;
+                }
+
+                var outcome = refresh
+                    ? "discarded="
+                        + (
+                            await cell.RefreshAsync(
+                                new SyncRefreshOptions
+                                {
+                                    DiscardLocalUnboundedBinaries = true,
+                                    Force = true,
+                                },
+                                ct,
+                                engine
+                            )
+                        ).DiscardedChanges
+                    : "downloaded=" + (await cell.SyncAsync(null, ct, engine)).Downloaded;
+
+                routes
+                    .Should()
+                    .Equal([SyncDownloadRoute.Chunked], $"{shape}（{clockName}）は塊の経路を通る");
+                carried
+                    .Should()
+                    .Be(refresh ? 0 : 1, $"{shape}（{clockName}）の最後の段が書く持ち越しの行");
+                var transactions = refresh ? 4 : 5;
+
+                if (clockName == "frozen")
+                {
+                    clock
+                        .Waits.Should()
+                        .Equal(
+                            Enumerable.Repeat(gap, transactions - 1),
+                            $"{shape}：止まった時計では、最初を除く塊の経路のトランザクションの前ごとに、隙間の全部を待つ"
+                        );
+                }
+                else
+                {
+                    clock
+                        .Waits.Should()
+                        .BeEmpty(
+                            $"{shape}（{clockName}）：前のコミットから隙間がたっていれば（隙間 0 なら常に）待たない"
+                        );
+                }
+
+                var result = string.Join(
+                    "\n",
+                    [
+                        outcome,
+                        Describe(await cell.ReadLocalAsync(ct)),
+                        Describe(await cell.ReadServerAsync(ct)),
+                        // 状態の表の 1 行（quicker_sync_state）は DB ごとの印を持ち、端末を作るたびに違うので比べない
+                        .. (await cell.ReadStateTablesAsync(ct)).Where(line =>
+                            !line.StartsWith("quicker_sync_state|", StringComparison.Ordinal)
+                        ),
+                    ]
+                );
+
+                if (first is null)
+                {
+                    first = result;
+                }
+                else
+                {
+                    result
+                        .Should()
+                        .Be(
+                            first,
+                            $"{shape}の結果（端末・サーバー・状態の表）は隙間の有無で変わらない（{clockName}）"
+                        );
+                }
+            }
+        }
     }
 
     /// <summary>

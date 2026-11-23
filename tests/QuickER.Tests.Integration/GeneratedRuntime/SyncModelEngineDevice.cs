@@ -54,6 +54,9 @@ internal static class SyncModelEngineDevice
                     {
                         engine.ChunkThreshold = SmallChunkThreshold;
                         engine.ChunkSize = SmallChunkSize;
+
+                        // 2 行の塊はトランザクションが多く、隙間を置くと照合が長くなる。隙間は結果を変えない
+                        engine.ChunkWriteGap = TimeSpan.Zero;
                         engine.DownloadRouteObserved = routes.Note;
                         engine.CarriedRowsApplied = routes.NoteCarried;
                     }
