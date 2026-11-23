@@ -642,7 +642,6 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         var foreignKeysBefore = await ReadForeignKeyViolationsAsync(op.Actor);
         var applied = true;
         var firedBefore = _world.Faults.Fired;
-        var hookSkipIndex = _world.Faults.HookSkipHitCount;
 
         try
         {
@@ -692,8 +691,6 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             applied && _world.Faults.Fired == firedBefore ? op : null
         );
         RecordChanges(op.Actor, before, after);
-        // この手の間にモデルが仕掛けた Before フックの飛ばしが当たった行を控える（照合 8 から外す）
-        _hookSkipped.UnionWith(_world.Faults.HookSkipHitsSince(hookSkipIndex));
         await CheckNewForeignKeyViolationsAsync(op.Actor, foreignKeysBefore, op.Describe());
 
         return applied;

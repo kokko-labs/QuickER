@@ -254,7 +254,7 @@
   - 初期データへそろったかの照合は None・Refresh の端末だけに掛ける。
   - 最初の同期をしない端末（Journaled・Untracked）から見ると、初期データはまだ受け取っていないほかの書き手の内容。その端末がそのキーをサーバーと同じ内容（品目は blob も）で持つまで、版の競合の根拠の判定と消失なしの表明は、初期データをそのキーの書き手に数える。
   - 追跡しない行に端末が初めて書いたら、その行の今の内容と blob をその端末の書き込みとして履歴へ積む（Repository 越しの更新・blob の書き込みは、サーバーへの挿入として全列を送る）。
-  - 作らない形（サーバーにあるキーの追跡しない行・外で版を書いた行の持ち込み・別の端末の DB の写し・端末 4 台以上・小さい取得の行数の上限・古い読みの保存〔同期が降ろす前に読んだ実体を降ろした後に保存する書き込み。項目 stale-entity-saves。見分ける形と見分けない形は同期のエンジンの決まった形の行が持つ〕ほか）は `SyncModelNotGenerated` に Accepted で宣言する。
+  - 作らない形は `SyncModelNotGenerated` に宣言する。Accepted はサーバーにあるキーの追跡しない行・別の端末の DB の写し・端末 4 台以上・小さい取得の行数の上限・古い読みの保存〔同期が降ろす前に読んだ実体を降ろした後に保存する書き込み。項目 stale-entity-saves。見分ける形と見分けない形は同期のエンジンの決まった形の行が持つ〕ほか。外で版を書いた行の持ち込み・表どうしの循環の列を書く手・同じバッチの一意な値の入れ替えは Pending（R3 の後の生成器の区切り）。
 - 空振りの守り：広い世界の種が既定の種の数のとき、最初の形ごとに実際に効いたことを `CoverageGuard` で表明する（`SyncModelRun.PreloadEffects`＝洗い替えで作った端末がそろった・初期データのキーへの記録が DuplicateOnServer になった・最初の同期の前の記録が UniqueValueTakenOnServer で断られた・どの書き込みも触れなかった追跡しない行が静止化の後にどの端末にも無い）。
 - 3 台目があって初めて起きる順序は、決まった形の行 `three-devices-change-reaches-the-other-two-in-different-orders`（全転送・3 台の世界）が持つ：端末 1 が UploadAsync だけで上げ（まだ降ろさない）、端末 2 がその版を降ろしてから編集して上げ、端末 3 は端末 2 の版だけを降ろす。端末 1 は自分が上げたキーに来た端末 2 の版を自分のエコーとみなさずに降ろし、端末 3 は端末 2 の版を元にした編集を競合なしに上げる。
 
@@ -308,7 +308,7 @@
   - 使う行は `dl-server-update-after-upload-is-still-downloaded`（取得の直前に書かれた版）と、割り込みの網の洗い替え × 持ち主 × 更新 × 取得の前の点の 4 行（下の「割り込みの点」）と、実行の途中にサーバーの他者が書く洗い替え・同期の行 3 本（`fk-parent-created-between-table-fetches-arrives-in-same-sync`・`blob-refresh-discard-leaves-no-blob-on-row-changed-after-ceiling`・`blob-refresh-discard-empties-blob-of-row-written-after-retry`）。ほかの行は、どのサーバー役でも同じ期待で書いてある（実 SQL Server の Theory が直結と同じ違反になることで確かめる）。
   - 実行の途中にサーバーの他者が書く行（`ArmInterruptOp` の書き手がサーバーの他者）を足すときは、書かれた版がその実行に入ることを期待に置くなら、この手で枝を分ける。分けない行は、実 SQL Server の転送でだけ赤になる。
 - DuplicateOnServer の決着の中身は決まった形の行が持つ：Collect＝`conflict-duplicate-key-on-server-is-reported`・LocalWins＝`lw-overwrites-duplicate-key-on-server`・ServerWins＝`sw-duplicate-key-on-server-reloads-server-row`（同期＝同じ実行のダウンロードが揃える）と `sw-duplicate-key-on-server-upload-only-reloads-server-row`（単独の UploadAsync＝ServerWins が自分で読み直す）・後勝ち＝`lww-duplicate-key-on-server-overwrites`。モデルは書き手が 2 人のキーの決着を表明しない（報告せずに上書きする壊し方は、乱数の種では結果の表の網羅だけが捕まえる）。
-- 表どうしの循環の列（`pinned_item_id`）は乱数の列が書かない（並行の書き手が行の循環を作るのを生成器は防げず、サーバーで消えた循環の行は端末に残る＝docs の既知の割り切り）。洗い替え以外の経路は決まった形の行が持つ：`cycle-pin-to-new-item-uploads-in-rounds`（新しい品目へのピン留めが最初の巡で断られ次の巡で通る）・`cycle-pinned-item-is-read-back-before-folder`（ダウンロードがピン留めの先の品目のまだ無いフォルダーを打ち切らずに入れる）・`cycle-serverwins-restores-folder-pinned-to-new-item`（単独の UploadAsync の ServerWins。端末に無い品目をピン留めするサーバーの行はその実行では戻さず、フォルダーは端末の内容のまま未送信で残り、次の ServerWins の同期で品目と一緒に戻る。枝はエンジンの宣言 `CarriesServerWinsDecision` で選ぶ＝`WhenEngineDeclaresOp`）。
+- 表どうしの循環の列（`pinned_item_id`）は乱数の列が書かない（生成器は書き手の DB で成功する手だけを選ぶので、循環に入った行を消す前に循環を外す手を選ぶ規則が要る。作らない形の宣言は Pending＝R3 の後の生成器の区切り）。洗い替え以外の経路は決まった形の行が持つ：`cycle-pin-to-new-item-uploads-in-rounds`（新しい品目へのピン留めが最初の巡で断られ次の巡で通る）・`cycle-pinned-item-is-read-back-before-folder`（ダウンロードがピン留めの先の品目のまだ無いフォルダーを打ち切らずに入れる）・`cycle-serverwins-restores-folder-pinned-to-new-item`（単独の UploadAsync の ServerWins。端末に無い品目をピン留めするサーバーの行はその実行では戻さず、フォルダーは端末の内容のまま未送信で残り、次の ServerWins の同期で品目と一緒に戻る。枝はエンジンの宣言 `CarriesServerWinsDecision` で選ぶ＝`WhenEngineDeclaresOp`）。
 - 次元表 `SyncModelDimensions`：
   - OpFamily に 4 つの形、因子 UniqueTable・PropagateDeletes・Excluded（2 表・3 表の水準 two・three を含む）・Batch・Blobs（後ろ 4 つは SyncOptions の Source）・FaultKind・KeyOrigin（own・stolen・not-insert）・Spelling（UniqueSpelling の値と none）・PayloadSize（small・large・none）。
   - 世界の形の因子 Devices（2・3）・Preload（操作の書き手の最初の形＝`ModelPreload` の値。サーバーの他者は None）。2 台の世界の最初の形が None 以外の組・端末 3 が 2 台の世界にいる組・サーバーの他者が None 以外の組は、定義から起こり得ない組として外す。
@@ -329,7 +329,7 @@
   - 残る網羅しない組は受け入れの組だけ（`SyncModelDimensions.EngineGaps`＝Blobs=False と、サーバーの他者 × ぶつかり得る別表記。結果の表の `SyncModelOutcomeDimensions.EngineGaps` は空）。
   - mutation 実証済み。
 - 静止化が終わらないときは、最後の周の打ち切りと競合を分類して署名を細かくする（`SyncModelRun.ClassifyStuckTruncationsAsync`）。
-  - 一意な値の回転：`1/no-quiesce:unique-swap:{表}`（docs の既知の割り切り＝受け入れ）。打ち切った行のサーバーの値をローカルで持つ行、その行のサーバーの値をローカルで持つ行…と辿って元の行へ戻る形で、2 行の厳密な入れ替えはその最短の形（判定は `SyncModelRun.UniqueRotation`。回転の途中に未送信の行・古い写しの行が混ざっても同じ）。2 行の入れ替えは打ち切りの分類の最初に、3 行以上の回転はほかの形（端末側の循環を含む）が説明しなかった打ち切りにだけ最後に当てる。2 行に限ると 3 行以上の回転が粗い署名に落ち、最初に当てると端末だけで回した循環を `pending-unique-cycle` から奪う。
+  - 一意な値の回転：`1/no-quiesce:unique-swap:{表}`（今のエンジンは同じ適用で降ろすので、出たら違反。docs の「競合」の節）。打ち切った行のサーバーの値をローカルで持つ行、その行のサーバーの値をローカルで持つ行…と辿って元の行へ戻る形で、2 行の厳密な入れ替えはその最短の形（判定は `SyncModelRun.UniqueRotation`。回転の途中に未送信の行・古い写しの行が混ざっても同じ）。2 行の入れ替えは打ち切りの分類の最初に、3 行以上の回転はほかの形（端末側の循環を含む）が説明しなかった打ち切りにだけ最後に当てる。2 行に限ると 3 行以上の回転が粗い署名に落ち、最初に当てると端末だけで回した循環を `pending-unique-cycle` から奪う。
   - 値を取る行自身の古い参照が持ち主を残す：`1/no-quiesce:holder-referenced-by-taker:{表}`。
   - 持ち主がサーバーに無く、別の表のローカルの行が持ち主を（推移的に）参照し、その行のサーバーの行が値を取る行の下にある：`1/no-quiesce:holder-referenced-by-other-table:{表}`。そのうち、参照する行の中にローカルの行がサーバーの行と同じ最新の写しがある形は `1/no-quiesce:holder-referenced-by-other-table-current-child:{表}` に分ける（`SyncModelRun.HasCurrentReferrer`）。引き留める行の形ごとの期待は決定的なシナリオ（`SyncModelScenarios.HolderKeptByOtherRows.cs`）が持つ。
   - 端末側の一意な値の循環：`1/no-quiesce:pending-unique-cycle:{表}`。
@@ -430,10 +430,10 @@
 
 ### 同期の構成の行列
 
-- `SyncConfigMatrixRuntimeTests`（登録簿 SyncModel/Config・`SyncConfigDimensions`・Docker）は、組める組の全積 196 行を流す（6 因子の水準の全積 384 から、原理的に組めない組＝AddGeneratedSyncSupport × HTTP・キーなしのローカル × キーなしの直結・キーを決めるフック × 直接の挿入を外した数。どちらのフィクスチャもリモートサービスを持つので HTTP の行も両方にある）。軸は次のとおり。
+- `SyncConfigMatrixRuntimeTests`（登録簿 SyncModel/Config・`SyncConfigDimensions`・Docker）は、組める組の全積 238 行を流す（6 因子の水準の全積 480 から、原理的に組めない組＝AddGeneratedSyncSupport × HTTP（HTTP/2 の水準を含む）・キーなしのローカル × キーなしの直結・キーを決めるフック × 直接の挿入を外した数。どちらのフィクスチャもリモートサービスを持つので HTTP の行も両方にある）。軸は次のとおり。
   - 主キーの型：行列の軸 `SyncConfigFixtures`（IntKey＝SyncFixture・VoKey＝SyncVoFixture）。
   - ローカルの登録の形（因子 LocalKey）：キーつき・キーなし・キーなしの登録の後でローカルの接続ファクトリを同じ接続文字列のインスタンスの登録（シングルトン）で登録し直した形（`UnkeyedInstance`。同期の登録より前に登録し直す）。
-  - サーバーの差分ソース：直結の keyed / 非 keyed・HTTP の baseAddress / HttpClient ファクトリ。
+  - サーバーの差分ソース：直結の keyed / 非 keyed・HTTP の baseAddress / HttpClient ファクトリ / HttpClient ファクトリで HTTPS のサーバーへ HTTP/2 で送る形（`HttpClientFactoryHttp2`）。
   - AddGeneratedSyncSupport か分けた登録（差分ソースと `AddGeneratedSyncEngine`）。
   - キーを決める Before フックの有無。
   - 書き込みの経路（因子 Via）：直接の挿入・グラフ保存・`GraphRemoveParentWithNewChild`・`GraphViaExcludedParent`。
@@ -446,6 +446,7 @@
   - `GraphRemoveParentWithNewChild` は、新しい親をグラフ保存で書いて同じ流れを通した後に段を 1 つ足す：上げ下げした 2 つの親に、キーの無い新しい子を足して親を消すグラフ保存（単数と複数の SaveAsync）と、新しい子だけを MarkRemoved したグラフ保存を流し、未送信は 2 つの親の削除だけになり（新しい子は DB のどの行も消さないのでトリガーが記録しない）、後勝ちの同期 1 回でサーバーから親が消えて未送信が残らないことを見る。IntKey は消す親の下に、サーバーに同じキーの行がある新しい版なしの子（`sync_notes`）も入れ、サーバーのその行が残ることを見る。
   - `GraphViaExcludedParent` は、親の表を `excludeFromSync` に入れた登録（Support・Split の両方）で、同じ流れを同期する子の表（明細）で流す。親はテストがサーバーとローカルへ直接入れ、除外した親の直接の挿入と更新が未送信に何も残さないこと、除外した親を書き換えて子を足すグラフ保存が子の表だけを未送信にすること、子が同期 1 回で上がりローカルに残ることを見る（未送信の一覧はエンジンの表の行だけを返すので、除外した表に記録の仕組みが無いことは登録の形の検査のトリガーの表明が受け持つ）。
   - サーバーの DB は全部の行で共有するので、この 2 つの水準はサーバーに足した補助の行を行の終わりに消す（後の行の最初の同期と洗い替えが、親の無い行を降ろさないようにする）。キーは行ごとに 3 つ（ローカルの新しい行・サーバーの新しい行・補助の親）。
+  - HTTP/2 の水準（42 行）は、フィクスチャごとに 1 つの HTTPS の Kestrel（`TestHttpsCertificate`＝テストの中で作る自己署名の証明書・Kestrel の既定のまま HTTP/1.1 と HTTP/2 を ALPN で交渉する）を共有し、HttpClient のファクトリが HTTP/2・`RequestVersionOrLower` の HttpClient（`TestHttpsCertificate.CreateHttp2Client`）を返す。洗い替えの後、親を消す段より前に、ローカルの新しい行（ローカルのリポジトリ）とサーバーの新しい行（サーバーのリポジトリ）に親の表の除外した無制限バイナリ列を書き、`IncludeUnboundedBinary` の同期 1 回でそれぞれの側が相手の内容を持つことを見る（親の表を除外した `GraphViaExcludedParent` の 12 行は、同期する表に除外列が無いので流さない）。行の終わりに、その行の間に HTTPS のサーバーへ届いた要求（外側のミドルウェアが記録する `SyncConfigRequestLog`・共有のサーバーなので行の前の件数から後ろだけを見る）がどれも `HTTP/2` で、同期の専用のエンドポイント（`SyncCeiling`・`SyncChanges`・`SyncKeys`）・CRUD と保存の書き込み・（blob の段を流した行では）blob の PUT と GET を含むことを確かめる（`SyncConfigFixtures.Http2Problems`）。
 - 既知の失敗は KnownCaseLedger で、今は空。行の由来の指摘は行に残す。
 - 網羅しない組の一覧は空。VoKey×HTTP は SyncVoFixture にリモートサービスを足して流す。
 - mutation 実証済み。

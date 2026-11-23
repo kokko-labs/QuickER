@@ -817,20 +817,6 @@ internal static class ModelEntityRows
         };
 }
 
-/// <summary>実体の表とキー（モデルの照合に使う格納値の文字列）</summary>
-internal static class ModelEntityKeys
-{
-    public static (string Table, string Key) Of(object entity) =>
-        entity switch
-        {
-            ModelFolderEntity f => (ModelTables.Folders, ModelDbState.Key(f.FolderId)),
-            ModelLabelEntity l => (ModelTables.Labels, l.LabelCode),
-            ModelItemEntity i => (ModelTables.Items, ModelDbState.Key(i.ItemId)),
-            ModelEventEntity e => (ModelTables.Events, ModelTables.EventKeyText(e.EventAt)),
-            _ => throw new ArgumentOutOfRangeException(nameof(entity), entity.GetType().Name, null),
-        };
-}
-
 /// <summary>キーの並び（両方が整数なら数の順・それ以外は序数）</summary>
 internal sealed class ModelKeyComparer : IComparer<string>
 {

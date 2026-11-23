@@ -6,10 +6,12 @@ using QuickER.Tests.GeneratedSyncModelFixture;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// 一意な値の持ち主（サーバーに無いローカルの行）を、別の表の送るものの無い行が引き留める形。引き留める行のサーバーの行は、
-/// 持ち主の値を待つ行の下にあるので先に入れられず、持ち主も消せない。解決役は、引き留める行がどれも送るものを持たない
-/// （未送信の変更が無いか、その実行が記録を捨てる）とき、それらを子から消し、持ち主を消して、待っていた行を入れた後に
-/// サーバーの写しで入れ直す（<c>SyncParentResolver.RemoveRowsKeepingHoldersAsync</c>）。
+/// 一意な値の持ち主（サーバーに無いローカルの行）を、別の表の行が引き留める形。引き留める行のサーバーの行は、持ち主の値を待つ
+/// 行の下にある。同期のエンジンは 1 つの適用の中で、全部の表の削除伝搬を行を書く前に流し、外部キーの検査を切ったまま行を書いて
+/// から外部キーを確かめる（違反があれば巻き戻し、書いた子を保留にするか消した親を残してやり直す）。引き留める行がどれも送る
+/// ものを持たない（未送信の変更が無いか、その実行が変更を捨てる）とき、削除伝搬が持ち主を消し、待っていた行と引き留める行の
+/// サーバーの行を同じ適用で書く。引き留める行に未送信の変更が残るときは、その行は端末の内容のまま残り、持ち主を消すと外部キーの
+/// 違反になるので持ち主も残し（持ち主自身に未送信の変更があれば削除伝搬が初めから消さない）、待っていた行は保留になる。
 /// </summary>
 internal static partial class SyncModelScenarios
 {
@@ -49,8 +51,8 @@ internal static partial class SyncModelScenarios
 
     private static IEnumerable<SyncModelScenario> HolderKeptByOtherRowsScenarios()
     {
-        // 広い世界の種 120022 の形を縮めたもの：静止化の ServerWins の周が、品目 1782（記録を捨てる行）を消して持ち主 1781 を
-        // 消し、3781・3782 を入れてから品目 1782 をサーバーの写しで入れ直す
+        // 広い世界の種 120022 の形を縮めたもの：静止化の ServerWins の周が品目 1782 と持ち主 1781 の変更を捨て、同じ適用で
+        // 削除伝搬が持ち主 1781 を消し、3781・3782 と品目 1782 のサーバーの行を書く
         yield return new("holder-referenced-by-other-table-settles", [], HolderKeptByItemOps());
 
         // ServerWins の同期 1 回で、その同期の中で決着する（後勝ち＋ServerWins も同じ）。品目 1782 の未送信の挿入は
@@ -74,8 +76,8 @@ internal static partial class SyncModelScenarios
             ]
         );
 
-        // Collect は、引き留める行に送るものがある（品目 1782 の未送信の挿入）ので消さず、競合を報告し続ける（docs の抜け方は
-        // 値を変えるか ServerWins）
+        // Collect は、引き留める行に送るものがある（品目 1782 の未送信の挿入）ので消さず、競合を報告し続ける（docs の「競合」の節の
+        // 解決の道は、値を変えるか ServerWins で回す）
         yield return new(
             "holder-referenced-by-other-table-collect-keeps-unsent-referrer",
             [],
@@ -87,8 +89,8 @@ internal static partial class SyncModelScenarios
             ]
         );
 
-        // 削除を伝搬しない実行は、持ち主を消さないのと同じく、引き留める行も消さない（docs：サーバーに無い行は伝搬が有効な
-        // ときに消える）
+        // 削除を伝搬しない実行は、持ち主を消さないのと同じく、引き留める行も消さない（docs の「競合」の節：PropagateDeletes を
+        // 切っていると、サーバーに無い行はそのまま残る）
         yield return new(
             "holder-referenced-by-other-table-propagation-off-keeps-referrer",
             [],
@@ -117,7 +119,7 @@ internal static partial class SyncModelScenarios
 
         // 広い世界の種 120055 の形を縮めたもの：持ち主 1781 を直接引き留めるのはラベル（未送信・サーバーに無い）で、その
         // ラベルを未送信の品目 1782 が参照する。ラベルの表は版を持たないので、後勝ちの実行の範囲にだけ入る（静止化の後勝ち＋
-        // ServerWins の周が、品目とラベルを消して持ち主を消す）
+        // ServerWins の周が品目とラベルの変更を捨て、削除伝搬がラベルと持ち主を消し、品目をサーバーの行で置き換える）
         yield return new(
             "holder-referenced-by-other-table-through-label-settles",
             [Folder(SV, 790)],
@@ -134,7 +136,7 @@ internal static partial class SyncModelScenarios
 
         // 未送信の無い古い写しが持ち主を引き留める形（サーバーの操作だけで起きる）：サーバーで品目 811 を新しいフォルダー 813
         // へ移し、元のフォルダー 810 を消し、813 が 810 の名前を取る。端末は品目 811 を 810 の下の古い写しのまま持つ。同期
-        // （Collect）1 回で、古い写しを消して 810 を消し、813 と品目 811 のサーバーの写しが入る
+        // （Collect）1 回で、削除伝搬が 810 を消し、同じ適用で 813 と品目 811 のサーバーの行を書く（古い写しは置き換わる）
         yield return new(
             "holder-referenced-by-other-table-stale-copy-settles",
             [Folder(SV, 810, name: "h810"), Item(SV, 811, 810)],
@@ -204,8 +206,8 @@ internal static partial class SyncModelScenarios
     /// <summary>SK-1 の形の手（持ち主 1781 を引き留める品目 1782 の下へ、サーバーの子のイベントが最新の写しとして降りる）</summary>
     /// <remarks>
     /// 端末が作った品目 1782 と同じキーのサーバーの品目 1782 の子のイベントが、キーでつながって端末の品目 1782 の下へ最新の
-    /// 写しとして降り、同じ表にそれより後ろの版のイベント（品目 795 の下）が残る。消すイベントの版は残る行が導く再開点より
-    /// 下なので、ダウンロードの流れでは二度と降りない
+    /// 写しとして降り、同じ表にそれより後ろの版のイベント（品目 795 の下）も降りて、イベントの表の再開点はその後ろへ進む。
+    /// 決着する実行は品目 1782 を消さずにサーバーの行で置き換えるので、降りたイベントは端末に残る
     /// </remarks>
     private static IReadOnlyList<ModelOp> CurrentChildOps() =>
         [
@@ -238,9 +240,8 @@ internal static partial class SyncModelScenarios
         ];
 
     /// <summary>
-    /// 消すとダウンロードの流れで降りてこない最新の写しの行がある形（区切り SR）：解決役は、その行を降ろし直す約束
-    /// （quicker_sync_row_pending）へ記録してから消し、その表のダウンロードの番にサーバーからキーで読み直して戻す
-    /// （<c>SyncParentResolver.BringOwedRowsBackAsync</c>）
+    /// 引き留める行の下に最新の写しの子の行がある形（区切り SR）：エンジンは引き留める行を消さずにサーバーの行で置き換え、
+    /// 再開点は表ごとに状態の表に持つ（ローカルの行から導かない）ので、子の行は端末に残り、降ろし直す必要が無い
     /// </summary>
     private static IEnumerable<SyncModelScenario> CurrentChildScenarios()
     {
@@ -325,7 +326,8 @@ internal static partial class SyncModelScenarios
             );
         }
 
-        // 戻した子のイベントには受理記録が original として残る：端末が編集して上げると、競合なしにサーバーへ届く
+        // 降りた子のイベントの行の状態は、降ろしたときのサーバーの版を基準の版に持つ：端末が編集して上げると、その版で守る
+        // 更新が競合なしにサーバーへ届く
         yield return new(
             "holder-referenced-by-other-table-current-child-read-back-row-uploads-its-edit",
             StaleCopyWithChildSetup(),

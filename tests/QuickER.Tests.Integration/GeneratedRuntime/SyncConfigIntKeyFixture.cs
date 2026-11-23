@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Model;
 using QuickER.Tests.GeneratedSyncFixture;
@@ -101,9 +103,16 @@ internal sealed class SyncConfigIntKeyFixture : ISyncConfigFixture
     public void AddSyncEngine(IServiceCollection services, object? localKey, bool excludeParent) =>
         services.AddGeneratedSyncEngine(localKey, Exclusions(excludeParent));
 
+    public IReadOnlyList<string> SyncOperationRoutes { get; } =
+    [RemoteSyncOperations.Ceiling, RemoteSyncOperations.Changes, RemoteSyncOperations.Keys];
+
+    public string UnboundedBinaryRoute => "SyncOrder/Attachment";
+
     public Task<InProcessRemoteServer> StartRemoteServerAsync(
         string connectionString,
-        CancellationToken ct
+        CancellationToken ct,
+        Action<WebApplicationBuilder>? configure = null,
+        SyncConfigRequestLog? requests = null
     ) =>
         InProcessRemoteServer.StartAsync(
             services =>
@@ -111,9 +120,45 @@ internal sealed class SyncConfigIntKeyFixture : ISyncConfigFixture
                 services.AddGeneratedSqlServerRepositories(connectionString);
                 services.AddGeneratedDirectSyncSources(null);
             },
-            app => app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous),
-            ct
+            app =>
+            {
+                requests?.Attach(app);
+                app.MapGeneratedRemoteEndpoints(RemoteAccess.AllowAnonymous);
+            },
+            ct,
+            configure
         );
+
+    public async Task WriteUnboundedBinaryAsync(
+        IServiceProvider provider,
+        object? key,
+        int id,
+        byte[] content,
+        CancellationToken ct
+    )
+    {
+        if (
+            !await Repository(provider, key)
+                .WriteAttachmentAsync(id, new MemoryStream(content), cancellationToken: ct)
+        )
+        {
+            throw new InvalidOperationException($"order {id} is not there");
+        }
+    }
+
+    public async Task<byte[]?> ReadUnboundedBinaryAsync(
+        IServiceProvider provider,
+        object? key,
+        int id,
+        CancellationToken ct
+    )
+    {
+        using var destination = new MemoryStream();
+
+        return await Repository(provider, key).ReadAttachmentAsync(id, destination, ct)
+            ? destination.ToArray()
+            : null;
+    }
 
     public async Task WriteLocalAsync(
         IServiceProvider provider,
@@ -347,13 +392,18 @@ internal sealed class SyncConfigIntKeyFixture : ISyncConfigFixture
     public async Task<(string? Problem, int Downloaded)> SyncAsync(
         IServiceProvider provider,
         CancellationToken ct,
-        bool lastWriteWins = false
+        bool lastWriteWins = false,
+        bool includeUnboundedBinary = false
     )
     {
         var result = await provider
             .GetRequiredService<SyncEngine>()
             .SyncAsync(
-                lastWriteWins ? new SyncOptions { Mode = SyncMode.LastWriteWins } : null,
+                new SyncOptions
+                {
+                    Mode = lastWriteWins ? SyncMode.LastWriteWins : SyncMode.Versioned,
+                    IncludeUnboundedBinary = includeUnboundedBinary,
+                },
                 ct
             );
 

@@ -44,7 +44,19 @@ internal sealed record SyncConfigCase(
 
     /// <summary>サーバーが HTTP の向こうにいるか</summary>
     public bool OverHttp =>
-        Server is SyncConfigDimensions.HttpAddress or SyncConfigDimensions.HttpClientFactory;
+        Server
+            is SyncConfigDimensions.HttpAddress
+                or SyncConfigDimensions.HttpClientFactory
+                or SyncConfigDimensions.HttpClientFactoryHttp2;
+
+    /// <summary>HTTPS のサーバーへ HTTP/2 で送るか（要求が HTTP/2 で届いたことを行の終わりに確かめる）</summary>
+    public bool OverHttp2 => Server == SyncConfigDimensions.HttpClientFactoryHttp2;
+
+    /// <summary>
+    /// 無制限バイナリ列（親の表の除外列）を運ぶ同期の段を流すか：HTTP/2 の行のうち、親の表を構築時に除外しない行だけ（どちらの
+    /// フィクスチャも除外列を持つのは親の表だけで、親の表を除外した行では同期する表に除外列が無い）
+    /// </summary>
+    public bool SyncsUnboundedBinary => OverHttp2 && !ExcludesParent;
 
     /// <summary>フックが新しい行のキーを決めるか</summary>
     public bool HookAssignsKey => Hook == SyncConfigDimensions.AssignsKey;
@@ -73,8 +85,13 @@ internal sealed record SyncConfigCase(
 /// 無い新しい子ごと消すグラフ保存は流れの後ろにその段を足し、構築時に除外した親のグラフ保存は同期する子の表で同じ流れを流す。
 /// </para>
 /// <para>
-/// 行はフィクスチャのアダプタが作れる組だけ（値オブジェクトのキーのフィクスチャはリモートサービスを持たないので HTTP の行が
-/// 無い＝網羅しない組の一覧に載せる）。行を表から落とすと、その水準の組が欠けて網羅の照合が赤になる。
+/// サーバーの差分ソースは 5 水準（直結 2・HTTP 3）。HTTP/2 の水準（<see cref="HttpClientFactoryHttp2"/>）は HTTPS のサーバーへ
+/// HTTP/2 で送り、洗い替えの後に無制限バイナリ列を運ぶ同期を 1 回足して（<see cref="SyncConfigCase.SyncsUnboundedBinary"/>）、
+/// 同期の要求と blob の読み書きがどれも HTTP/2 で届いたことを行の終わりに確かめる。
+/// </para>
+/// <para>
+/// 行はフィクスチャのアダプタが作れる組だけ（今はどちらのフィクスチャもリモートサービスを持つので、HTTP の行も両方にある）。
+/// 行を表から落とすと、その水準の組が欠けて網羅の照合が赤になる。
 /// </para>
 /// </remarks>
 internal static class SyncConfigDimensions
@@ -130,6 +147,12 @@ internal static class SyncConfigDimensions
     /// <summary>HTTP・HttpClient のファクトリで登録</summary>
     public const string HttpClientFactory = "HttpClientFactory";
 
+    /// <summary>
+    /// HTTP・HttpClient のファクトリで登録し、HTTPS のサーバー（Kestrel の既定＝HTTP/1.1 と HTTP/2 を ALPN で交渉する）へ、
+    /// HTTP/2 と <c>RequestVersionOrLower</c> にした HttpClient で送る
+    /// </summary>
+    public const string HttpClientFactoryHttp2 = "HttpClientFactoryHttp2";
+
     /// <summary>AddGeneratedSyncSupport の 1 回の呼び出し</summary>
     public const string Support = "Support";
 
@@ -179,8 +202,9 @@ internal static class SyncConfigDimensions
                         new Level(DirectUnkeyed),
                         new Level(HttpAddress),
                         new Level(HttpClientFactory),
+                        new Level(HttpClientFactoryHttp2),
                     ],
-                    "サーバーの差分ソース（直結はサーバーのリポジトリのキーの有無・HTTP は AddGeneratedHttpSyncSources の 2 つの形。HTTP の差分ソースはキーを取らない）"
+                    "サーバーの差分ソース（直結はサーバーのリポジトリのキーの有無・HTTP は AddGeneratedHttpSyncSources の 2 つの形と、HttpClient のファクトリの形で HTTPS のサーバーへ HTTP/2 で送る形。HTTP の差分ソースはキーを取らない）"
                 ),
                 new Factor(
                     Registration,
@@ -254,14 +278,21 @@ internal static class SyncConfigDimensions
 
     /// <summary>行の流れの説明</summary>
     private static string Description(SyncConfigCase c) =>
-        c.ExcludesParent
-            ? "親の表を除外して登録→解決→登録の形の検査→除外した親の直接の書き込みは未送信に残らない→除外した親のグラフ保存で足した子だけが未送信になり同期 1 回で上がる→サーバーの新しい子を同期 1 回で降ろす→洗い替え"
-            : "登録→解決→登録の形の検査→ローカルの新しい行を同期 1 回で上げる→サーバーの新しい行を同期 1 回で降ろす→洗い替え"
-                + (
-                    c.RemovesParentWithNewChild
-                        ? "→保存済みの親をキーの無い新しい子ごと消すグラフ保存は親の削除だけを未送信にし、同期 1 回でサーバーへ届ける"
-                        : ""
-                );
+        (
+            c.ExcludesParent
+                ? "親の表を除外して登録→解決→登録の形の検査→除外した親の直接の書き込みは未送信に残らない→除外した親のグラフ保存で足した子だけが未送信になり同期 1 回で上がる→サーバーの新しい子を同期 1 回で降ろす→洗い替え"
+                : "登録→解決→登録の形の検査→ローカルの新しい行を同期 1 回で上げる→サーバーの新しい行を同期 1 回で降ろす→洗い替え"
+                    + (
+                        c.SyncsUnboundedBinary
+                            ? "→両側で書いた無制限バイナリ列を、運ぶ同期 1 回で交換する"
+                            : ""
+                    )
+                    + (
+                        c.RemovesParentWithNewChild
+                            ? "→保存済みの親をキーの無い新しい子ごと消すグラフ保存は親の削除だけを未送信にし、同期 1 回でサーバーへ届ける"
+                            : ""
+                    )
+        ) + (c.OverHttp2 ? "→HTTPS のサーバーに届いた要求はどれも HTTP/2" : "");
 
     /// <summary>全因子の水準の全積のうち、原理的に組める組</summary>
     private static IEnumerable<SyncConfigCase> AllCases()
@@ -301,7 +332,10 @@ internal static class SyncConfigDimensions
 
         // AddGeneratedSyncSupport は直結の差分ソース（AddGeneratedDirectSyncSources）とエンジンの合成で、HTTP の差分ソースを
         // 組まない
-        if (registration == Support && server is HttpAddress or HttpClientFactory)
+        if (
+            registration == Support
+            && server is HttpAddress or HttpClientFactory or HttpClientFactoryHttp2
+        )
         {
             return false;
         }

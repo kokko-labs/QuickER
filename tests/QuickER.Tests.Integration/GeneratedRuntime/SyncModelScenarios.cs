@@ -299,8 +299,9 @@ internal static partial class SyncModelScenarios
                     new ExpectLocalOp(D1, ModelTables.Folders, "51", "parent=50 name=f51"),
                 ]
             ),
-            // N6: 既存の行を、同じランで新しく作った同じ表の行の下へ付け替える（271 の最初の記録が 270 より古い）。
-            // 表の中の再生は最初の記録の順なので子が先に送られて断られるが、同じ表の中で進展がある限りやり直す
+            // N6: 既存の行を、同じランで新しく作った同じ表の行の下へ付け替える（271 の最初の変更は 270 の挿入より前）。
+            // 同じ表の中は行の最後の変更の順に送るので、270 の挿入が付け替えより先に届く。断られた書き込みは、進展がある限り
+            // 次の巡で送り直す
             new(
                 "n6-upload-reparent-to-new-row",
                 [Folder(SV, 271)],
@@ -326,8 +327,8 @@ internal static partial class SyncModelScenarios
                     new ExpectLocalOp(D2, ModelTables.Folders, "273", "parent=272 name=moved273"),
                 ]
             ),
-            // N6: 同じ表の親子を両方ローカルで消し、親の記録が先（親を先に改名した）。親の削除が先に送られて断られる
-            // が、子の削除の後でやり直して通る
+            // N6: 同じ表の親子を両方ローカルで消す（親を先に改名した）。同じ表の中は行の最後の変更の順に送るので、子の
+            // 削除が親の削除より先に届く。断られた削除は、進展がある限り次の巡で送り直す
             new(
                 "n6-delete-parent-recorded-first",
                 [Folder(SV, 274), Folder(SV, 275, parent: 274)],
@@ -750,8 +751,9 @@ internal static partial class SyncModelScenarios
                     new ExpectLocalOp(D1, ModelTables.Folders, "261", "parent=260 name=f261"),
                 ]
             ),
-            // 親の読み直し: 読み直した親の版は受理記録に残る。ダウンロードがその親へ届く前に端末で編集しても、
-            // 偽の DuplicateOnServer にならずに上がる（263 は D2 が作って改名した親・262 は打ち切りを作る未送信の行）
+            // 降りた親の行の状態は、サーバーが知っている行であることとその版を基準の版に持つ。その親を端末で編集しても、
+            // 偽の DuplicateOnServer にならずに版で守る更新として上がる（263 は D2 が作って改名した親・262 は D1 の未送信の
+            // 行で、ダウンロードはその行で打ち切らない）
             new(
                 "parent-readback-ack-guards-later-edit",
                 [Folder(SV, 262)],
@@ -1047,8 +1049,8 @@ internal static partial class SyncModelScenarios
                     Sync(D1),
                 ]
             ),
-            // #16: 失敗した Write{列}Async の記録が残り、blob を持たない端末（コピーに失敗して空のまま）がサーバーの
-            // blob を空で上書きする
+            // #16: 失敗した Write{列}Async は、トリガーの記録も書き込みと一緒に巻き戻るので何も残さず、blob を持たない端末
+            // （コピーに失敗して空のまま）がサーバーの blob を空で上書きしない
             new(
                 "16-failed-write-record-overwrites-blob",
                 [Folder(SV, 175)],
@@ -1060,7 +1062,8 @@ internal static partial class SyncModelScenarios
                     Sync(D1),
                 ]
             ),
-            // #16: 失敗した更新（After フックの例外）の記録が残り、LocalWins の再生が古い内容でサーバーの他者の更新を戻す
+            // #16: 失敗した更新（After フックの例外）は、トリガーの記録も同じトランザクションで巻き戻るので、LocalWins の
+            // 同期が古い内容でサーバーの他者の更新を戻さない
             new(
                 "16-failed-update-record-reverts-row",
                 [Folder(SV, 210, name: "base")],
@@ -1071,7 +1074,7 @@ internal static partial class SyncModelScenarios
                     Sync(D1, policy: SyncConflictPolicy.LocalWins),
                 ]
             ),
-            // #16: 失敗した Write{列}Async の記録が残り、LocalWins の再生が古い blob でサーバーの他者の blob を戻す
+            // #16: 失敗した Write{列}Async は記録を残さないので、LocalWins の同期が古い blob でサーバーの他者の blob を戻さない
             new(
                 "16-failed-blob-write-record-reverts-blob",
                 [Folder(SV, 212), Item(SV, 213, folder: 212)],
@@ -1081,7 +1084,8 @@ internal static partial class SyncModelScenarios
                     Sync(D1, policy: SyncConflictPolicy.LocalWins),
                 ]
             ),
-            // #16: 失敗した Write{列}Async の記録が中身の変わらない書き込みとして上がり、版を進めて別の端末に偽の競合を出す
+            // #16: 失敗した Write{列}Async は記録を残さないので、中身の変わらない書き込みが上がって版を進め、別の端末に偽の
+            // 競合を出すことが無い
             new(
                 "16-failed-blob-write-record-spurious-conflict",
                 [Folder(SV, 214), Item(SV, 215, folder: 214)],
@@ -1166,7 +1170,8 @@ internal static partial class SyncModelScenarios
                     Sync(D1),
                 ]
             ),
-            // #28: BeforeSaveAsync で主キーを決めるフックがあると古いキーで記録され、行が両側から消える
+            // #28: BeforeSaveAsync で主キーを決めるフックがあっても、トリガーは DB に書いた行のキー（フックが決めた後のキー）を
+            // 記録するので、行は両側に残る
             new(
                 "28-hook-assigns-key",
                 [Folder(SV, 195)],
@@ -1265,7 +1270,7 @@ internal static partial class SyncModelScenarios
                     Sync(D1),
                 ]
             ),
-            // 対照（失敗しない）: フックが飛ばした書き込みは、記録が残っても何も変えない
+            // 対照（失敗しない）: フックが飛ばした書き込みは DB に書かれず、トリガーは記録しないので、同期は何も変えない
             new(
                 "hook-skip-changes-nothing",
                 [Folder(SV, 238, name: "base")],
@@ -1280,8 +1285,8 @@ internal static partial class SyncModelScenarios
                         ? null
                         : $"folder 238: {state.Folders[238].Name}"
             ),
-            // 新規（案 N10）: フックが飛ばした書き込み（Before が false＝例外にならない）の記録が残り、中身の変わらない書き込みが
-            // 上がって版を進め、別の端末に偽の ModifiedOnServer を出す（#16 と同じ根。種 887・1834 の形）
+            // 新規（案 N10）: フックが飛ばした書き込み（Before が false＝例外にならない）は DB に書かれず、トリガーは記録しない
+            // ので、中身の変わらない書き込みが上がって版を進め、別の端末に偽の ModifiedOnServer を出すことが無い（種 887・1834 の形）
             new(
                 "n10-hook-skip-record-spurious-conflict",
                 [Folder(SV, 495)],
@@ -1293,7 +1298,8 @@ internal static partial class SyncModelScenarios
                     Sync(D1),
                 ]
             ),
-            // 新規（案 N10）: 同じ形で後勝ち。飛ばした書き込みの記録の再生が、古い内容でサーバーの他者の更新を戻す（種 1766 の形）
+            // 新規（案 N10）: 同じ形で後勝ち。飛ばした書き込みは記録されないので、後勝ちの同期が古い内容でサーバーの他者の更新を
+            // 戻さない（種 1766 の形）
             new(
                 "n10-hook-skip-record-reverts-row",
                 [Folder(SV, 496)],
@@ -1304,7 +1310,8 @@ internal static partial class SyncModelScenarios
                     Sync(D1, mode: SyncMode.LastWriteWins),
                 ]
             ),
-            // 新規（案 N10）: 同じ形で、飛ばした更新の記録の後勝ちの再生が、別の端末の削除の後で行を作り直す（種 726 の形）
+            // 新規（案 N10）: 同じ形で、飛ばした更新は記録されないので、後勝ちの同期が別の端末の削除の後で行を作り直さない
+            // （種 726 の形）
             new(
                 "n10-hook-skip-record-resurrects-deleted-row",
                 [Folder(SV, 507), new AddLabelOp(SV, Direct, "L507", 507, "cap")],
@@ -1724,19 +1731,20 @@ internal static partial class SyncModelScenarios
     public enum ServerInterruptPrelude
     {
         /// <summary>
-        /// フォルダー p（800）と p の子フォルダー c（801）を作り、p を更新する。端末のバッチでは c が p より前に来て、端末に無い p を
-        /// 親の解決役がサーバーから先に読み直す
+        /// フォルダー p（800）と p の子フォルダー c（801）を作り、p を更新する。端末のバッチでは c が p より前に来る（p は端末に
+        /// 無い）。エンジンは同じ適用の中で両方を書き、外部キーは適用の終わりに確かめる
         /// </summary>
         ParentAfterChildSelfRef,
 
         /// <summary>
-        /// フォルダー p（800）と p の下の品目（811）を作り、p を更新する（対照：親の表が先に降りるので解決役は動かない）
+        /// フォルダー p（800）と p の下の品目（811）を作り、p を更新する（対照：親の表が先に降りる）
         /// </summary>
         ParentAfterChildCrossTable,
 
         /// <summary>
         /// 端末が持つフォルダー h（820・名前 hx）が名前を手放し、別のフォルダー t（821）がその名前を取り、h をもう一度更新する。
-        /// 端末のバッチでは t が h より前に来て、名前を持つ端末の h を一意な値の持ち主の読み直しがサーバーから先に読み直す
+        /// 端末のバッチでは t が h より前に来る（名前はまだ端末の h が持つ）。エンジンは取得した行の中で、値の空かない行を
+        /// 後回しにして解く
         /// </summary>
         UniqueHolderAfterTaker,
     }
@@ -1932,23 +1940,24 @@ internal static partial class SyncModelScenarios
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 欠陥の形は前段 <see cref="ServerInterruptPrelude.ParentAfterChildSelfRef"/>（親の解決役）と
-    /// <see cref="ServerInterruptPrelude.UniqueHolderAfterTaker"/>（一意な値の持ち主の読み直し）× 取得の後の点：解決役が対象の行を
-    /// サーバーから読み直して受理記録（割り込みの後の版）を書き、続けて同じ実行がバッチの古い写しで内容を上書きする。受理記録が
-    /// 残ると、次の実行は新しい版を自分の折り返しとみなして版だけを写し、端末は古い内容のまま残る（収束しない）。その後の端末の
-    /// 編集は受理記録の版を original にしてサーバーの新しい内容を競合なしに上書きする（汎用の「消失なし」は拾えないので、後段の
-    /// 期待の操作で表明する）。
+    /// 欠陥の形は前段 <see cref="ServerInterruptPrelude.ParentAfterChildSelfRef"/>（バッチで子が親より前に来る）と
+    /// <see cref="ServerInterruptPrelude.UniqueHolderAfterTaker"/>（バッチで値を取る行が持ち主より前に来る）× 取得の後の点：
+    /// 対象の行を待つ行のために、エンジンが対象の行をサーバーから読み直して基準の版を割り込みの後の新しい版にし、続けて同じ
+    /// 実行がバッチの古い写しで内容を書く。そうなると、次の実行は新しい版を自分の折り返しとみなして版だけを写し、端末は古い
+    /// 内容のまま残る（収束しない）。その後の端末の編集は新しい版を元の版にして、サーバーの新しい内容を競合なしに上書きする
+    /// （汎用の「消失なし」は拾えないので、後段の期待の操作で表明する）。
     /// </para>
     /// <para>
     /// 後段の期待（更新の行）：取得の後の点では、次の同期がサーバーの版を内容ごと降ろし（downloaded=1）、編集してから同期すると
     /// Collect は ModifiedOnServer の競合になる。取得の前の点では、割り込まれた実行が新しい版を降ろしているので、次の同期は何も
     /// 降ろさず、Collect の編集はそのまま上がる。ServerWins は点に依らず端末の編集を捨ててサーバーの内容に戻す（Versioned＋
     /// ServerWins は範囲の未送信をすべて捨てる）。削除の行は、子フォルダーを null の親へ・
-    /// 品目を別のフォルダー（812）へ移してから対象の行を消す（解決役が親を見つけられない分岐・持ち主がサーバーに無い分岐を踏む）。
+    /// 品目を別のフォルダー（812）へ移してから対象の行を消す（サーバーの外部キー〔NO ACTION〕が削除を受け付けるため）。
     /// </para>
     /// <para>
-    /// 洗い替えでは、親の解決役が読み直した行がそのバッチに来ると上書きする（<c>again</c>）。同期と同じ後段の期待を持つ。
-    /// 洗い替えは一意な値のぶつかりを読み直さない（表を空にしてから入れる）ので、持ち主の前段は対照になる。
+    /// 洗い替えも同期と同じ後段の期待を持つ。洗い替えは表を空にせず行を置き換えるので、持ち主の前段 × 更新 × 取得の前の点では、上限を実行の始めに
+    /// 固定するサーバー役で割り込みの版が最初の取得に入らなくても、値を取る行がまだ値を持つ対象の行で保留になり、上限を取り直した
+    /// もう 1 回の取得が対象の行の新しい版を同じ洗い替えに入れる（<see cref="WhenServerFixesCeilingOp"/> の枝）。
     /// </para>
     /// <para>
     /// 次の取得の失敗の行（<see cref="ServerInterruptFault.NextFetchFails"/>）は、割り込まれた同期のバッチの大きさを 2 にし、
@@ -2124,7 +2133,7 @@ internal static partial class SyncModelScenarios
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 行は同じ形：端末 1 が品目 701 を編集し（再生の順で先頭に来る）、品目 702 に形の書き込み（編集・削除→作り直し）をしてから、
+    /// 行は同じ形：端末 1 が品目 701 を編集し（送る順＝変更の順で先頭に来る）、品目 702 に形の書き込み（編集・削除→作り直し）をしてから、
     /// 702 への割り込みの書き込み（更新・削除・作り直し）を点に仕掛けて同期する。どの点も当たるように、アップロードの書き込み（701）・
     /// 取得・1 行以上の差分（アップロードした行の折り返し。ServerWins の行はサーバーの他者が変えた 703）がある形にする。
     /// </para>
@@ -2138,9 +2147,10 @@ internal static partial class SyncModelScenarios
     /// SQL Server の両方）が起こすので、どの行もすべての転送で流れる。
     /// </para>
     /// <para>
-    /// 4m-D1＝<c>interrupt-BeforeServerWrite-delete-recreated</c>：計画の後・再生の前（701 の書き込みの直前）にアプリが 702 をもう一度
-    /// 消すと、再生は 702 の作り直しの記録（削除の版を持つ upsert）を「行が無い」として捨て、割り込みの削除の記録は版を持たない
-    /// （作り直した行はミラー版を持たない）ので、次の同期も「サーバーに届いていない行の削除」として捨てる。サーバーに 702 が残る。
+    /// 4m-D1＝<c>interrupt-BeforeServerWrite-delete-recreated</c>：送る行を読んだ後・送る前（701 の書き込みの直前）にアプリが 702 を
+    /// もう一度消す形。エンジンが作り直しも割り込みの削除も送らずに捨てると、サーバーに 702 が残る。エンジンは、送った行の未送信を
+    /// 送る前に読んだ連番のままのときだけ外し、送る巡のたびに端末の行を読み直す（無ければ削除として送る）ので、連番の進んだ 702 は
+    /// 未送信のまま残り、後の送信でサーバーが知っている行の削除として送られる。
     /// <c>d1-folder-recreate-delete</c> は同じ形のフォルダー版（rs6-offline-delete-reinsert の作り直しに割り込みを組む）。
     /// </para>
     /// </remarks>
@@ -2574,7 +2584,7 @@ internal static partial class SyncModelScenarios
         // 値を手放す持ち主の書き込み自身がサーバーに断られた形（種 4288 を縮めたもの）。サーバーの他者が 798 で x798 を取り、
         // 797 を消す。端末は 799 で x798 を取りに行き（c799 を手放す）、サーバーに無い 797 で c799 を取る。後勝ち＋ServerWins・
         // 削除伝搬なしの同期で両方が断られ、797 は決着する（サーバーの 799 が c799 を持つ＝根拠がある）。799 のサーバーの行は
-        // ローカルの 797 が c799 を持ち消せないので戻せず、記録が残り報告されない（docs の「戻せない行は記録を残す」）。
+        // ローカルの 797 が c799 を持ち消せないので戻せず、記録が残り報告されない（docs の「競合」の節：ServerWins が戻せなかった行は変更を残し、決定を後の実行へ持ち越す）。
         // 判定役は、手放しが同じ実行で届くはずとみなして持ち主 799 を割り引かない（手放し自身にサーバーで断られる根拠がある）
         yield return new(
             "repro-d2-upsert-unique-lww-serverwins-held-holder-is-basis",
