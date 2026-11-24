@@ -132,14 +132,14 @@
 
 ### SQL Server の系統の決まった形のケースの軸
 
-`BackendParitySqlServerRuntimeTests` のケースのうち、次の 3 つは軸から組み立てる（`Cases()` に流す名前を手で並べない。全組が流れることは `Known_NamesExistingCases` の `CoverageGuard.ContainsAll` が表明する）。
+`BackendParitySqlServerRuntimeTests` のケースのうち、次の 5 系統は軸から組み立てる（`Cases()` に流す名前を手で並べない。全組が流れることは `Known_NamesExistingCases` の `CoverageGuard.ContainsAll` が表明する）。
 
 - `alternate-key-{形}-with-{ほかの行}-{扱い}`：代替キーの行の形（plain／taken-from-deleted＝2 つめの文脈／taken-from-released＝同じ保存の更新する行が手放す code を取る。ほかの行は手放す行に置く）× 同じ保存のほかの行（gone／gone-insert-when-missing／gone-insert-when-missing-hooks／stale／hook-skipped）× Optimistic／ForceOverwrite の全積。代替キーを書いた後に、同じ保存のほかの行の理由で試行をやり直す経路（K1）の入力。
 - `own-write-{形}-{他者の変更}-{経路}`：SaveChanges が書く列を持たない表の形（tags＝代替キーと版・stamps＝キーと版・markers＝キーだけ）× 読んだ後の他者の変更（fresh／stale／gone）× 保存の経路（UpdateAsync／グラフ保存／insertWhenUpdateMissing のグラフ保存）。キーだけの表の stale は原理的に起こり得ないので外す。表の形ごとに、消えた 11 行を insertWhenUpdateMissing でまとめて保存する `own-write-{形}-gone-graph-save-insert-when-missing-11-rows` も持つ（EF Core 版は 1 試行 1 行ずつ挿入へ切り替え、やり直しの上限に掛からない）。
 - `alternate-key-taken-from-deleted-twice-{作り方}`：DbContext のファクトリの作り方（接続文字列で構成した文脈を使い回す＝プールの形／実行時に付けた接続／オプションで渡した接続＝対照）で、2 つめの文脈の保存を 2 回続け、その間に読む。値オブジェクトありの生成コードは EF Core の本物のプールを断るので、破棄を飛ばして同じインスタンスを貸し出し直す派生（`ReusedDbContext`）でプールの観測できる振る舞いを作る。
 - `alternate-key-swap-{扱い}`・`alternate-key-new-takes-released-{順}`・`alternate-key-gone-insert-takes-released-{順}`・`alternate-key-part-moved-off-released-{順}`・`alternate-key-gone-part-then-taker-first`（`HandoffCase`）：2 行の code の入れ替え（docs のとおりどの実装先も最初の更新で断る）と、更新する行が手放す code を挿入する行（新しい行・insertWhenUpdateMissing の挿入）が取る形と、手放す code を参照する部品を別の kit へ付け替える形を、渡す順（releaser-first／taker-first。付け替えの取る行は部品を持たせる kit）で流し、他者が消した部品の後ろでどの実装先でも断られる取りの順を 1 つ流す。リモートの EF Core のサーバーでも流す。new-takes-released と gone-insert-takes-released の taker-first は受け入れた差（G3-B）、part-moved-off-released の taker-first は H2-D1、gone-part-then-taker-first は H2-D2 で、基準の値を `ExpectedLines`、EF Core とリモートの値を `ExpectedEfCoreLines` で固定し、既知の違いの一覧 `Known` に docs を出典にした Accepted として載せる（載っていて一致すれば赤）。
 - `key-shape-{guidkey|binary|dotted}[-full|-cascade]`・`key-shape-binary-short-key-full`（`SqlServerKeyShapeCase`）：ConcurrencyFixture の親子 3 組（GuidKey の `vouchers`・`binary(4)` の `badges`・既定のスキーマで修飾した `dbo.zones`）へ実装先どうしの一致の `key-shape-*` と同じ手を流し、QuickER 版・EF Core 版・インメモリ（リモート面と cascade はリモートの EF Core のサーバーも）を比べる（失敗の署名 `differs`・`remote-efcore-differs`・`inmemory-differs`）。短い binary のキーは SQL Server が 0x00 で詰める（docs のインメモリの節「実 DB との既知の乖離」）ので、インメモリとの差を `Known` に Accepted で載せる。
-- 前の 2 つは、サーバーが EF Core 版 Repository のリモート（ConcurrencyFixture の RemoteServer）でも流し、QuickER 版と比べる（失敗の署名 `remote-efcore-differs`）。リモートでサーバーの DB が断った保存は `RemoteRepositoryException`（500）で届くので、`OutcomeAsync` が `throws store-rejected` にまとめる（`ParityFormat` と同じ扱い）。
+- `alternate-key-{形}-with-*`・`own-write-*`・`HandoffCase` の行・`key-shape-*`（`-full` を除く）は、サーバーが EF Core 版 Repository のリモート（ConcurrencyFixture の RemoteServer）でも流し、QuickER 版と比べる（`alternate-key-taken-from-deleted-twice-*` はリモートで流さない）（失敗の署名 `remote-efcore-differs`）。リモートでサーバーの DB が断った保存は `RemoteRepositoryException`（500）で届くので、`OutcomeAsync` が `throws store-rejected` にまとめる（`ParityFormat` と同じ扱い）。
 
 ### SQL Server の系統の乱数の保存
 
@@ -207,7 +207,7 @@
 ### 決定的なシナリオと Theory
 
 - 同期のエンジン（`SyncEngine`）の振る舞いの決定的なシナリオは `SyncModelScenarios.cs` と `SyncModelScenarios.Engine*.cs`・`SyncModelScenarios.HolderKeptByOtherRows.cs`・`SyncModelScenarios.Judge.cs` にある。対象はダウンロード・アップロードの基本・送る操作の決め方・削除伝搬・グラフ保存・後勝ち・競合と ServerWins / LocalWins・外部キー・一意な値の付け替え・割り込み・洗い替え・blob・フック・塊をまたぐ大きい取得・判定役の対照。
-- 同期のモデルの 4 つの転送（直結・HTTP・実 SQL Server の 3 つの Theory と、HTTP × 実 SQL Server の夜間だけの Fact）が、同じ宣言 `SyncModelScenario.Transports` から行を作り、エンジンの端末（`SyncModelEngineDevice`）で流す。今はどのシナリオも全転送で流れる（サーバー役の口は SQLite の代役も実 SQL Server も同じ点で持つ）。
+- 同期のモデルの 4 つの転送（直結・HTTP・実 SQL Server の 3 つの Theory と、HTTP × 実 SQL Server の夜間だけの Fact）が、同じ宣言 `SyncModelScenario.Transports` から行を作り、エンジンの端末（`SyncModelEngineDevice`）で流す。対照の行 `judge-*`（直結だけ。下の「判定役の継ぎ目・台帳・実行ごとの照合」）を除き、どのシナリオも全転送で流れる（サーバー役の口は SQLite の代役も実 SQL Server も同じ点で持つ）。
   - 直結の Theory（`SyncModelRuntimeTests.Scenario_FailsExactlyAsListed`）は、既知の失敗の一覧 `SyncModelKnownFailures.EngineSet`（空）のその行の署名の組どおりに失敗することを表明する。転送の Theory（`SyncModelHttpRuntimeTests.Scenario_MatchesDirect`・`SyncModelSqlServerRuntimeTests.Scenario_MatchesDirect`）と夜間の Fact は、直結の結果と同じ違反（正規化した署名）になることを比べる。
 - 直結の結果の使い回し（`SyncModelDirectRuns`）：直結・エンジンの端末で流した結果を、違反の無いものだけ、プロセスの中でシナリオごとに 1 回だけ流し、直結の Theory と転送の Theory が使い回す（エンジンの端末の世界は、同時に並べる数が増えるほど 1 つあたりが遅くなるので、流す世界の数を減らす）。
   - 使い回すのは例外なく終わって違反が 1 つも無い結果だけ。違反のある結果（既知の失敗の行・判定役の対照の行・退行）と例外で終わった実行は使い回さず、呼んだ行ごとに自分で流す（1 つの行の失敗がほかの行の比べ方へ混ざらない）。

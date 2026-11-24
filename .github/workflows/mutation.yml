@@ -1,7 +1,7 @@
 # QuickER Mutation: 変異テスト（Stryker.NET）を夜間に流し、結果を報告する（点数では赤にしない）
 #
 # - 毎晩: QuickER.Model を割った 3 本（制約名・表と列・残り）
-# - 週 1 回（土曜）: QuickER.Provider を割った 8 本（同期の計画・差分の 3 本・残りの 2 本・型のトークン・型の表記）。
+# - 週 1 回（土曜）: QuickER.Provider を割った 9 本（同期の計画の 2 本・差分の 3 本・残りの 2 本・型のトークン・型の表記）。
 #   範囲は 1 ジョブが 3 時間未満になる大きさに割る（static の変異を持つ 1 ファイルの 3 本は例外で 4.5 時間未満。理由と止める基準は
 #   tests/QuickER.Tests/TestSupport/CLAUDE.md の「変異テスト（Stryker.NET）」）
 #   QuickER.CodeGen.CSharp の 3 部分（診断・クエリ・エスケープ）は休止中（設定は stryker/ に残す。理由と再開の合図は
@@ -24,12 +24,12 @@ on:
   schedule:
     # 毎日 05:17 UTC（日本時間 14:17）：Model の 3 本
     - cron: "17 5 * * *"
-    # 土曜 05:47 UTC（日本時間 14:47）：Provider の 8 本
+    # 土曜 05:47 UTC（日本時間 14:47）：Provider の 9 本
     - cron: "47 5 * * 6"
   workflow_dispatch:
     inputs:
       scope:
-        description: "流す範囲（nightly＝Model の 3 本・weekly＝Provider の 8 本・all＝両方）"
+        description: "流す範囲（nightly＝Model の 3 本・weekly＝Provider の 9 本・all＝両方）"
         type: choice
         options: [nightly, weekly, all]
         default: nightly
