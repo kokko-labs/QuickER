@@ -50,7 +50,7 @@ SQLite 方言エンジン（QuickER 版 Repository の ADO 実装）の固定コ
 ## 複数の文を 1 つのトランザクションで流す口（ISqlBatchExecutor）
 
 - 利用者向けの口。SQLite の `SqlExecutor` だけが Core の公開の口 `ISqlBatchExecutor.ExecuteSqlBatchAsync` を実装する（`_04_RepositoryContractCore.scriban` の `repository_dialect == "sqlite"` の分岐。包んだ実行器は呼び出しを自分で転送しない限り実装しない）。
-- 複数の文を、1 つの接続の 1 つのトランザクションで順に流す：プロバイダのトランザクション（`BeginTransactionAsync`）を張り、文ごとに `ExecuteNonQueryAsync` → `CommitAsync`。全部通ればコミットして文ごとの影響行数を返し、どれかの文かコミット（遅延した外部キーの検査など）が失敗したら `SqlTransactions.RollbackQuietlyAsync` で全部を巻き戻してから投げ直し、`await using` で接続を返す。文の並びが空なら `ArgumentException`。パラメータは持たない（決まった文のための口）。
+- 複数の文を、1 つの接続の 1 つのトランザクションで順に流す：プロバイダのトランザクション（`BeginTransactionAsync`）を張り、文ごとに `ExecuteNonQueryAsync` で流す。全部通れば最後に 1 回 `CommitAsync` して文ごとの影響行数を返し、どれかの文かコミット（遅延した外部キーの検査など）が失敗したら `SqlTransactions.RollbackQuietlyAsync` で全部を巻き戻してから投げ直し、`await using` で接続を返す。文の並びが空なら `ArgumentException`。パラメータは持たない（決まった文のための口）。
 - 生の `BEGIN … COMMIT` を `ExecuteSqlAsync` に渡す形にしない：失敗したときトランザクションが開いたまま接続がプールへ返る（Microsoft.Data.Sqlite はプールへ返す接続を巻き戻さない）。
 - 壊すと：生の `BEGIN … COMMIT` で流して巻き戻さないと、失敗の後に接続がトランザクションとロックを持ったままプールへ戻り、ほかの接続の書き込みが `database is locked` になり、次にその接続を引いた呼び出しがそのトランザクションの中で動く。catch で巻き戻さずにコミットすると、途中の文の失敗で前の文の書き込みが残る。
 - catch の明示の巻き戻し（`SqlTransactions.RollbackQuietlyAsync`）は、トランザクションの失敗経路はこの関数だけを呼ぶという規則（`src/QuickER.Runtime/CLAUDE.md`「トランザクション失敗経路」）を保つために残す。外しても、今の Microsoft.Data.Sqlite では `await using` の破棄と接続を閉じる処理がトランザクションを巻き戻すので、下の行は赤にならない。
