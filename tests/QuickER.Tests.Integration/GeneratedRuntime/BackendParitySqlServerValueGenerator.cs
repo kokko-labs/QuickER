@@ -347,8 +347,7 @@ public static class SqlServerValueShapes
     /// <summary>
     /// datetime の値。Exact は 10 ミリ秒の倍数（1/300 秒の 3 単位＝ちょうど表せる）、RoundDown・RoundUp は 10 ミリ秒の倍数から
     /// 半単位未満・半単位を超えた位置（半単位のちょうどは tick で表せない）、RangeEnd は最後の値から半単位未満だけ前、OutOfRange は
-    /// 最小の値から 1 単位を超えて前。最後の値から半単位を超えて後ろ（丸めると範囲の外）は作らない
-    /// （<c>BackendParitySqlServerValueNotGenerated</c> の <c>datetime-rounds-past-max</c>）
+    /// 最小の値から 1 単位を超えて前か、最後の値から半単位を超えて後ろ（丸めると範囲の外。決まった形は後ろ）
     /// </summary>
     private static DateTime LegacyDateTime(string shape, Random? random)
     {
@@ -364,9 +363,11 @@ public static class SqlServerValueShapes
                 100_000 * Pick(random, 0, 99, 12) + Pick(random, half + 1, 33_332, 23_456)
             ),
             RangeEnd => LegacyMax.AddTicks(-Pick(random, 0, half, 0)),
-            OutOfRange => LegacyMin.AddTicks(
-                -Pick(random, 33_334, TimeSpan.TicksPerDay, TimeSpan.TicksPerDay)
-            ),
+            OutOfRange => Pick(random, 0, 1, 1) == 0
+                ? LegacyMin.AddTicks(
+                    -Pick(random, 33_334, TimeSpan.TicksPerDay, TimeSpan.TicksPerDay)
+                )
+                : LegacyMax.AddTicks(Pick(random, half + 1, 29_999, half + 1)),
             KindUtc => DateTime.SpecifyKind(LegacyDateTime(Exact, random), DateTimeKind.Utc),
             _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, null),
         };
@@ -379,10 +380,9 @@ public static class SqlServerValueShapes
     public static readonly DateTime SmallMax = new(2079, 6, 6, 23, 59, 0);
 
     /// <summary>
-    /// smalldatetime の値（秒はミリ秒の単位で作る：29.998 秒以下は分を切り下げ、30.001 秒以上は切り上げる）。
+    /// smalldatetime の値（秒はミリ秒の単位で作る：29.998 秒以下は分を切り下げ、29.999 秒以上は切り上げる）。
     /// CarryDay は日の最後の分の後半、RangeEnd は最後の分の前半、OutOfRange は最小の値の前の分か、最後の分の後半。
-    /// 秒が 29.999 以上 30.000 以下の値は作らない（<c>BackendParitySqlServerValueNotGenerated</c> の
-    /// <c>smalldatetime-half-minute-boundary</c>）
+    /// 決まった形は切り上げの境目（RoundUp は 29.999 秒・CarryDay は 30.000 秒・OutOfRange は最後の分の 29.999 秒）
     /// </summary>
     private static DateTime SmallDateTime(string shape, Random? random)
     {
@@ -392,15 +392,15 @@ public static class SqlServerValueShapes
         {
             Exact => minute,
             RoundDown => minute.AddMilliseconds(Pick(random, 1, 29_998, 29_998)),
-            RoundUp => minute.AddMilliseconds(Pick(random, 30_001, 59_999, 30_001)),
+            RoundUp => minute.AddMilliseconds(Pick(random, 29_999, 59_999, 29_999)),
             CarryDay => BaseDay
                 .AddDays(1)
                 .AddMinutes(-1)
-                .AddMilliseconds(Pick(random, 30_001, 59_999, 30_001)),
+                .AddMilliseconds(Pick(random, 29_999, 59_999, 30_000)),
             RangeEnd => SmallMax.AddMilliseconds(Pick(random, 0, 29_998, 29_998)),
             OutOfRange => Pick(random, 0, 1, 1) == 0
                 ? SmallMin.AddMinutes(-1).AddMilliseconds(Pick(random, 0, 29_998, 0))
-                : SmallMax.AddMilliseconds(Pick(random, 30_001, 59_999, 30_001)),
+                : SmallMax.AddMilliseconds(Pick(random, 29_999, 59_999, 29_999)),
             _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, null),
         };
     }

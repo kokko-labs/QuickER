@@ -77,7 +77,9 @@ public abstract class TranslatorParityRuntimeTestsBase
     /// name と group は NULL の 4 つの組を持つ（id 1＝両方非 NULL の異値・id 10＝name だけ NULL・id 11＝両方非 NULL の同値・
     /// ほか＝group が NULL）。NULL 許容の decimal の amount は 100・200・300 と、境界の 250・重複の 100・NULL を散らす。
     /// 列の型より細かい値と比べる列は id 1・2 が値を持つ（day は日付だけ・at2 と clock は 1/100 秒まで）。Unicode でない ansi は、
-    /// 列が表せない文字が化けた形の '??'（id 2）と '?'（id 4）を持つ。
+    /// 列が表せない文字が化けた形の '??'（id 2）と '?'（id 4）を持つ。datetime の legacy_at は列の型でちょうど表せる値だけを持つ
+    /// （id 1・2・3 が 1/300 秒の 0・1・2 単位〔読み戻すと .000・.003・.007〕・id 5 が翌日の 0 時）。範囲の最後の値
+    /// 9999-12-31 23:59:59.997 は持たない（方言切替で写す MySQL の datetime は秒の端数を持たず、丸めると範囲を出て書けない）。
     /// </remarks>
     internal static IReadOnlyList<ProbeEntity> SeedProbes() =>
         [
@@ -96,7 +98,8 @@ public abstract class TranslatorParityRuntimeTestsBase
                 clock: new TimeSpan(0, 10, 0, 0, 120),
                 ansi: "abc",
                 bin: [0x01],
-                binFixed: [0x01]
+                binFixed: [0x01],
+                legacyAt: LegacyAtBase
             ),
             Probe(
                 2,
@@ -111,7 +114,8 @@ public abstract class TranslatorParityRuntimeTestsBase
                 clock: new TimeSpan(0, 10, 0, 0, 130),
                 ansi: "??",
                 bin: [0x01, 0x00],
-                binFixed: [0x01, 0x00]
+                binFixed: [0x01, 0x00],
+                legacyAt: LegacyAtBase.AddMilliseconds(3)
             ),
             Probe(
                 3,
@@ -122,7 +126,8 @@ public abstract class TranslatorParityRuntimeTestsBase
                 true,
                 amount: 300m,
                 bin: [0x01, 0x00, 0x00, 0x00],
-                binFixed: [0x01]
+                binFixed: [0x01],
+                legacyAt: LegacyAtBase.AddMilliseconds(7)
             ),
             Probe(4, "\t", null, null, null, false, ansi: "?", bin: [0xFF]),
             Probe(
@@ -133,7 +138,8 @@ public abstract class TranslatorParityRuntimeTestsBase
                 new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.FromHours(9)),
                 true,
                 amount: 100m,
-                binFixed: [0x01, 0x00, 0x00, 0x00]
+                binFixed: [0x01, 0x00, 0x00, 0x00],
+                legacyAt: new DateTime(2024, 1, 2)
             ),
             Probe(6, "", "Zc", new DateTime(2024, 1, 15, 0, 0, 0), null, false),
             Probe(7, "Bob\n", null, new DateTime(2025, 1, 15, 8, 0, 0), null, true, amount: 250m),
@@ -158,7 +164,8 @@ public abstract class TranslatorParityRuntimeTestsBase
         TimeSpan? clock = null,
         string? ansi = null,
         byte[]? bin = null,
-        byte[]? binFixed = null
+        byte[]? binFixed = null,
+        DateTime? legacyAt = null
     ) =>
         new()
         {
@@ -177,7 +184,11 @@ public abstract class TranslatorParityRuntimeTestsBase
             Ansi = ansi,
             Bin = bin,
             BinFixed = binFixed,
+            LegacyAt = legacyAt,
         };
+
+    /// <summary>datetime の列 legacy_at のシードの基準の値（id 1。id 2・3 はこれに .003・.007 を足した値）</summary>
+    internal static readonly DateTime LegacyAtBase = new(2024, 1, 1, 10, 0, 0);
 
     /// <summary>
     /// 実装先の Query() が返す行の集合が、同じ実装先から読み戻した全行へ C# のラムダを当てた結果と一致することを表明する。

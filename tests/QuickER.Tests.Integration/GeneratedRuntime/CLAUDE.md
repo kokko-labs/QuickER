@@ -167,7 +167,7 @@
 - 次元表 `BackendParitySqlServerValueDimensions`：実装先 × 書く経路 × 列 × 値の形（列の型に無い形は `isValid`）。網羅しない組は、除外 blob の列と長い blob の形 × 更新の 2 経路の 4 組（除外列は UPDATE の値で書けない）だけ。
 - `FixedCases_MatchDocsOnBothBackends`（普段・種なし）が成り立つ組を 1 行ずつ流して全組を出し、網羅しない組を照合する。`RandomSeeds_MatchDocsOnBothBackends`（`NightlyEngine`・`QUICKER_PARITY_SQLSERVER_VALUE_SEEDS` 普段 8・夜間 200）は 1 行に 2〜4 列の値を混ぜ、BulkInsert は 2〜5 行、2 回に 1 回 1 つの値を断られる形（列と形の組から一様に）へ置き換える。網羅しない組の照合は夜間の既定の種の数でだけ行う（普段の 8 種は書く経路 × 断られる形の組が欠ける）。
 - 列は datetime2・time・datetimeoffset・date・decimal・varchar・nchar・nvarchar・varbinary・除外 blob と、datetime・smalldatetime・money・smallmoney（期待は 1/300 秒・分・小数 4 桁への丸めと型の範囲）。
-- 作らない形は `BackendParitySqlServerValueNotGenerated.cs`。Pending は 2 つで、どちらも区切り「SQL Server の datetime・smalldatetime の保存と WHERE を C# とそろえる」で直す：smalldatetime の秒が 29.999 以上 30.000 以下の値（QuickER 版は分を切り上げ、EF Core 版は切り下げる）と、datetime の 9999-12-31 23:59:59.997 を超えて丸めると範囲の外になる値（QuickER 版は断り、EF Core 版は 23:59:59.997 で保存する）。生成 DbContext が datetime・smalldatetime に `HasColumnType` を出さず、EF Core が datetime2 で送ってサーバーが変換するため。乱数の本流（`BackendParityGenerator`）と別の種の式で引くので、本流の種の指紋は変わらない（記録 `BackendParitySqlServerValues`）。
+- 作らない形は `BackendParitySqlServerValueNotGenerated.cs`（Accepted の 2 つだけ）。smalldatetime の秒が 29.999 以上 30.000 以下の値（決まった形は RoundUp 29.999 秒・CarryDay 30.000 秒・範囲の外は最後の分の 29.999 秒）と、datetime の 9999-12-31 23:59:59.997 を超えて丸めると範囲の外になる値（決まった形の OutOfRange）も作る。EF Core 版は生成 DbContext が datetime・smalldatetime に `HasColumnType` を出すので、SqlClient が QuickER 版と同じく丸め・断る（教えないと赤＝mutation 実証済み）。乱数の本流（`BackendParityGenerator`）と別の種の式で引くので、本流の種の指紋は変わらない（記録 `BackendParitySqlServerValues`）。
 - 時間：決まった形 4 秒前後・普段の 8 種 1〜2 秒・夜間の 200 種 13 秒前後。
 - mutation 実証済み（SqlBulkCopy へ渡す値の丸めを外す・切り捨てに戻す・範囲の端で止めない・空白と 0x00 の切りを外す・空白以外や 0x00 以外も切る・属性の Scale を出さない、の各回で赤）。
 

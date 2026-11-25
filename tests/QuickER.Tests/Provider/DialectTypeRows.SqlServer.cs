@@ -600,6 +600,26 @@ internal static partial class DialectTypeRows
                 "ok type=decimal p=- s=- efcol=smallmoney"
             );
 
+            // EF Core は列の型を知らない DateTime を datetime2 で送り、サーバーの変換が SqlClient の丸めと範囲の判定と食い違うので、
+            // datetime・smalldatetime は列の型を教える（datetime2・date は教えない）
+            (string Input, string EfCoreColumn)[] dateTimeColumns =
+            [
+                ("datetime", "datetime"),
+                ("smalldatetime", "smalldatetime"),
+                ("datetime2", "-"),
+                ("date", "-"),
+            ];
+
+            foreach (var (input, efCoreColumn) in dateTimeColumns)
+            {
+                yield return SqlServerMap(
+                    $"efcol-{SqlServerSlug(input)}",
+                    "datetime・smalldatetime は生成 EF Core の DbContext が同じ名前の列の型を教え、datetime2・date は教えない",
+                    input,
+                    $"ok type=DateTime efcol={efCoreColumn}"
+                );
+            }
+
             yield return SqlServerMap(
                 "unknown-sqldb-null",
                 "未知の型は SqlDbTypeName が null になる",

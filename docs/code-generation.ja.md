@@ -766,8 +766,12 @@ SQLite の QuickER 版 Repository は、この比較を EF Core 版 Repository �
 
 SQL Server の QuickER 版 Repository と EF Core 版 Repository は、比べる値が列の型にそのまま入るときだけ、値を列の型で束縛します。
 入らない値は値の型で束縛するので、比較は C# と同じ答えになります。
-対象は、整数の列と小数や範囲の外の整数（`x.Qty < 1.5`・`x.Tiny < 300`）、整数の列とすべての `float`・`double` の値、`real` の列がそのまま持てない `double`（`float` のプロパティと比べる `x.Ratio == 0.1`）、列の精度とスケールより桁の多い decimal、`money`・`smallmoney` の列と範囲の外か小数 4 桁を超える数（`x.Price == 1.23456m`）、`date` の列と時刻つきの日時、Unicode でない列（`varchar`・`char`）と ASCII の外の文字です。
+対象は、整数の列と小数や範囲の外の整数（`x.Qty < 1.5`・`x.Tiny < 300`）、整数の列とすべての `float`・`double` の値、`real` の列がそのまま持てない `double`（`float` のプロパティと比べる `x.Ratio == 0.1`）、列の精度とスケールより桁の多い decimal、`money`・`smallmoney` の列と範囲の外か小数 4 桁を超える数（`x.Price == 1.23456m`）、`date` の列と時刻つきの日時、`smalldatetime` の列と分ちょうどでない値・範囲の外の値、`datetime` の列が読み戻せない値（次の段落）、Unicode でない列（`varchar`・`char`）と ASCII の外の文字です。
 このときサーバーはその比較のために列の側を変換するので、列のインデックスが使われないことがあります。
+`datetime` の列は 1/300 秒の刻みで値を持ち、1 の位が 0・3・7 の整数のミリ秒（`.000`・`.003`・`.007`）で読み戻し、C# は読み戻した値で比べます。
+`datetime` の列が読み戻せない値（`.004`・1 ミリ秒より細かい値・1753-01-01 から 9999-12-31 23:59:59.997 の外の値）は、その値以下で最後の読み戻す値の 1 ミリ秒後へ置き直して `datetime2` で送ります。
+互換レベル 130 以上の SQL Server は、`datetime` の列と `datetime2` の値を正確な刻み（`.0033333`）で比べるので、置き直さないと、読み戻す値と刻みの間の値（`.0031` など）が C# と違う答えになります。
+置き直した値は、どの互換レベルでも C# と同じ答えになります。
 EF Core 版 Repository では、クエリのすべてのパラメータ（名前付きクエリ・手書きの LINQ の `Query()`・IN のリストの要素・`Contains` のパターン）と、`ExecuteDeleteAsync` の条件が対象です（[EF Core モード](#ef-core-モードgenerateefcorerepositories)を参照）。
 PostgreSQL の EF Core 版 Repository も、`date` の列と比べる時刻つきの `DateTime` を同じように扱って `timestamp` で送り、クエリでは `time` の列と比べる範囲の外の `TimeSpan` を `interval` で送ります。
 
@@ -775,6 +779,9 @@ PostgreSQL の EF Core 版 Repository も、`date` の列と比べる時刻つ�
 > EF Core は定数を SQL へ書き込み、Unicode でない列と比べる文字列の定数は Unicode でない文字列で書くので、ASCII の外の文字は `?` に変わり、`?` を持つ行に一致します（`Query().Where(x => x.Code == "日本")`）。
 > こうした値は変数で渡してください（EF Core はパラメータで送ります）。
 > 簡易 DSL の条件の文字列のリテラルは変数として生成するので、名前付きクエリは C# と同じ答えになります。
+> 同じく、SQL Server の `datetime`・`smalldatetime` の列と比べる `DateTime` の定数は列の型のリテラルで書かれるので、列が持てない値は比べる前に列の精度へ丸められます（`smalldatetime` の列と比べる `x.At == new DateTime(2024, 1, 1, 10, 0, 40)` は 10:01 に一致します）。
+> 列が持てる値は C# と同じ答えになります。
+> 簡易 DSL は日付のリテラルを持たないので、名前付きクエリには当たりません。
 
 > **既知の割り切り**: SQL Server・PostgreSQL・Oracle の EF Core 版 Repository では、整数の列と decimal の列の比較（`Query().Where(x => x.Qty > x.Price)`）が、桁あふれで失敗することがあります。
 > EF Core は整数の列を decimal の列の型（`decimal(10,2)` など）へ CAST するので、その型に入らない桁の整数を持つ行が 1 行でもあると、クエリ全体が失敗します。
@@ -1381,6 +1388,8 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   列に入る値は列の型のままなので、SQL と列のインデックスの使われ方は変わりません。
   変えるのは LINQ のクエリと `ExecuteDelete` / `ExecuteUpdate` のコマンドだけです。
   `SaveChanges` は今までどおりに値を送るので、入らない値は列が変換したとおりに保存されます。
+  `datetime`・`smalldatetime` の列と比べる、列が持てない値は、LINQ のクエリと `ExecuteDelete` の条件でだけ `datetime2` で送ります（`datetime` の列は [クエリ](#クエリ式木--sql-変換) のとおりに置き直します）。
+  EF Core は `ExecuteDelete` のコマンドを `ExecuteUpdate` と同じように報告するので、インターセプターはコマンドの本文（`TagWith` のコメントの行の後の `DELETE`）で見分けます。
   `AddGeneratedEfCoreRepositories` は、渡した構成の後にこのインターセプターを DbContext のオプションへ足します。
   `DbContextOptions` を自分で組むときは、`AddInterceptors` で `SqlServerQueryParameterInterceptor.Instance` を足してください。
   ほかのプロバイダの接続には触れません
@@ -1404,12 +1413,17 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - SQL Server の `money`・`smallmoney` の列と PostgreSQL の `money` の列は、`HasColumnType` で構成します。
   構成しないと、EF Core は `decimal` のプロパティに既定の型を付け、SQL Server は `money` の列へ `1.2345` を `1.23`（`decimal(18,2)`）で保存し、PostgreSQL はその列の条件を断ります（`operator does not exist: money = numeric`）。
   構成すると、SQL Server は列が持つ小数の 4 桁を保存し、PostgreSQL は列を `money` の値と比べます（[大文字小文字・空白・日付部品](#大文字小文字空白日付部品)の `money` の既知の割り切りを参照）
+- SQL Server の `datetime`・`smalldatetime` の列は、`HasColumnType` で構成します。
+  構成しないと、EF Core は `DateTime` を `datetime2` で送り、サーバーが自分の規則で変換します。
+  `smalldatetime` の列は 29.999 秒を切り下げて保存し、`datetime` の列は 9999-12-31 23:59:59.997 を超えて丸まる値をその最後の値で保存します。
+  構成すると、SqlClient が QuickER 版 Repository のときと同じく値を変換します。
+  `smalldatetime` の値は 29.999 秒から切り上げ、`datetime` の値は 1/300 秒へ丸め、丸めると型の範囲の外になる値は断ります
 - EF Core の Npgsql のプロバイダが、プロパティの型の既定の対応では正しく書けない PostgreSQL の列は、`HasColumnType` で構成します（`date`・`timestamp`・`time`・`time with time zone`・`json`・`jsonb`・`xml` と、その配列の `date[]` など）。
   構成しないと、プロバイダは `DateTime` を `timestamp with time zone` として送って `DateTimeKind.Unspecified` の値を断り、`DateTimeOffset` も同じく送って UTC 以外のオフセットを断り、文字列を `text` として送って JSON・XML の列で PostgreSQL に断られます。
   `TimeSpan` は `interval` として送り、PostgreSQL は `time` の列の範囲の外の値を、日の部分を落としてエラーなしに保存します（`1.01:00:00` は `01:00:00`、`-01:00:00` は `23:00:00`）。
   構成すると、PostgreSQL はこうした値を断ります。
   `DateTimeKind.Utc` の `DateTime` は `timestamp` の列へ書けず、`timestamptz` の列は UTC のオフセットだけを受け付けます（どちらも Npgsql の規則）。
-  `money`（前の項目）を除き、ほかの列には列の型を構成しないので、どの方言でも同じ C# 型へ写る型だけの図は、方言に依らず同じコードを生成します。
+  `money` と SQL Server の `datetime`・`smalldatetime`（前の項目）を除き、ほかの列には列の型を構成しないので、どの方言でも同じ C# 型へ写る型だけの図は、方言に依らず同じコードを生成します。
 - MySQL の写し方（`timestamp` を `DateTime`、`char(36)` を `Guid`。[DB 型と C# 型の対応](#db-型と-c-型の対応)を参照）は、ドライバが MySql.Data の MySql.EntityFrameworkCore で確かめました。
   Pomelo では確かめていません。
 - 単一列の整数の主キー（ほかに EF Core が値を作れない単一列の主キー）は `ValueGeneratedNever()` で構成します。
@@ -1439,6 +1453,11 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   接続文字列で構成した文脈には、接続文字列を戻します（EF Core は別の接続を付けた時点で自分が作った接続を破棄し、次に使うときに作り直します）。
   オプションで渡した接続（`UseSqlServer(connection)`）はオプションのとおりの持ち主で戻し、ファクトリが実行時に `SetDbConnection` で付けた接続は持ち主でないものとして戻すので、文脈がその接続を破棄することはありません。
   `contextOwnsConnection: true` で渡した接続は、2 つめの文脈が接続を切り替えた時点で EF Core が破棄するので、そうした文脈はプールや使い回しをしないでください。
+
+> **既知の割り切り**: SQL Server で、`QuickErDbContext` へ自分で書く `ExecuteUpdate` の `WHERE` は、列が持てない `datetime`・`smalldatetime` の値を列の型で送るので、比べる前に丸められます。
+> `SqlServerQueryParameterInterceptor` は `UPDATE` のコマンドのパラメータを変えません。
+> `SET` の値と `WHERE` の値を見分けられず、`SET` の値の型を変えると保存される値が変わるためです。
+> 生成した Repository は `ExecuteUpdate` を出さないので、生成コードには当たりません。
 
 **生 SQL**
 

@@ -81,6 +81,8 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 #### Generated code
 
 - **The blob uploads of the generated HTTP client now follow the HttpClient's `DefaultRequestVersion` and `DefaultVersionPolicy`** — until now, `Write{Column}Async` and the two-way sync's blob uploads went out as HTTP/1.1 even when the HttpClient was set to HTTP/2. Nothing changes unless HTTP/2 is configured.
+- **The EF Core Repository now stores the same values as the QuickER Repository in SQL Server `datetime` and `smalldatetime` columns** — The generated DbContext configures their column types, so `smalldatetime` rounds up from 29.999 seconds, and a `datetime` value that rounds outside the type's range is refused instead of being stored as 23:59:59.997.
+- **Conditions on SQL Server `datetime` and `smalldatetime` columns now answer as C# does in both repositories** — A value the column cannot hold is compared without being rounded to the column's precision. On the EF Core Repository, a date constant written directly in hand-written LINQ is now rounded to the column's precision instead of failing.
 
 ## [0.4.0] - 2026-11-16
 

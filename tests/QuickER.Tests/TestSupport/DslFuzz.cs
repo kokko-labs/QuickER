@@ -160,6 +160,12 @@ public sealed record DslColumn(
     public DslTimeRange? TimeRange { get; init; }
 
     /// <summary>
+    /// SQL Server の datetime・smalldatetime の列が読み戻せる値（null ならそうでない列。比べる値が読み戻せる値でなければ、範囲の外なら
+    /// 次元表の因子 ValueFit の beyond-range、範囲の中なら beyond-scale に数える）
+    /// </summary>
+    public DslLegacyDateTimeType? LegacyDateTime { get; init; }
+
+    /// <summary>
     /// 日時の列の小数秒の桁（null なら値の桁のまま持つ列。SQL Server の <c>datetimeoffset(n)</c> の n が 7 より小さい列だけ立てる）。
     /// 比べる値の小数秒がこの桁より細かければ、次元表の因子 ValueFit の beyond-scale に数える
     /// </summary>
@@ -202,6 +208,40 @@ public sealed record DslMoneyType(decimal Min, decimal Max)
 
     /// <summary>値が列の型に丸めずに入るか（範囲の中で、小数が 4 桁以下）</summary>
     public bool Fits(decimal value) => InRange(value) && decimal.Round(value, Scale) == value;
+}
+
+/// <summary>
+/// SQL Server の datetime・smalldatetime の型（読み戻せる値の範囲と刻み）
+/// </summary>
+/// <remarks>
+/// datetime は 1/300 秒の刻みで持ち、SqlClient は刻みをミリ秒へ丸めて読み戻す（10 ミリ秒ごとに .000・.003・.007）。smalldatetime は分の
+/// 刻みで持つ。読み戻せる値は書いたまま読み戻り、ほかの値は書くと刻みへ丸められる（docs の SQL Server の日時の型の写し）。
+/// </remarks>
+/// <param name="Min">最小値</param>
+/// <param name="Max">読み戻せる最大値</param>
+/// <param name="WholeMinute">分の刻みか（smalldatetime）。偽なら 1/300 秒の刻み（datetime）</param>
+public sealed record DslLegacyDateTimeType(DateTime Min, DateTime Max, bool WholeMinute)
+{
+    /// <summary>datetime（1753-01-01 00:00:00〜9999-12-31 23:59:59.997）</summary>
+    public static DslLegacyDateTimeType Datetime { get; } =
+        new(new(1753, 1, 1), new(9999, 12, 31, 23, 59, 59, 997), WholeMinute: false);
+
+    /// <summary>smalldatetime（1900-01-01 00:00〜2079-06-06 23:59）</summary>
+    public static DslLegacyDateTimeType SmallDatetime { get; } =
+        new(new(1900, 1, 1), new(2079, 6, 6, 23, 59, 0), WholeMinute: true);
+
+    /// <summary>値が範囲の中か</summary>
+    public bool InRange(DateTime value) => value >= Min && value <= Max;
+
+    /// <summary>値が列から読み戻せる値か（範囲の中で、刻みの上にある）</summary>
+    public bool Fits(DateTime value) =>
+        InRange(value)
+        && (
+            WholeMinute
+                ? value.Ticks % TimeSpan.TicksPerMinute == 0
+                : value.Ticks % TimeSpan.TicksPerMillisecond == 0
+                    && value.Millisecond % 10 is 0 or 3 or 7
+        );
 }
 
 /// <summary>TimeSpan の列の型が持てる値の範囲（両端を含む）</summary>

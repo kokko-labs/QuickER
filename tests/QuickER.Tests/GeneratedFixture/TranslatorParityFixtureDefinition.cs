@@ -27,7 +27,10 @@ namespace QuickER.Tests.GeneratedTranslatorParityFixture;
 ///     オフセットつき日時・bool・NULL 許容の数値（<c>amount</c>＝<c>decimal(10,2)</c>）と、予約語の列名 <c>group</c>・
 ///     閉じ角括弧を含む列名 <c>x]y</c>、列の型より細かい値と比べる列（<c>day</c>＝<c>date</c>・<c>at2</c>＝<c>datetime2(2)</c>・
 ///     <c>clock</c>＝<c>time(2)</c>・<c>ansi</c>＝Unicode でない <c>varchar(20)</c>）と、バイナリの列（<c>bin</c>＝<c>varbinary(4)</c>・
-///     <c>bin_fixed</c>＝<c>binary(4)</c>。SQL Server は末尾の 0x00 だけが違う値を等しいとみなし、固定長の列は値を 0x00 で詰める）を持つ
+///     <c>bin_fixed</c>＝<c>binary(4)</c>。SQL Server は末尾の 0x00 だけが違う値を等しいとみなし、固定長の列は値を 0x00 で詰める）と、
+///     値を 1/300 秒へ丸めて持つ日時の列（<c>legacy_at</c>＝<c>datetime</c>）を持つ。<c>smalldatetime</c> の列は持たない
+///     （SQLite の型マッパーが <c>smalldatetime</c> を DateTime に写さず、マルチターゲットの型が食い違って生成が断られる。
+///     smalldatetime の列の条件は簡易 DSL の総当たりの SQL Server の網羅の単位が持つ）
 ///   </item>
 ///   <item>
 ///     <c>order</c> / <c>order_line</c>: 予約語の表名とナビゲーション名（<c>Order</c>）で、
@@ -87,6 +90,7 @@ public static class TranslatorParityFixtureDefinition
     private static readonly Guid ProbeAnsiColId = new("7a000000-0000-0000-0000-00000000000e");
     private static readonly Guid ProbeBinColId = new("7a000000-0000-0000-0000-00000000000f");
     private static readonly Guid ProbeBinFixedColId = new("7a000000-0000-0000-0000-000000000010");
+    private static readonly Guid ProbeLegacyAtColId = new("7a000000-0000-0000-0000-000000000014");
 
     private static readonly Guid OrderId = new("7a000000-0000-0000-0000-000000000011");
     private static readonly Guid OrderPkColId = new("7a000000-0000-0000-0000-000000000012");
@@ -142,6 +146,7 @@ public static class TranslatorParityFixtureDefinition
                 Nullable(ProbeAnsiColId, "ansi", "varchar(20)"),
                 Nullable(ProbeBinColId, "bin", "varbinary(4)"),
                 Nullable(ProbeBinFixedColId, "bin_fixed", "binary(4)"),
+                Nullable(ProbeLegacyAtColId, "legacy_at", "datetime"),
             },
         };
 
