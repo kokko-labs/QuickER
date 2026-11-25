@@ -169,7 +169,8 @@ public sealed partial class BackendParitySqlServerRuntimeTests
             : [];
         await using var host = backend switch
         {
-            RandomSaveBackend.RemoteEfCore => await CompanionHost.RemoteEfCoreAsync(
+            RandomSaveBackend.RemoteEfCore => await CompanionHost.RemoteAsync(
+                RemoteServer.EfCore,
                 _fixture.ConnectionString,
                 hooks
             ),

@@ -90,6 +90,7 @@ public sealed partial class BackendParitySqlServerRuntimeTests
         Ado,
         EfCore,
         RemoteEfCore,
+        RemoteAdo,
         InMemory,
     }
 
@@ -101,11 +102,12 @@ public sealed partial class BackendParitySqlServerRuntimeTests
         KeyShapeHost host
     )
     {
-        if (host is KeyShapeHost.RemoteEfCore)
+        if (host is KeyShapeHost.RemoteEfCore or KeyShapeHost.RemoteAdo)
         {
             await _fixture.ResetSchemaAsync(Ct);
             await _fixture.ApplyDdlAsync(ConcurrencyFixtureDefinition.Build(), Ct);
-            await using var remote = await CompanionHost.RemoteEfCoreAsync(
+            await using var remote = await CompanionHost.RemoteAsync(
+                host is KeyShapeHost.RemoteEfCore ? RemoteServer.EfCore : RemoteServer.Ado,
                 _fixture.ConnectionString,
                 []
             );

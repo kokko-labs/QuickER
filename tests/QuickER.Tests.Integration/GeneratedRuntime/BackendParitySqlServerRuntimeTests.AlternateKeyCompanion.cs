@@ -162,7 +162,7 @@ public sealed partial class BackendParitySqlServerRuntimeTests
     private async Task<IReadOnlyList<string>> AlternateKeyWithCompanionAsync(
         bool efCore,
         AlternateKeyCompanionCase companionCase,
-        bool remoteEfCore = false
+        RemoteServer? remote = null
     )
     {
         var takenFromDeleted = companionCase.Shape == AlternateKeyRowShape.TakenFromDeleted;
@@ -178,8 +178,8 @@ public sealed partial class BackendParitySqlServerRuntimeTests
             AlternateKeyCompanion.HookSkipped => [new SkipKitUpdate(companionId)],
             _ => [],
         };
-        await using var host = remoteEfCore
-            ? await CompanionHost.RemoteEfCoreAsync(_fixture.ConnectionString, hooks)
+        await using var host = remote is { } server
+            ? await CompanionHost.RemoteAsync(server, _fixture.ConnectionString, hooks)
             : new CompanionHost(Build(efCore, withHooks: false, hooks: hooks), null);
         var kits = host.Client.GetRequiredService<IKitRemoteRepository>();
         var parts = host.Client.GetRequiredService<IKitPartRemoteRepository>();
@@ -289,24 +289,21 @@ public sealed partial class BackendParitySqlServerRuntimeTests
             new() { PartId = PartIdValue.Create(id), KitCode = CodeValue.Create("K1") };
     }
 
-    /// <summary>1 つのケースを空のスキーマから、サーバーが EF Core 版 Repository のリモートで流す</summary>
-    private async Task<IReadOnlyList<string>> RunOnRemoteEfCoreAsync(
-        AlternateKeyCompanionCase companionCase
+    /// <summary>1 つのケースを空のスキーマから、サーバーが <paramref name="server"/> の Repository のリモートで流す</summary>
+    private async Task<IReadOnlyList<string>> RunOnRemoteAsync(
+        AlternateKeyCompanionCase companionCase,
+        RemoteServer server
     )
     {
         await _fixture.ResetSchemaAsync(Ct);
         await _fixture.ApplyDdlAsync(ConcurrencyFixtureDefinition.Build(), Ct);
 
-        return await AlternateKeyWithCompanionAsync(
-            efCore: true,
-            companionCase,
-            remoteEfCore: true
-        );
+        return await AlternateKeyWithCompanionAsync(efCore: true, companionCase, server);
     }
 
     /// <summary>
     /// ケースが操作するリポジトリの持ち主：QuickER 版・EF Core はそのプロバイダ、リモートはクライアントのプロバイダと、
-    /// EF Core 版 Repository を持つサーバー（Save フックはサーバーに登録する）
+    /// EF Core 版か QuickER 版の Repository を持つサーバー（Save フックはサーバーに登録する）
     /// </summary>
     private sealed class CompanionHost(ServiceProvider client, InProcessRemoteServer? server)
         : IAsyncDisposable
@@ -314,8 +311,9 @@ public sealed partial class BackendParitySqlServerRuntimeTests
         /// <summary>リポジトリを解決するプロバイダ</summary>
         public ServiceProvider Client { get; } = client;
 
-        /// <summary>サーバーが EF Core 版 Repository のリモートを起動する</summary>
-        public static async Task<CompanionHost> RemoteEfCoreAsync(
+        /// <summary>サーバーが <paramref name="kind"/> の Repository のリモートを起動する</summary>
+        public static async Task<CompanionHost> RemoteAsync(
+            RemoteServer kind,
             string connectionString,
             IReadOnlyList<object> hooks
         )
@@ -323,9 +321,16 @@ public sealed partial class BackendParitySqlServerRuntimeTests
             var server = await InProcessRemoteServer.StartAsync(
                 services =>
                 {
-                    services.AddGeneratedEfCoreRepositories(options =>
-                        options.UseSqlServer(connectionString).IgnoreServiceProviderCacheLimit()
-                    );
+                    _ = kind switch
+                    {
+                        RemoteServer.EfCore => services.AddGeneratedEfCoreRepositories(options =>
+                            options.UseSqlServer(connectionString).IgnoreServiceProviderCacheLimit()
+                        ),
+                        RemoteServer.Ado => services.AddGeneratedSqlServerRepositories(
+                            connectionString
+                        ),
+                        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+                    };
 
                     foreach (var hook in hooks)
                     {

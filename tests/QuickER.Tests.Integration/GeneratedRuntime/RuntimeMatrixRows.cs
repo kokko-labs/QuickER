@@ -134,7 +134,16 @@ public static class RuntimeMatrixRows
         Row(
             RuntimeFeatures.CrudParity,
             "CRUD・グラフ保存・Query() の共通シナリオ（パリティ基底が同一シナリオを各実装へ掛ける）",
-            On(Gap(Trigger, EfCoreUntested), EfCoreOthers)
+            [On(Gap(Trigger, EfCoreUntested), EfCoreOthers)],
+            [
+                new RuntimeMissingServer(
+                    RuntimeTarget.AdoSqlServer,
+                    Trigger,
+                    "CRUD の照合のシナリオの群（RemoteServiceRuntimeTestsBase）は RemoteServiceFixture（SQLite 方言だけ）に固定で、"
+                        + "サーバーが QuickER 版 SQL Server のリモートは実装先どうしの一致の SQL Server の系統（BackendParitySqlServerRuntimeTests）の"
+                        + "代替キー・書く列を持たない表・キーと表名の形の系統だけが流す"
+                ),
+            ]
         ),
         Row(
             RuntimeFeatures.Concurrency,
@@ -188,8 +197,9 @@ public static class RuntimeMatrixRows
             On(
                 Gap(
                     Trigger,
-                    "EditModel / Mapper は方言に依らない生成物で、除外の意味論は SQLite で代表させている"
-                        + "（SQL Server 側の除外の実 DB 検証は BinaryColumn 行が持つ）"
+                    "EditModel / Mapper は方言に依らない生成物で、SQL Server の側の除外（INSERT は全列・SELECT と UPDATE は縮小列・"
+                        + "値を残した更新の断り）の実 DB 検証は BinaryColumn 行（BinaryColumnAdoSqlServerRuntimeTests）が持つ。"
+                        + "流すには BinaryVoFixture を SQL Server 方言でも生成する必要がある"
                 ),
                 RuntimeTarget.AdoSqlServer
             ),
@@ -198,14 +208,6 @@ public static class RuntimeMatrixRows
                     "EF Core は列選択を自身が行うため除外が非適用＝除外列が未取得になる状況が発生しない"
                 ),
                 EfCoreAll
-            ),
-            On(
-                Gap(
-                    Trigger,
-                    "インメモリも除外の意味論を持つが、往復の主題は「実 DB の UPDATE が除外列に触れない」ことなので"
-                        + "実 DB 側を先に押さえている"
-                ),
-                RuntimeTarget.InMemory
             ),
             On(
                 NotApplicable("EditModel / Mapper はクライアント側の型でリモート面を経由しない"),
@@ -261,13 +263,14 @@ public static class RuntimeMatrixRows
             RuntimeFeatures.IgnoredWrite,
             "版の無い表で競合以外の理由により更新が当たらないときの扱い（行なしとして報告・やり直さない）",
             On(
-                Gap(
-                    Trigger,
-                    "QuickER 版は SQL Server・SQLite とも版の無い表で 0 行を実在確認しない同じ規則で、SQLite で代表させている"
+                NotApplicable(
+                    "SQL Server では行を読めるまま UPDATE が 0 行を報告する形を作れない（何も書かない INSTEAD OF UPDATE トリガーでも"
+                        + "影響行数は対象の行の数で報告される＝実測 1・行レベルセキュリティの FILTER 述語は同じ利用者の SELECT からも行を隠す）。"
+                        + "版の無い表の 0 行は実在を確かめない道で、他者が消した行と同じになる"
                 ),
-                RuntimeTarget.AdoSqlServer
+                [RuntimeTarget.AdoSqlServer, RuntimeTarget.EfCoreSqlServer]
             ),
-            On(Gap(Trigger, EfCoreUntested), [RuntimeTarget.EfCoreSqlServer, .. EfCoreOthers]),
+            On(Gap(Trigger, EfCoreUntested), EfCoreOthers),
             On(
                 NotApplicable(
                     "インメモリにはトリガー・行レベルセキュリティが無く、文が当たらない状況が生まれない"
@@ -285,13 +288,6 @@ public static class RuntimeMatrixRows
         Row(
             RuntimeFeatures.NamedQueryRawSql,
             "名前付きクエリの生 SQL 実装（戻り形・パラメータ展開）",
-            On(
-                Gap(
-                    Trigger,
-                    "SQL Server の名前付きクエリの実行時テストは簡易 DSL の総当たりだけで、生 SQL の実装は未整備"
-                ),
-                RuntimeTarget.AdoSqlServer
-            ),
             On(Gap(Trigger, EfCoreUntested), [RuntimeTarget.EfCoreSqlServer, .. EfCoreOthers]),
             On(
                 NotApplicable(
@@ -353,12 +349,17 @@ public static class RuntimeMatrixRows
                 Gap(
                     Trigger,
                     "インメモリとの併用はコンパイル行列で押さえているが、keyed DI に方言実装とインメモリを"
-                        + "同居させる実行時テストは無い"
+                        + "同居させる実行時テストは無い。MultiTargetPortableFixture にインメモリを足して別の区切りで流す見込みで、"
+                        + "インメモリの登録を方言実装と keyed で同居させられるかが未確定（できなければ非該当へ宣言し直す）"
                 ),
                 RuntimeTarget.InMemory
             ),
             On(
-                Gap(Trigger, "リモート面との併用は直交だが、実行時の組合せ検証は無い"),
+                Gap(
+                    Trigger,
+                    "リモート面との併用は直交だが、実行時の組合せ検証は無い。MultiTargetPortableFixture にリモートサービスを足して"
+                        + "別の区切りで流す見込み"
+                ),
                 RuntimeTarget.Remote
             )
         ),
@@ -370,7 +371,8 @@ public static class RuntimeMatrixRows
                 Gap(
                     Trigger,
                     "インメモリは擬似版を採番する SQL Server の代役として振る舞う（案 B のスコープ外）。"
-                        + "ハイブリッド構成での併用は未検証"
+                        + "ハイブリッド構成での併用は未検証。MultiTargetRowVersionFixture にインメモリを足して別の区切りで流す見込みで、"
+                        + "インメモリの登録を方言実装と keyed で同居させられるかが未確定（できなければ非該当へ宣言し直す）"
                 ),
                 RuntimeTarget.InMemory
             ),
@@ -378,7 +380,9 @@ public static class RuntimeMatrixRows
                 Gap(
                     Trigger,
                     "ミラー列をリモート面越しに往復させる専用テストは無い"
-                        + "（HTTP 越しに実 rowversion を運ぶ経路自体は SyncSupport 行が押さえている）"
+                        + "（HTTP 越しに実 rowversion を運ぶ経路自体は SyncSupport 行が押さえている）。"
+                        + "MultiTargetRowVersionFixture にリモートサービスを足し、サーバーが QuickER 版 SQLite と SQL Server のリモートで"
+                        + "別の区切りで流す見込み"
                 ),
                 RuntimeTarget.Remote
             )
@@ -402,7 +406,9 @@ public static class RuntimeMatrixRows
             On(
                 Gap(
                     Trigger,
-                    "リモート面越しの専用テストは無い（除外は転送経路でなく EntitySaveMetadata の側で効く）"
+                    "リモート面越しの専用テストは無い（除外は転送経路でなく EntitySaveMetadata の側で効くが、"
+                        + "保存の応答が計算列の値をクライアントへ書き戻すことはリモートの経路にだけある）。"
+                        + "ComputedColumnFixture にリモートサービスを足して別の区切りで流す見込み"
                 ),
                 RuntimeTarget.Remote
             )
@@ -489,9 +495,9 @@ public static class RuntimeMatrixRows
             On(
                 Gap(
                     Trigger,
-                    "DB 照合の実 DB 検証は QuickER 版（SQLite・SQL Server）だけ。照合 SQL は UniquenessCheck 側で 5 実装を通している"
+                    "EditModel の照合の検証は QuickER 版（SQLite・SQL Server）とインメモリ・リモートだけ。EF Core 版の照合 SQL は UniquenessCheck 側で通している"
                 ),
-                [.. EfCoreAll, RuntimeTarget.InMemory, RuntimeTarget.Remote]
+                EfCoreAll
             )
         ),
         Row(
