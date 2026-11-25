@@ -85,7 +85,7 @@ Save フック・楽観排他・無制限バイナリの共通規則は `src/Qui
 - 名前付きクエリのページング引数も 400 にする（`ValidatedPaging(take, skip)`）。`take<=0` / `skip<0` はクエリパイプラインが `ArgumentOutOfRangeException` で拒否する値で、素通しすると呼び出し側の不備が 500＋ログ＋フックに化ける。2 つは常に対で出るので、まとめて 1 回検証する。
   - 生成クライアントはこの 400 を出さない。ページング付きの転送メソッドは先頭で直結と同じ例外（`ArgumentOutOfRangeException`・順序は Skip→Take・ParamName は `SqlQuery.Skip/Take` の引数名 `count`・文言も同一）で弾き、HTTP を投げない。
   - クライアントの Insert / Update / Save / SaveMany / CheckUniqueness も入口で `ArgumentNullException.ThrowIfNull` を通し、SaveMany のリスト内 null 要素は送信前のガードと保存後の RowState 確定で飛ばす。例外型・パラメータ名まで直結（ADO / EF Core / InMemory）と一致させるのが契約の一部で、実装を差し替えても catch が変わらない。
-  - 文言の複製は `_05_QueryPipeline` とモデルビルダーの 2 箇所になるため、一致はパリティテスト（RemoteService 20・22・23）が固定する。サーバー側 400 は手書きクライアント向けの防御として残す。
+  - 文言の複製は `_05_QueryPipeline` とモデルビルダーの 2 箇所になるため、一致はパリティテスト（RemoteService 22）が固定する。サーバー側 400 は手書きクライアント向けの防御として残し、素の HttpClient での 400 は RemoteService 21 が見る。
 - Kestrel の `BadHttpRequestException` はステータスを素通しする（ボディサイズ超過の 413 を 500 に化けさせないため）。
 
 ## 切断とタイムアウト

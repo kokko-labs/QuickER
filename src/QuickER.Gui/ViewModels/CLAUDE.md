@@ -151,14 +151,14 @@ MainViewModel と図の ViewModel の規則：文書の保存・外部変更検�
   - 選択中の項目が ItemsSource から一度でも消えると、ComboBox が `null` を書き戻し、それが利用者の編集として正本（列ペア）を変える。
   - 一意制約の削除の Undo / Redo の最中だと、`RefreshColumnPairCandidates` の行の列挙の途中で `SetColumnPairs` が行コレクションを書き換えて `InvalidOperationException` になり、アプリが落ちる（実ウィンドウで再現済み）。行の列挙はコピーに対して回すが、これは保険で単独の mutation では赤にできない。
 - `CanAddColumnPair` は件数の比較でなく「どの行も使っていない候補が残っているか」で判定する（選択が候補キーでなくても残るため、件数は対応しない）。
-- ガード：`CandidateListSyncTests`（6 件）・`RelationshipViewModelTests` の 3 件（一意制約が無くなった親列・主キーでなくなった親列・並べ替え）・`EntityViewModelUniqueConstraintTests` の並べ替え 1 件・`RelationshipColumnPairCardTests` の実ウィンドウ 2 件（「参照先の一意制約を Redo で消しても落ちず、ペアと選択と履歴が残る」「選択中の列を並べ替えて Undo しても選択が落ちず候補が重複しない」）。mutation 実証済み。
+- ガード：`CandidateListSyncTests`（Theory 1 本・7 ケース）・`RelationshipViewModelTests` の 3 件（一意制約が無くなった親列・主キーでなくなった親列・並べ替え）・`EntityViewModelUniqueConstraintTests` の並べ替え 1 件・`RelationshipColumnPairCardTests` の実ウィンドウ 2 件（「参照先の一意制約を Redo で消しても落ちず、ペアと選択と履歴が残る」「選択中の列を並べ替えて Undo しても選択が落ちず候補が重複しない」）。mutation 実証済み。
 
 ### 選択を当て直す順
 - 正本から行の選択を当て直すときは「当てる列を候補へ足す → 選択を当てる → 候補を絞る」の順にする（`RelationshipViewModel.SyncColumnPairRows` / `UniqueConstraintViewModel.SyncMembers`）。行を外して残りが繰り上がる・並びを入れ替える・列が消える、のどれでも、候補に無い項目を選択に当てない。
 - 列の増減では、消えた列を指すペアを先に落としてから候補を作り直す。
 - 外す行は、行リストから削除する前に切り離す（削除の通知の最中の後片付けの書き込みで、残りの行がまだ古い選択を持つ間に正本を古い並びへ戻さない）。
 - 図から外れた要素（`Detach` 後のリレーション・`IsDetachedFromOwner` の一意制約・`IsDetachedFromDiagram` のテーブルの一意制約）の行の書き込みは、正本を変えず表示を正本へ戻す（Undo で戻る要素を欠けさせない）。図に居る間は、受け手がいなくても正本へ反映する（単独の VM の経路）。
-- ガード：`CandidateRowReconcileTests`（選択と候補の順序を観測点 `SelectionCandidateProbe` で数える 13 件）・`CandidateSelectionOrderWindowTests` の実ウィンドウ 2 件。mutation 実証済み。
+- ガード：`CandidateRowReconcileTests`（選択と候補の順序を観測点 `SelectionCandidateProbe` で数える 10 件）・`SelectionInvariantTests`（図から外れた要素の行の書き込み＝行 `detached-write-*` の 3 件）・`CandidateSelectionOrderWindowTests` の実ウィンドウ 2 件。mutation 実証済み。
 
 ## 列の削除とクエリの参照の通知
 - 列がテーブルから外れたら、その列を参照する名前付きクエリを `NotifyStatus` で名指しする（`OnEntityColumnsChangedForQueryReferences`。クエリは書き換えない。判定は `QueryColumnReferences.Find`＝`src/QuickER.CodeGen.CSharp/Queries/CLAUDE.md`「列の削除とクエリの参照」）。

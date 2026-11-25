@@ -185,7 +185,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
   - 大小だけ違う綴りはコードから読めないので、C# のマージ取込が現在図の同じ列の綴りへ戻す（`ReverseMergePostProcessor.ApplyTypeSpellings`。`AreEquivalent` で同じときだけ）。戻さないと SQLite の図で取り込むたびに `int` が `INT` へ変わり、構造署名の差として置換の確認が出る。ガード：`FormatRoundTripTests`（形の行 `dbml-long-default-name-sqlite` の C# のマージの表明。エンジンは大小だけの違いを運ばない面 `TypeCase` に宣言し、マージが戻す面に入れる）
 - 対象列は生成時 Info 診断（`CodeGen_Info_NonCanonicalTypeSpellingColumns`）で名指しする
 - 行バージョン列はトークンごと不出力なので verbatim も出ない
-- ガード：`CSharpReverseVerbatimTypeTests`（大小差の非出力・行バージョンの非出力）・`FormatRoundTripTests`（7 表記の往復＝形の行 `csharp-verbatim-type-*`・不一致の警告＝規則の行 `csharp-rule-verbatim-*`）
+- ガード：`CSharpReverseVerbatimTypeTests`（大小差の非出力・行バージョンの非出力）・`FormatRoundTripTests`（8 表記の往復＝形の行 `csharp-verbatim-type-*`・不一致の警告＝規則の行 `csharp-rule-verbatim-*`）
 
 ### DbTableMeta の PrimaryKeyOrder
 
@@ -356,7 +356,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 ## Repository を作れる表が無い図
 
 - 固定 infra（Repository の共通契約・方言エンジン・クエリ / インメモリ / EF Core の土台）はオプションとスペックだけで出し、図の表の主キーの形に依らない。`_04_RepositoryContractCore.scriban` の外側のゲートに `repository_classes` を入れない（パッケージ参照モードで固定 infra が常にパッケージにあるのと同じ形）
-  - 入れると、主キーが 1 列の表が無い図（どの表も複合主キーか主キーなし）で部品 04 の契約（`ISqlExecutor`・`IRepositoryCore`・`ISaveHookRegistry`・`IncludeKeys` など）だけが抜ける。図に依らず出るほかの部品の土台（`_05` のクエリ・`_07`・`_08`・`GraphSaveOrder`）がそれを参照し、生成の診断はエラー 0 のまま、QuickER 版単独・EF Core 版・インメモリのどれでもコンパイルできない
+  - 入れると、主キーが 1 列の表が無い図（どの表も複合主キーか主キーなし）で部品 04 の契約（`ISqlExecutor`・`IRepositoryCore`・`ISaveHookRegistry` など）だけが抜ける。図に依らず出るほかの部品の土台（`_05` のクエリ・`_07`・`_08`・`GraphSaveOrder`）がそれを参照し、生成の診断はエラー 0 のまま、QuickER 版単独・EF Core 版・インメモリのどれでもコンパイルできない
 - Repository を作る表の判定は `HasSinglePrimaryKey`（テンプレートでは `repository_classes`）だけ。表ごとの「Repository をスキップ」の警告は既存のまま
   - その表の名前付きクエリは生成されず、表の警告の直後にクエリごとの警告で名指しする（→ `src/QuickER.CodeGen.CSharp/Queries/CLAUDE.md`「Repository の無い表のクエリ」）
 - DI の登録のローカル関数（`AddRepository` / `AddClient`。`_06` の 4 か所・`_07`・`_08`）は、Repository が 0 件だと使われず CS8321 になるので、既存の判定 `repository_classes.size > 0` のときだけ出す（リモート契約の形は `remote_contracts && repository_classes.size > 0`＝0 件なら else 側の空のループへ進む）
@@ -466,7 +466,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 
 ### 型名の名簿
 
-- 射影 DTO の型名が生成コードの型名と衝突する定義を生成前に断る入力は 3 つ
+- 射影 DTO の型名が生成コードの型名と衝突する定義を生成前に断る入力は、固定の名簿 `GeneratedFixedTypeNames` の 3 集合と、図から決まる名前 `GeneratedTypeNames.Collect`
   - `GeneratedFixedTypeNames`（固定の名簿）：`Runtime`（ランタイム 7 パッケージが宣言する型）・`FixedGenerated`（テーブルや列に依らない生成物の型）・`External`（生成コードが単純名で参照するソース外の型。属性は `Attribute` を省いた綴りも）
   - `GeneratedTypeNames.Collect`（図から決まる名前：エンティティ・EditModel・Mapper・Repository 系・値オブジェクト）。オプションに依らず出し得る名前をすべて返す（GUI・MCP がオプションを知らなくても判定が割れない）
 - 名簿が実際の出力より狭いと、その名前の DTO は診断ゼロでコンパイルできない出力になる（`Task` のように単純名で使う型を隠すと、無関係なメソッドまで壊れる）
@@ -478,7 +478,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 
 ### 型名のぶつかりを生成時に止める
 
-判定の本体は `GeneratedTypeNames.Analyze` の 1 つだけ。名簿は射影 DTO の検査と同じ（`ForTable`＝エンティティ・EditModel・Mapper・Repository 系の 12 名＋列ごとの値オブジェクトの名前、`GeneratedFixedTypeNames.IsReserved`）。サービスの `ValidateGeneratedTypeNames` は診断の文面を組み立てるだけ。
+判定の本体は `GeneratedTypeNames.Analyze` の 1 つだけ。名簿は射影 DTO の検査と同じ（`ForTable`＝エンティティ・EditModel・Mapper・Repository 系の 11 名＋列ごとの値オブジェクトの名前、`GeneratedFixedTypeNames.IsReserved`）。サービスの `ValidateGeneratedTypeNames` は診断の文面を組み立てるだけ。
 
 1. 同じ綴りの型名を 2 つ以上の出どころが作る組はエラー
    - 出どころはテーブルごとに 1 つ。値オブジェクトの名前は作る列が何本あっても 1 つ（同じ綴りの列は型を共有する設計）
@@ -553,7 +553,7 @@ SQL 側（動的 SQL・`--` コメント・型文字列・名前の入口検証�
 
 - XmlDoc の定型文へ載る名前は、専用の `*XmlDoc` フィールドで XML エスケープする
   - `CSharpClassModel.TableNameXmlDoc` / `CSharpPropertyModel.ColumnNameXmlDoc` / `CSharpValueObjectModel.ColumnNameXmlDoc` / `CSharpEditModelClassModel.TableNameXmlDoc` / `CSharpSyncTableModel.TableNameXmlDoc`
-  - テンプレートの `*_xml_doc` 参照サイトは 6 か所（`_01` VO・`_02` Entity とプロパティ・`_03` EditModel・`_07` インメモリシーダー・`_10` 同期記述子）。同期記述子の 1 か所だけは、説明が無いときのフォールバックでなく無条件文
+  - テンプレートの `*_xml_doc` 参照サイトは 6 か所（`_01` VO・`_02` Entity とプロパティ・`_03` EditModel・`_07` インメモリシーダー・`_10` 同期記述子）。インメモリのシーダー（`_07`）と同期記述子（`_10`）の 2 か所だけは、説明が無いときのフォールバックでなく無条件文
 - C# リテラル用のエスケープを XmlDoc へ流用すると、`<` が生のまま残って CS1570 になる。生のまま流すと、U+2028 で `///` 行を抜けて任意の C# を注入できる
 - ガード：`CodegenCaseTests` の行 `code-xmldoc-name-angle-bracket-fallback`（説明フォールバックの Entity クラス・Entity プロパティ・値オブジェクト・EditModel クラス・インメモリのシーダーの XmlDoc の完全一致）・`code-xmldoc-stream-accessor-name-angle-bracket`（Stream アクセサの契約・ファイル糖衣の定型文）。どちらもコンパイルし、CS1570 は警告 0 の判定が拾う
 

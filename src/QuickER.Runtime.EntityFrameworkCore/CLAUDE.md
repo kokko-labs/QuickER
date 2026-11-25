@@ -9,7 +9,7 @@ EF Core モード（`GenerateEfCoreRepositories`）の固定ランタイムと�
 - DI 登録の差し替え（`AddGenerated{方言}Repositories` と `AddGeneratedEfCoreRepositories`）だけで QuickER 版 Repository と交換できる。
 - `GenerateEfCoreRepositories=false` のとき、生成物に EF Core への依存は一切出ない（using を含む）。
 - スキーマ作成は DDL 生成の責務で、EF Core は既存スキーマへの接続専用とする（Migrations は範囲外）。
-  - 列の型（`HasColumnType`）は、プロバイダの既定の対応では書けない列（PostgreSQL の `date`・`timestamp`・`timetz`・`json`・`jsonb`・`xml`・`money` とその配列、SQL Server の `money`・`smallmoney`・`datetime`・`smalldatetime`）にだけ出す。DB には何も作らず、パラメータの型を決めるためだけに使う。判定は型マッパー（`src/QuickER.CodeGen.CSharp/CLAUDE.md`「EF Core に教える列の型」）。
+  - 列の型（`HasColumnType`）は、プロバイダの既定の対応では書けない列（PostgreSQL の `date`・`timestamp`・`time`・`timetz`・`json`・`jsonb`・`xml`・`money` とその配列、SQL Server の `money`・`smallmoney`・`datetime`・`smalldatetime`）にだけ出す。DB には何も作らず、パラメータの型を決めるためだけに使う。判定は型マッパー（`src/QuickER.CodeGen.CSharp/CLAUDE.md`「EF Core に教える列の型」）。
 - EF Core 単独のスコープ（EF Core のランタイムパッケージを含む）は、行の組み立て器を出さない。
   - 対象は `SelectMaterializer`・`MapEntity`・型ごとの読み取り・値オブジェクトの速い経路。QuickER 版 Repository のあるスコープだけに出す。
   - EF Core は自分で行を組み立て、生 SQL のエンティティ取得は列ごとの写し `SetColumnValue` で行うので使われない。生 SQL の列の解決の `SelectOrdinals` は残る。
@@ -80,7 +80,7 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
   - 分類の前に戻すのは、ForceOverwrite の保存先の値の採用（`OriginalValues.SetValues`）を後勝ちにするため。記録に入るのは、その試行で代替キーの UPDATE が通った（行のロックを持つ）行だけなので、同じ試行でその行が採用に回る組は作れず、順序の違いは観測できない（設計の理由で、守りは置かない）。
   - 代替キーの元の値（今の値にした印）は戻さない。次の試行の書き込みは、書くかどうかを保存先の値（ロールバックで戻った値）と今の値で決めて書き直し、変更検出の前に印を今の値にし直すので、戻しても上書きされて意味が無い。
   - 実行戦略の再試行は `ChangeTracker.Clear()` から登録し直すので、記録の外で元に戻る。
-- 呼ぶ位置：グラフ保存では Before のフックの後・明示のトランザクションの試行ごとの最初（`KeepStoredUnboundedBinaries` と `AdoptStoredForeignKeysAsync` は変更検出を走らせるので、その前）。`UpdateAsync` では代替キーを持つ表のときだけ、実行戦略の中の試行ごとのトランザクション（`UpdateWithAlternateKeysAsync`）。
+- 呼ぶ位置：グラフ保存では Before のフックの後・明示のトランザクションの試行ごとの最初（`KeepStoredUnboundedBinaries` と `AdoptStoredForeignKeysAsync` は変更検出を走らせるので、その前）。`UpdateAsync` では、自分で書く行の表（`WritesOwnColumns` が真＝代替キーを持つ、または `SaveChanges` が書く列を持たない表）のときだけ、実行戦略の中の試行ごとのトランザクション（`UpdateWritingOwnColumnsAsync`）。
 - 同じ保存で消す行がまだ持つ値を代替キーで取る更新は、削除の後に書く（`HeldBackContextAsync`）。
   - SaveChanges の前に書くと、消す前の行とぶつかって一意制約に断られる。1 回の SaveChanges の中では文の間に何も挟めず、一意インデックスの並べ替えはキーの列に効かない。
   - そのため、3 段目（`GraphSaveOrder.HeldBack` から歩く行）を、接続とトランザクションを共有する 2 つめの文脈（`SetDbConnection`＋試行のトランザクションごとの `UseTransaction`）で追跡し、1 つめの SaveChanges の後に、代替キー → SaveChanges の順で書く。3 段目の新しい子が新しい値を参照しても通る。
