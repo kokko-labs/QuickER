@@ -302,7 +302,7 @@
   - `ExpectsUnwarnedFailure` の理由・`Outcome`・`Unchanged()` の欠け。
 - 方言ごとの行の数の下限（`MinimumRealRowsFor`＝`Real{方言}RowCount`＋方言をまたぐ行）を、実 DB の Fact の `CoverageGuard.AtLeast` が照合する。
 - DDL の注記は `*DdlNoteTests` に残してある。
-- mutation 実証済み（src の `SyncPlanner`・`SchemaDiffService`・方言の同期スクリプト・能力と識別子の宣言を書き換えると、移した行がそろって赤になる）。
+- mutation 実証済み（src の同期の計画〔`SyncPlanner` と `Sync/`〕・`SchemaDiffService`・方言の同期スクリプト・能力と識別子の宣言を書き換えると、移した行がそろって赤になる）。
 
 ## 総当たりの表明と運用
 

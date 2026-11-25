@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using QuickER.Provider.Sync.State;
 using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider.Sync.Scheduling;
@@ -81,7 +82,7 @@ internal static class SelectedSteps
                     break;
 
                 case SchemaDiffKind.AlterPrimaryKey:
-                    if (SyncPlanner.HasNewPrimaryKeyColumns(item))
+                    if (PlanFacts.HasNewPrimaryKeyColumns(item))
                     {
                         var keyPair = new ReaddPair();
                         steps.Add(

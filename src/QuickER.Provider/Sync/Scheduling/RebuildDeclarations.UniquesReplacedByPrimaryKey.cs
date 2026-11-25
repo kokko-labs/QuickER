@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using QuickER.Model;
+using QuickER.Provider.Sync.State;
 using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider.Sync.Scheduling;
@@ -12,7 +13,7 @@ internal static partial class RebuildDeclarations
     /// </summary>
     /// <remarks>
     /// 対象は、主キーを変える表を参照し、参照する列が新しい主キーと同じ列の集合で、同じ計画がその表から外す一意制約のどれかが
-    /// 参照する列を支えうる外部キー（<see cref="SyncPlanner.CanSupportForeignKey"/>）。付け直しは新しい主キーが支える。
+    /// 参照する列を支えうる外部キー（<see cref="PlanFacts.CanSupportForeignKey"/>）。付け直しは新しい主キーが支える。
     /// </remarks>
     private static IEnumerable<LiveConstraint> RequireForeignKeysOffUniquesReplacedByPrimaryKey(
         SchedulingInput input
@@ -38,10 +39,10 @@ internal static partial class RebuildDeclarations
                 .ToList();
 
             if (
-                SyncPlanner.IsSameColumnSet(newPrimaryKey, referencedColumns)
+                PlanFacts.IsSameColumnSet(newPrimaryKey, referencedColumns)
                 && uniqueDrops.Any(drop =>
                     SchemaNames.AreSame(SchemaNames.ToStoredForm(drop.TableName), parentTable)
-                    && SyncPlanner.CanSupportForeignKey(
+                    && PlanFacts.CanSupportForeignKey(
                         input.Capabilities,
                         drop.Columns,
                         referencedColumns

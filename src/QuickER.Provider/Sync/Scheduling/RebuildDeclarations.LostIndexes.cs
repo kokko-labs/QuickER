@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using QuickER.Model;
+using QuickER.Provider.Sync.State;
 using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider.Sync.Scheduling;
@@ -14,7 +15,7 @@ internal static partial class RebuildDeclarations
     /// <remarks>
     /// 外す索引は、主キーを変える表の DB の今の主キーと、同じ計画が外す一意制約（選んだ削除・作り直しの展開・同期後の状態の差として
     /// 足した削除）。外部キーを支える唯一の索引を外すと DB が断るので、子の列が先頭の列とちょうど同じ集合になる外部キーを外す
-    /// （<see cref="SyncPlanner.IsLeadingPrefix"/>）。別の索引が支えている外部キーも外し直すことになるが、外して付け直すだけ。
+    /// （<see cref="PlanFacts.IsLeadingPrefix"/>）。別の索引が支えている外部キーも外し直すことになるが、外して付け直すだけ。
     /// </remarks>
     private static IEnumerable<LiveConstraint> RequireForeignKeysOffLostIndexes(
         SchedulingInput input
@@ -50,7 +51,7 @@ internal static partial class RebuildDeclarations
         {
             if (
                 lostIndexes.TryGetValue(SchemaDiffService.NormalizeTable(fk.Child), out var indexes)
-                && indexes.Any(index => SyncPlanner.IsLeadingPrefix(index, fk.ColumnPairs))
+                && indexes.Any(index => PlanFacts.IsLeadingPrefix(index, fk.ColumnPairs))
             )
             {
                 yield return new LiveForeignKey(fk);

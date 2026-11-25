@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using QuickER.Model;
+using QuickER.Provider.Sync.State;
 
 namespace QuickER.Provider.Sync.Assessment;
 
@@ -15,7 +16,7 @@ internal static partial class AssessmentRules
     /// 続けて返し、<see cref="Add"/> が 1 件にする）
     /// </returns>
     /// <remarks>
-    /// 削除する一意制約がその外部キーを支えうるか（<see cref="SyncPlanner.CanSupportForeignKey"/>＝前寄せと同じ判定。MySQL は参照する列を先頭に
+    /// 削除する一意制約がその外部キーを支えうるか（<see cref="PlanFacts.CanSupportForeignKey"/>＝前寄せと同じ判定。MySQL は参照する列を先頭に
     /// 並べる一意制約も）で判定する。ほかのキーが同じ列を覆っていれば実際には壊れないが、誤警告を許容してほかのキーは数えず、
     /// 実行はブロックしない（レンダラーは DROP を出す）。
     /// </remarks>
@@ -57,7 +58,7 @@ internal static partial class AssessmentRules
             if (
                 dropped.Touches(fk, childTable, parentTable)
                 || explicitlyDropped.Contains(
-                    SyncPlanner.ForeignKeyKey(
+                    PlanIdentity.ForeignKeyKey(
                         childTable,
                         parentTable,
                         fk.ColumnPairs,
@@ -67,7 +68,7 @@ internal static partial class AssessmentRules
                 )
                 || (
                     pkChangedTables.TryGetValue(parentTable, out var newKey)
-                    && SyncPlanner.IsSameColumnSet(
+                    && PlanFacts.IsSameColumnSet(
                         newKey,
                         ForeignKeyColumnPairResolver.ParentColumns(fk.ColumnPairs)
                     )
@@ -87,7 +88,7 @@ internal static partial class AssessmentRules
                 }
 
                 if (
-                    !SyncPlanner.CanSupportForeignKey(
+                    !PlanFacts.CanSupportForeignKey(
                         capabilities,
                         drop.UniqueConstraintColumns,
                         referenced
@@ -101,7 +102,7 @@ internal static partial class AssessmentRules
                     new SyncPlanWarning(
                         SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey,
                         parentTable,
-                        SyncPlanner.ResolveForeignKeyName(
+                        PlanIdentity.ResolveForeignKeyName(
                             fk.Relationship,
                             SchemaDiffService.NormalizeTable(fk.Child),
                             parentTable,

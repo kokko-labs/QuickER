@@ -9,7 +9,7 @@ namespace QuickER.Tests.TestSupport.Guards;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 規則への参照は、名前が <c>Exclude</c> に大文字が続く識別子で、クラス <c>SelectionRules</c> か <c>SyncPlanner</c> の中にあるか、
+/// 規則への参照は、名前が <c>Exclude</c> に大文字が続く識別子で、クラス <c>SelectionRules</c> か <c>PlanSelection</c> の中にあるか、
 /// <c>SelectionRules.</c> で修飾したもの（呼び出しとメソッドグループの両方）。周そのもの（<c>ExcludeUntilStable</c>）は数えない。
 /// 規則の表への参照は、<c>SelectionRules.</c> で修飾した（か <c>SelectionRules</c> の
 /// 中の）<c>BeforeRounds</c>・<c>EachRound</c> の読み。
@@ -20,13 +20,13 @@ namespace QuickER.Tests.TestSupport.Guards;
 /// 「含むメソッドかフィールド: 名前」で返す（メソッドにもフィールドにも入らない参照は <c>(member outside a method)</c>）。
 /// </para>
 /// <para>
-/// 読みの限界：<c>using static</c>・別名の <c>using</c> で受け手を書かずに、<c>SelectionRules</c>・<c>SyncPlanner</c> の外から呼ぶ形は拾わない。
+/// 読みの限界：<c>using static</c>・別名の <c>using</c> で受け手を書かずに、<c>SelectionRules</c>・<c>PlanSelection</c> の外から呼ぶ形は拾わない。
 /// XmlDoc の <c>cref</c> と <c>nameof</c> の中の名前は数えない。
 /// </para>
 /// </remarks>
 internal static class SyncExclusionCalls
 {
-    private const string Planner = "SyncPlanner";
+    private const string Planner = "PlanSelection";
     private const string Rules = "SelectionRules";
     private const string Prefix = "Exclude";
     private const string Loop = "ExcludeUntilStable";

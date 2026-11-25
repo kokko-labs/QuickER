@@ -59,7 +59,7 @@ internal static partial class AssessmentRules
                 continue;
             }
 
-            var name = SyncPlanner.SelectedForeignKeyName(add, capabilities.IdentifierLengthLimit);
+            var name = PlanIdentity.SelectedForeignKeyName(add, capabilities.IdentifierLengthLimit);
 
             warnings.Add(
                 new SyncPlanWarning(

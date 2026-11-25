@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using QuickER.Model;
 using QuickER.Provider.Resources;
+using QuickER.Provider.Sync.State;
 using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider.Sync.Scheduling;
@@ -48,7 +49,7 @@ internal static class Readds
 
             if (
                 explicitlyDropped.Contains(
-                    SyncPlanner.ForeignKeyKey(
+                    PlanIdentity.ForeignKeyKey(
                         childTable,
                         parentTable,
                         fk.ColumnPairs,
@@ -61,7 +62,7 @@ internal static class Readds
                 continue;
             }
 
-            var name = SyncPlanner.ResolveForeignKeyName(
+            var name = PlanIdentity.ResolveForeignKeyName(
                 fk.Relationship,
                 childTable,
                 parentTable,
@@ -161,7 +162,7 @@ internal static class Readds
 
                 if (
                     explicitlyDropped.Contains(
-                        SyncPlanner.UniqueConstraintKey(tableName, constraint.Name, columns)
+                        PlanIdentity.UniqueConstraintKey(tableName, constraint.Name, columns)
                     )
                 )
                 {

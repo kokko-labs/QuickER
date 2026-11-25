@@ -408,6 +408,7 @@ internal static class SyncPlanShapeRows
             [
                 "src/QuickER.Provider/SchemaDiffService.cs",
                 "src/QuickER.Provider/SyncPlanner.cs",
+                "src/QuickER.Provider/SyncPlanContext.cs",
                 "src/QuickER.Provider/Sync",
             ]
         );

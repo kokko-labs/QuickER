@@ -230,16 +230,15 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider/SchemaDiffService.cs` | `Name/DdlRoundTrip`・`SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/HistoryRows`・`SyncPlan/ShapeRows`・`rule:sync-name-comparison-tokens`・`table:SyncPlanExpectations` |
 | `src/QuickER.Provider/SqlNameDuplicates.cs` | `Name/Entrances` |
 | `src/QuickER.Provider/SqlNameText.cs` | `Name/DdlRoundTrip`・`rule:sql-name-text-name-sources` |
-| `src/QuickER.Provider/Sync` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/ShapeRows`・`rule:sync-live-schema-single-source`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
+| `src/QuickER.Provider/Sync` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/ShapeRows`・`rule:sync-live-schema-single-source`・`rule:sync-name-comparison-tokens`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
 | `src/QuickER.Provider/Sync/Assessment` | `rule:sync-assessment-builds-warnings-only` |
 | `src/QuickER.Provider/Sync/Scheduling` | `rule:sync-scheduling-builds-steps-only` |
-| `src/QuickER.Provider/Sync/Selection` | `rule:sync-name-comparison-tokens` |
-| `src/QuickER.Provider/Sync/State` | `rule:sync-name-comparison-tokens` |
 | `src/QuickER.Provider/Sync/State/ConstraintState.cs` | `rule:sync-assessment-builds-warnings-only` |
 | `src/QuickER.Provider/Sync/StepPlanner.cs` | `rule:sync-assessment-builds-warnings-only` |
-| `src/QuickER.Provider/Sync/TableRebuilds` | `rule:sync-name-comparison-tokens`・`rule:sync-scheduling-builds-steps-only` |
+| `src/QuickER.Provider/Sync/TableRebuilds` | `rule:sync-scheduling-builds-steps-only` |
 | `src/QuickER.Provider/SyncDialectCapabilities.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`rule:sync-capabilities-initializers` |
 | `src/QuickER.Provider/SyncPlan.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`table:SyncPlanExpectations` |
+| `src/QuickER.Provider/SyncPlanContext.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/ShapeRows`・`rule:sync-live-schema-single-source`・`rule:sync-name-comparison-tokens`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
 | `src/QuickER.Provider/SyncPlanner.cs` | `SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/ShapeRows`・`rule:sync-live-schema-single-source`・`rule:sync-name-comparison-tokens`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
 | `src/QuickER.Provider/SyncScriptBuilderBase.cs` | `SyncPlan/Fuzz` |
 | `src/QuickER.Provider/SyncScriptBuilderHelper.cs` | `SyncPlan/Fuzz` |
@@ -585,19 +584,19 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 - 名前：同期計画の総当たり（5 方言の実 DB）
 - テストのソース：`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanCoverageRows.cs`・`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzDialect.cs`・`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzDimensions.cs`・`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzGenerator.cs`・`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzKnownFailures.cs`・`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzRunner.cs`・`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzTestsBase.cs`・`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanScenarios.cs`
-- 範囲：`src/QuickER.Provider/SchemaDiffService.cs`・`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/Sync`・`src/QuickER.Provider/SyncPlan.cs`・`src/QuickER.Provider/SyncDialectCapabilities.cs`・`src/QuickER.Provider/SyncScriptBuilderBase.cs`・`src/QuickER.Provider/SyncScriptBuilderHelper.cs`・`src/QuickER.Provider.MySql`・`src/QuickER.Provider.Oracle`・`src/QuickER.Provider.PostgreSql`・`src/QuickER.Provider.SqlServer`・`src/QuickER.Provider.Sqlite`
+- 範囲：`src/QuickER.Provider/SchemaDiffService.cs`・`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/SyncPlanContext.cs`・`src/QuickER.Provider/Sync`・`src/QuickER.Provider/SyncPlan.cs`・`src/QuickER.Provider/SyncDialectCapabilities.cs`・`src/QuickER.Provider/SyncScriptBuilderBase.cs`・`src/QuickER.Provider/SyncScriptBuilderHelper.cs`・`src/QuickER.Provider.MySql`・`src/QuickER.Provider.Oracle`・`src/QuickER.Provider.PostgreSql`・`src/QuickER.Provider.SqlServer`・`src/QuickER.Provider.Sqlite`
 
 ### `SyncPlan/CapabilityNet`
 
 - 名前：同期計画の能力の組の網（5 方言の能力・DB なし）
 - テストのソース：`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanCapabilityNet.cs`・`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanCoverageRows.cs`・`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanStaticRules.cs`・`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanFuzzGenerator.cs`・`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanScenarios.cs`
-- 範囲：`src/QuickER.Provider/SchemaDiffService.cs`・`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/Sync`・`src/QuickER.Provider/SyncPlan.cs`・`src/QuickER.Provider/SyncDialectCapabilities.cs`
+- 範囲：`src/QuickER.Provider/SchemaDiffService.cs`・`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/SyncPlanContext.cs`・`src/QuickER.Provider/Sync`・`src/QuickER.Provider/SyncPlan.cs`・`src/QuickER.Provider/SyncDialectCapabilities.cs`
 
 ### `SyncPlan/ShapeRows`
 
 - 名前：同期計画の形の行（D4・網羅の配列から作る決定的な行）
 - テストのソース：`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanShapeRows.cs`・`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanScenarios.cs`
-- 範囲：`src/QuickER.Provider/SchemaDiffService.cs`・`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/Sync`
+- 範囲：`src/QuickER.Provider/SchemaDiffService.cs`・`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/SyncPlanContext.cs`・`src/QuickER.Provider/Sync`
 
 ### `SyncPlan/HistoryRows`
 
@@ -735,7 +734,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 - 名前：同期の差分と計画の期待の行（SyncPlan のエンジン〔SyncPlan/Fuzz・SyncPlan/CapabilityNet〕が流す。方言ごとの期待と実 DB の段の汎用の表明）
 - テストのソース：`tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanExpectationRows.cs`
-- 範囲：`src/QuickER.Provider/SchemaDiffService.cs`・`src/QuickER.Provider/SyncPlan.cs`・`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/Sync`
+- 範囲：`src/QuickER.Provider/SchemaDiffService.cs`・`src/QuickER.Provider/SyncPlan.cs`・`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/SyncPlanContext.cs`・`src/QuickER.Provider/Sync`
 
 ### `rule:model-dialect-lookups`
 
@@ -767,15 +766,15 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 ### `rule:sync-name-comparison-tokens`
 
-- 範囲：`src/QuickER.Provider/SchemaDiffService.cs`・`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/NameMatching.cs`・`src/QuickER.Provider/UniqueConstraintNaming.cs`・`src/QuickER.Provider/Sync/State`・`src/QuickER.Provider/Sync/Selection`・`src/QuickER.Provider/Sync/TableRebuilds`
+- 範囲：`src/QuickER.Provider/SchemaDiffService.cs`・`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/SyncPlanContext.cs`・`src/QuickER.Provider/NameMatching.cs`・`src/QuickER.Provider/UniqueConstraintNaming.cs`・`src/QuickER.Provider/Sync`
 
 ### `rule:sync-type-deciding-column-copies`
 
-- 範囲：`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/Sync`
+- 範囲：`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/SyncPlanContext.cs`・`src/QuickER.Provider/Sync`
 
 ### `rule:sync-selected-foreign-key-names`
 
-- 範囲：`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/Sync`
+- 範囲：`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/SyncPlanContext.cs`・`src/QuickER.Provider/Sync`
 
 ### `rule:sync-exclusions-inside-stable-loop`
 
@@ -787,7 +786,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 
 ### `rule:sync-live-schema-single-source`
 
-- 範囲：`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/Sync`
+- 範囲：`src/QuickER.Provider/SyncPlanner.cs`・`src/QuickER.Provider/SyncPlanContext.cs`・`src/QuickER.Provider/Sync`
 
 ### `rule:sync-post-sync-schema-single-source`
 

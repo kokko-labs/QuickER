@@ -271,7 +271,7 @@ internal sealed class PostSyncSchema
 
         foreach (
             var items in selected
-                .Where(i => SyncPlanner.IsColumnNameSetChange(i.Kind))
+                .Where(i => PlanFacts.IsColumnNameSetChange(i.Kind))
                 .GroupBy(i => SchemaNames.ToStoredForm(i.TableName), SchemaNames.Comparer)
         )
         {
@@ -324,7 +324,7 @@ internal sealed class PostSyncSchema
     /// <param name="liveByName">live の表の索引</param>
     /// <param name="capabilities">型の比較に使う方言のケーパビリティ</param>
     /// <remarks>
-    /// 外部キーの両端の型の照合（<see cref="SyncPlanner.HasPostSyncTypeMismatch"/>・<see cref="SyncPlanner.ExcludeForeignKeysWithPostSyncTypeMismatch"/>）は、
+    /// 外部キーの両端の型の照合（<see cref="PlanFacts.HasPostSyncTypeMismatch"/>・<see cref="SyncPlanner.ExcludeForeignKeysWithPostSyncTypeMismatch"/>）は、
     /// この関数が返す列だけを「この同期で型が決まる」とみなす。NULL 許容だけを変える列の変更は型を決めない：DB はその外部キーを
     /// 今の両端の型のまま受け入れているので、型を変えずに外して付け直せば同じ組の型で通る。数えると、DB が受け入れている型の違う
     /// 外部キー（PostgreSQL の integer → bigint など）を「付け直せない」と名指しして外し直さず、その外部キーに阻まれる主キーの
@@ -445,7 +445,7 @@ internal sealed class PostSyncSchema
 
             var (parentTable, columnPairs) = signature.Value;
             explicitlyDropped.Add(
-                SyncPlanner.ForeignKeyKey(
+                PlanIdentity.ForeignKeyKey(
                     SchemaDiffService.NormalizeTable(dropFk.ChildEntity),
                     parentTable,
                     columnPairs,

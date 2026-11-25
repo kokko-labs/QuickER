@@ -59,7 +59,7 @@ internal sealed class SelectionState
     public PostSyncSchema ExpandedPostSync =>
         _expandedPostSync ??= PostSyncSchema.From(
             PlanStage.ExclusionRoundExpanded,
-            SyncPlanner.ExpandAlters(Items),
+            PlanSelection.ExpandAlters(Items),
             _context.LiveSchema,
             _context.Capabilities
         );

@@ -203,6 +203,7 @@ internal static class SyncPlanFuzzDimensions
             [
                 "src/QuickER.Provider/SchemaDiffService.cs",
                 "src/QuickER.Provider/SyncPlanner.cs",
+                "src/QuickER.Provider/SyncPlanContext.cs",
                 "src/QuickER.Provider/Sync",
                 "src/QuickER.Provider/SyncPlan.cs",
                 "src/QuickER.Provider/SyncDialectCapabilities.cs",

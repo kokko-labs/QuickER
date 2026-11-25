@@ -1,3 +1,5 @@
+using QuickER.Provider.Sync.State;
+
 namespace QuickER.Provider.Sync.Scheduling;
 
 /// <summary>
@@ -9,9 +11,9 @@ namespace QuickER.Provider.Sync.Scheduling;
 /// 何も変えずに断られる。判定は制約 1 つと同期後の事実だけで決まり、どの宣言が外すと答えたかを見ない。
 /// </para>
 /// <list type="bullet">
-/// <item>同期後に両端の列の型が並べられない外部キー（<see cref="SyncPlanner.HasPostSyncTypeMismatch"/>）。</item>
+/// <item>同期後に両端の列の型が並べられない外部キー（<see cref="PlanFacts.HasPostSyncTypeMismatch"/>）。</item>
 /// <item>参照アクションが SET NULL で、子の列が同期後に NOT NULL になる外部キー（その外部キーを作れない方言＝
-/// <see cref="SyncPlanner.BlocksSetNullRebuild"/>）。</item>
+/// <see cref="PlanFacts.BlocksSetNullRebuild"/>）。</item>
 /// </list>
 /// </remarks>
 internal static class UnreaddableConstraints
@@ -23,13 +25,13 @@ internal static class UnreaddableConstraints
     {
         var childTable = SchemaDiffService.NormalizeTable(fk.Child);
 
-        return SyncPlanner.BlocksSetNullRebuild(
+        return PlanFacts.BlocksSetNullRebuild(
                 fk,
                 childTable,
                 input.Capabilities,
                 input.PostSync.AllowsNull
             )
-            || SyncPlanner.HasPostSyncTypeMismatch(
+            || PlanFacts.HasPostSyncTypeMismatch(
                 fk,
                 childTable,
                 SchemaDiffService.NormalizeTable(fk.Parent),

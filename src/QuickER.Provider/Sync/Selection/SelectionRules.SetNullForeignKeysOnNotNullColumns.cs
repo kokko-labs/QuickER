@@ -39,7 +39,7 @@ internal static partial class SelectionRules
                 .Select(found => new Withdrawal(
                     found.Item,
                     [
-                        SyncPlanner.SetNullWarning(
+                        PlanFacts.SetNullWarning(
                             found.ChildTable,
                             found.ConstraintName,
                             found.NotNullColumns
@@ -86,7 +86,7 @@ internal static partial class SelectionRules
                 || item.Relationship is null
                 || item.ChildEntity is null
                 || item.ParentEntity is null
-                || !SyncPlanner.UsesSetNull(item.Relationship, capabilities)
+                || !PlanFacts.UsesSetNull(item.Relationship, capabilities)
             )
             {
                 continue;
@@ -105,7 +105,7 @@ internal static partial class SelectionRules
                     (
                         item,
                         childTable,
-                        SyncPlanner.SelectedForeignKeyName(
+                        PlanIdentity.SelectedForeignKeyName(
                             item,
                             capabilities.IdentifierLengthLimit
                         ),

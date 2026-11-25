@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using QuickER.Provider.Sync.State;
 
 namespace QuickER.Provider.Sync.Scheduling;
 
@@ -35,9 +36,9 @@ internal static partial class RebuildDeclarations
 
             if (
                 fk.ColumnPairs.Any(pair =>
-                    alteredColumns.Contains(SyncPlanner.ColumnKey(childTable, pair.ChildColumn))
+                    alteredColumns.Contains(PlanIdentity.ColumnKey(childTable, pair.ChildColumn))
                     || alteredColumns.Contains(
-                        SyncPlanner.ColumnKey(parentTable, pair.ParentColumn)
+                        PlanIdentity.ColumnKey(parentTable, pair.ParentColumn)
                     )
                 )
             )

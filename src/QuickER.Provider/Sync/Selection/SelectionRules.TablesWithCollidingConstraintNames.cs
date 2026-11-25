@@ -51,7 +51,7 @@ internal static partial class SelectionRules
                 .ResolveAll(add.Entity, add.UniqueConstraintNames, limit)
                 .Where(u =>
                     capabilities.SupportsUniqueConstraintOnPrimaryKey
-                    || !SyncPlanner.IsSameColumnSet(primaryKey, u.ColumnNames)
+                    || !PlanFacts.IsSameColumnSet(primaryKey, u.ColumnNames)
                 )
                 .Select(u =>
                     (

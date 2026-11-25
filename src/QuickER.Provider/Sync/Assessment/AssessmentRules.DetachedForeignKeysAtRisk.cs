@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using QuickER.Provider.Sync.State;
 
 namespace QuickER.Provider.Sync.Assessment;
 
@@ -14,11 +15,11 @@ internal static partial class AssessmentRules
     /// <para>明示的に外す外部キーは見ない。外部キー 1 つにつき、次の順に当たった最初の 1 つだけを行う。</para>
     /// <list type="number">
     /// <item>参照アクションが SET NULL で、子の列が同期後に NOT NULL になる（作れない方言＝
-    /// <see cref="SyncPlanner.BlocksSetNullRebuild"/>）：<see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/>
+    /// <see cref="PlanFacts.BlocksSetNullRebuild"/>）：<see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/>
     /// （Detail は「制約名 (同期後に NOT NULL の子の列, …)」）。計画はこの外部キーを外さない。</item>
-    /// <item>同期後に両端の型が並べられない（<see cref="SyncPlanner.HasPostSyncTypeMismatch"/>）：何も返さない
+    /// <item>同期後に両端の型が並べられない（<see cref="PlanFacts.HasPostSyncTypeMismatch"/>）：何も返さない
     /// （<see cref="WarnLiveForeignKeysWithPostSyncTypeMismatch"/> が名指しする。計画はこの外部キーも外さない）。</item>
-    /// <item>参照先の列が、同期後の主キーにも一意制約にも列の集合で一致しない（<see cref="SyncPlanner.StaysCandidateKey"/>）：
+    /// <item>参照先の列が、同期後の主キーにも一意制約にも列の集合で一致しない（<see cref="PlanFacts.StaysCandidateKey"/>）：
     /// <see cref="SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey"/>（Detail は制約の実効名）。計画は外して付け直す。</item>
     /// </list>
     /// </remarks>
@@ -53,7 +54,7 @@ internal static partial class AssessmentRules
 
             if (
                 explicitlyDropped.Contains(
-                    SyncPlanner.ForeignKeyKey(
+                    PlanIdentity.ForeignKeyKey(
                         childTable,
                         parentTable,
                         fk.ColumnPairs,
@@ -66,7 +67,7 @@ internal static partial class AssessmentRules
                 continue;
             }
 
-            var constraintName = SyncPlanner.ResolveForeignKeyName(
+            var constraintName = PlanIdentity.ResolveForeignKeyName(
                 fk.Relationship,
                 childTable,
                 parentTable,
@@ -74,20 +75,20 @@ internal static partial class AssessmentRules
                 liveSchema
             );
 
-            if (SyncPlanner.BlocksSetNullRebuild(fk, childTable, capabilities, postSync.AllowsNull))
+            if (PlanFacts.BlocksSetNullRebuild(fk, childTable, capabilities, postSync.AllowsNull))
             {
                 warnings.Add(
-                    SyncPlanner.SetNullWarning(
+                    PlanFacts.SetNullWarning(
                         childTable,
                         constraintName,
-                        SyncPlanner.PostSyncNotNullChildColumns(fk, childTable, postSync.AllowsNull)
+                        PlanFacts.PostSyncNotNullChildColumns(fk, childTable, postSync.AllowsNull)
                     )
                 );
                 continue;
             }
 
             if (
-                SyncPlanner.HasPostSyncTypeMismatch(
+                PlanFacts.HasPostSyncTypeMismatch(
                     fk,
                     childTable,
                     parentTable,
@@ -104,7 +105,7 @@ internal static partial class AssessmentRules
                 .ToList();
 
             if (
-                !SyncPlanner.StaysCandidateKey(
+                !PlanFacts.StaysCandidateKey(
                     postSync.PrimaryKeyOf(parentTable),
                     postSyncUniques,
                     parentTable,

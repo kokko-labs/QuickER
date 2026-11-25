@@ -150,7 +150,7 @@ internal static class TableRebuildDefinition
     /// </summary>
     /// <remarks>
     /// 合成後の定義は live の写しで、削除の項目も live の制約の名前を運ぶので、DB の一意制約の照合キー
-    /// （<see cref="SyncPlanner.UniqueConstraintKey"/>＝名前と列集合）で除去する（同じ列集合のほかの一意制約は残す）。
+    /// （<see cref="PlanIdentity.UniqueConstraintKey"/>＝名前と列集合）で除去する（同じ列集合のほかの一意制約は残す）。
     /// </remarks>
     internal static void ApplyUniqueConstraintDrops(
         Entity newDef,
@@ -163,7 +163,7 @@ internal static class TableRebuildDefinition
             newDef.UniqueConstraints.RemoveAll(constraint =>
                 UniqueConstraintNaming.TryResolveColumnNames(newDef, constraint, out var columns)
                 && dropped.Contains(
-                    SyncPlanner.UniqueConstraintKey(drop.TableName, constraint.Name, columns)
+                    PlanIdentity.UniqueConstraintKey(drop.TableName, constraint.Name, columns)
                 )
             );
         }

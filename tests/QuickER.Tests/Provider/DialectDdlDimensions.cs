@@ -134,7 +134,7 @@ internal static class DialectDdlDimensions
             Scope,
             AcceptedFinding,
             "同期は差分・計画とも外部キーを ForeignKeyColumnPairResolver.ResolveAll（多対多を除く）で組むので、多対多は同期の出力に現れない"
-                + "（SyncPlanner.cs:3609・SchemaDiffService.cs:432・446）",
+                + "（Sync/State/LiveSchema.cs・SchemaDiffService.cs の ResolveAll の呼び出し）",
             Element,
             Path,
             (element, path) =>

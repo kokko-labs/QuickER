@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using QuickER.Provider.Sync.State;
 
 namespace QuickER.Provider.Sync.Assessment;
 
@@ -19,7 +20,7 @@ internal static partial class AssessmentRules
     /// <para>
     /// 再構築の方言は外部キーを外して付け直すのではなく、子の表の外部キーの宣言を残したまま親の表を作り直す。参照先の列が候補キーで
     /// なくなると、同期後の <c>foreign_key_check</c> が foreign key mismatch で失敗する（巻き戻るので安全側だが、逐次 DDL の方言と同じく
-    /// 実行前に知らせる）。判定は <see cref="SyncPlanner.StaysCandidateKey"/> を逐次 DDL の方言と共有する。
+    /// 実行前に知らせる）。判定は <see cref="PlanFacts.StaysCandidateKey"/> を逐次 DDL の方言と共有する。
     /// </para>
     /// <para>
     /// 明示的に削除する外部キー（選んだ外部キーの削除）と、削除する子の表（選んだ表の削除）の外部キーは、同期後に残らないので見ない。
@@ -60,7 +61,7 @@ internal static partial class AssessmentRules
                 !pkChangedTables.TryGetValue(parentTable, out var newPkColumns)
                 || dropped.Tables.Contains(childTable)
                 || explicitlyDropped.Contains(
-                    SyncPlanner.ForeignKeyKey(
+                    PlanIdentity.ForeignKeyKey(
                         childTable,
                         parentTable,
                         fk.ColumnPairs,
@@ -78,7 +79,7 @@ internal static partial class AssessmentRules
                 .ToList();
 
             if (
-                SyncPlanner.StaysCandidateKey(
+                PlanFacts.StaysCandidateKey(
                     newPkColumns,
                     postSyncUniques,
                     parentTable,
@@ -93,7 +94,7 @@ internal static partial class AssessmentRules
                 new SyncPlanWarning(
                     SyncPlanWarningKind.ForeignKeyRebuildMayLoseCandidateKey,
                     childTable,
-                    SyncPlanner.ResolveForeignKeyName(
+                    PlanIdentity.ResolveForeignKeyName(
                         fk.Relationship,
                         childTable,
                         parentTable,
