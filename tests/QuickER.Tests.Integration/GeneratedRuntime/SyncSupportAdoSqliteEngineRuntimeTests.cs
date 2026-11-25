@@ -30,42 +30,21 @@ public sealed class SyncSupportAdoSqliteEngineRuntimeTests(ITestOutputHelper out
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>
-    /// 夜間の既定の種の数（<see cref="SyncModelRuntimeTests.NightlySeedCount"/> の 3 分の 1）。種を並列に流して
-    /// ランナーの CPU を使い切るので、夜間の Integration のジョブ（50 分未満の目安）で同時に流れるほかのテストを遅らせない数にする
-    /// （4 コアのランナーで、広い世界の種と合わせて 1,440 種が 14 分）
+    /// 直結・新しいエンジンの端末（<see cref="SyncModelEngineDevice"/>）で乱数の種を流すときの組。種の決め方は
+    /// <see cref="SyncModelRuntimeTests.Seeds"/>・<see cref="SyncModelRuntimeTests.WideSeeds"/> そのもの（夜間は 1200＋広い世界 240）
     /// </summary>
-    public const int NightlySeedCount = 400;
-
-    /// <summary>夜間の広い世界の種の既定の数（<see cref="SyncModelRuntimeTests.NightlyWideSeedCount"/> の 3 分の 1）</summary>
-    public const int NightlyWideSeedCount = 80;
-
-    /// <summary>
-    /// 乱数の種の決め方。<see cref="SyncModelRuntimeTests.Seeds"/> と環境変数・普段の数・開始番号が同じで、
-    /// 夜間の数だけ <see cref="NightlySeedCount"/>
-    /// </summary>
-    public static SeedSettings Seeds { get; } =
-        SyncModelRandomSuite.WithNightlyCount(SyncModelRuntimeTests.Seeds, NightlySeedCount);
-
-    /// <summary>
-    /// 広い世界の種の決め方。<see cref="SyncModelRuntimeTests.WideSeeds"/> と夜間の数だけが違う
-    /// （<see cref="NightlyWideSeedCount"/>）
-    /// </summary>
-    public static SeedSettings WideSeeds { get; } =
-        SyncModelRandomSuite.WithNightlyCount(
-            SyncModelRuntimeTests.WideSeeds,
-            NightlyWideSeedCount
-        );
-
-    /// <summary>
-    /// 直結・新しいエンジンの端末（<see cref="SyncModelEngineDevice"/>）で乱数の種を流すときの組（夜間の種の数は
-    /// <see cref="Seeds"/>・<see cref="WideSeeds"/>）
-    /// </summary>
+    /// <remarks>
+    /// 種を全部のコアで並列に流すので、流れている間は同じジョブのほかのテストも遅れる。夜間の 3 夜の実測（2026-11-24・25）では
+    /// 400＋広い世界 80 の種で 1.1〜1.7 分で、今の数では約 3 倍（遅いランナーで約 5 分）に伸びる。伸びる分と、その間にほかのテストが
+    /// 遅れる分を足しても、integration-nightly-rest の段は目安の 50 分に十分な余裕を残す
+    /// （<c>tests/QuickER.Tests/TestSupport/CLAUDE.md</c>「夜間の深い実行」）。
+    /// </remarks>
     internal static SyncModelRandomSuite EngineSuite { get; } =
         new(
             "SyncModelEngine",
             SyncModelWorldOptions.Direct,
-            Seeds,
-            WideSeeds,
+            SyncModelRuntimeTests.Seeds,
+            SyncModelRuntimeTests.WideSeeds,
             SyncModelKnownFailures.EngineSet,
             SyncModelDimensions.EngineGaps,
             SyncModelOutcomeDimensions.EngineGaps,
@@ -95,10 +74,10 @@ public sealed class SyncSupportAdoSqliteEngineRuntimeTests(ITestOutputHelper out
     /// 経路は <see cref="EngineSuite"/> と同じなので、守りはそちらが持つ。この組の空振りの守りは、道の守り（1 回で全部と塊が
     /// どちらも 1 回以上）で受ける。
     /// <para>
-    /// 夜間の種の数は普段の数と同じにする（夜間に深くしない）。夜間の Integration のジョブは目安の時間を超えていて、この組の
-    /// 種は並列に流れてランナーを使い切るので、足すとジョブの上限に届きうる。塊の経路の形は、普段の CI で直結の Theory との照合
-    /// （<see cref="SmallChunkScenarios_MatchDirect"/>）が全行を流す。夜間のジョブの実測が目安の内へ戻ったら、夜間の数を
-    /// 普段の 4 倍（広い世界は普段と同じ）へ上げる
+    /// 夜間の種の数は普段の 4 倍（240）、広い世界の種は普段と同じ（48）。この組の種も並列に流れてランナーを使い切るが、夜間の
+    /// 3 夜の実測（2026-11-24・25）で普段と同じ数の種が 0.5 分なので、この数でも約 1.3 分の見込みで、integration-nightly-rest の段
+    /// （同じ 3 夜で 13.1〜21.1 分）は目安の 50 分の内に収まる。塊の経路の形は、普段の CI で直結の Theory との照合
+    /// （<see cref="SmallChunkScenarios_MatchDirect"/>）が全行を流す
     /// </para>
     /// </remarks>
     internal static SyncModelRandomSuite SmallChunkSuite { get; } =
@@ -111,7 +90,7 @@ public sealed class SyncSupportAdoSqliteEngineRuntimeTests(ITestOutputHelper out
             ),
             Seeds = SyncModelRandomSuite.WithNightlyCount(
                 SyncModelRuntimeTests.Seeds,
-                SyncModelRuntimeTests.Seeds.RegularCount
+                SyncModelRuntimeTests.Seeds.RegularCount * 4
             ),
             WideSeeds = SyncModelRandomSuite.WithNightlyCount(
                 SyncModelRuntimeTests.WideSeeds,

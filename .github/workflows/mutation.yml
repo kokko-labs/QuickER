@@ -2,8 +2,9 @@
 #
 # - 毎晩: QuickER.Model を割った 3 本（制約名・表と列・残り）
 # - 週 1 回（土曜）: QuickER.Provider を割った 9 本（同期の計画の 2 本・差分の 3 本・残りの 2 本・型のトークン・型の表記）。
-#   範囲は 1 ジョブが 3 時間未満になる大きさに割る（static の変異を持つ 1 ファイルの 3 本は例外で 4.5 時間未満。理由と止める基準は
-#   tests/QuickER.Tests/TestSupport/CLAUDE.md の「変異テスト（Stryker.NET）」）
+#   範囲は 1 ジョブが 3 時間未満になる大きさに割る（static の変異を持つ 1 ファイルの 3 本は例外で 4.5 時間未満。1 ファイルだけで割れない
+#   model-constraint-names は 3 時間をわずかに超えうる。理由と止める基準は tests/QuickER.Tests/TestSupport/CLAUDE.md の
+#   「変異テスト（Stryker.NET）」）
 #   QuickER.CodeGen.CSharp の 3 部分（診断・クエリ・エスケープ）は休止中（設定は stryker/ に残す。理由と再開の合図は
 #   tests/QuickER.Tests/TestSupport/CLAUDE.md の「変異テスト（Stryker.NET）」）
 # - 範囲・除外・点数で赤にしない設定（thresholds.break 0）・初回のテストの失敗で止める設定は stryker/*.json が持つ。
