@@ -149,38 +149,55 @@ internal static class PhysicalMouseButtons
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern short GetAsyncKeyState(int vKey);
 
-    /// <summary>固定の自己検査の対照を流し直す上限（1 回は 1 秒に満たない。人の手のクリックが 3 回続けて当たることは無い）</summary>
-    public const int ControlAttemptLimit = 3;
+    /// <summary>
+    /// 表に書いた値を確かめる自己検査を流し直す上限（1 回は 1 秒に満たない。人の手のクリック・キー入力が 3 回続けて当たることは無い）
+    /// </summary>
+    public const int TableCheckAttemptLimit = 3;
 
     /// <summary>
-    /// 固定の自己検査の対照（キーの状態の表に押下を書き、固定を外して流すと押下が WPF のコントロールに届くことを見る側）を、
-    /// 途中の本物のクリックで黙って落とさずに流す（流し直しの経過をテストの出力と失敗の記録の時系列へ書く）
+    /// 固定の自己検査のうち、テストがキーの状態の表に書いた値を後で読む部分（<see cref="TableCheck"/>）を、途中の外からの乱れで
+    /// 黙って落とさずに流す（流し直しの経過をテストの出力と失敗の記録の時系列へ書く）
     /// </summary>
+    /// <param name="check">確かめの種類（文言を決める）</param>
     /// <param name="attempt">
-    /// 対照を 1 回流す（毎回、表に押下を書き直してから流し、スコープ・ハーネスを破棄する前に表の押下が残っているかを読む。
-    /// 破棄は作る前の値を書き戻して、消えた跡を隠す）
+    /// 1 回流す（毎回、表に値を書き直してから流し、スコープ・ハーネスを破棄する前か、破棄が書き直さない値なら破棄の後に、
+    /// 書いた値が表に残っているかを読む。破棄は作る前の値を書き戻して、消えた跡を隠す）
     /// </param>
-    /// <returns>結果（<see cref="ControlRun.Problem"/> が null なら合格。null でなければその文で失敗させる）</returns>
+    /// <param name="maxAttempts">流す上限</param>
+    /// <param name="report">流し直しの報告先</param>
+    /// <returns>結果（<see cref="TableCheckRun.Problem"/> が null なら合格。null でなければその文で失敗させる）</returns>
     /// <remarks>
     /// <para>
-    /// Windows は実際のボタンが変わるとスレッドの表を実際の状態へ同期し直すので、対照の途中に本物のクリックが入ると、
-    /// 書いた押下が消えて押下が届かない（自己検査が効いていないように見える）。落ちる原因そのもの（表の押下が消えた）を、
-    /// 流した後の表で見分ける。ほかのアプリの上のクリックは Win32 の報告としてテストの窓に届かず、<c>GetAsyncKeyState</c> を
-    /// 何点かで読むだけでは短いクリックを取りこぼすので、使わない。
+    /// Windows はスレッドの表を実際の状態へ同期し直す（実際のボタンが変わったときは測った。目印のキーが消えたのは、
+    /// 全件の裏で動いていたほかのアプリへのキー入力で同期し直されたものと推定している）。途中で同期し直されると、テストが書いた値が
+    /// 消えて表明が外れる。落ちる原因そのもの（書いた値が消えた）を、流した後の表で見分ける。ほかのアプリの上の入力は Win32 の報告と
+    /// してテストの窓に届かず、<c>GetAsyncKeyState</c> を何点かで読むだけでは短い入力を取りこぼすので、使わない。
     /// </para>
     /// <list type="bullet">
-    ///   <item>届いた → 合格（何回目かを返す）。</item>
-    ///   <item>届かず表が押下のまま → 乱れなしの失敗。流し直さず、すぐに失敗の文を返す（本物の欠陥を隠さない）。</item>
-    ///   <item>届かず表が離れている → 外からの乱れ。名指しして流し直す。<paramref name="maxAttempts"/> 回とも乱れたら、
+    ///   <item>合格 → 何回目かを返す。</item>
+    ///   <item>合格せず、書いた値が表に残っていた → 乱れなしの失敗。流し直さず、すぐに失敗の文を返す（本物の欠陥を隠さない）。</item>
+    ///   <item>合格せず、書いた値が表から消えていた → 外からの乱れ。名指しして流し直す。<paramref name="maxAttempts"/> 回とも乱れたら、
     ///     名指しの失敗の文を返す。</item>
     /// </list>
     /// <para>
-    /// 見分けられない形：流している間に押して離し、終わり際にもう一度押していると、表は押下に見えるので、対照が落ちても
-    /// 乱れなしの失敗になる（偽の赤の側で、本物の欠陥は隠さない）。
+    /// 書いた値が残っていることそのものを確かめる種類（<see cref="TableCheck.MarkerKey"/>）は、呼び出し側が「消えていない」を
+    /// 合格の条件に含めて返す（消えた回は合格にできない）。押下の対照（<see cref="TableCheck.PressedControl"/>）は、押下が届けば
+    /// 表の押下が消えていても合格（届いたなら乱れは結果に響いていない）。
     /// </para>
+    /// <para>見分けられない形（どれも偽の赤の側か、赤が遅れるだけで、本物の欠陥は隠さない）：</para>
+    /// <list type="bullet">
+    ///   <item>押下の対照：流している間に押して離し、終わり際にもう一度押していると、表は押下に見えるので、対照が落ちても
+    ///     乱れなしの失敗になる。</item>
+    ///   <item>目印：固定・戻しが目印まで消す欠陥は、1 回ごとには外からの乱れと同じに見える。流し直した後、上限で名指しの赤になる
+    ///     （上限の文に欠陥の読みも書く）。</item>
+    ///   <item>目印：目印は押下にしか置かないので、固定・戻しがボタンでないキーを押下にする欠陥は見えない。</item>
+    ///   <item>目印：同期し直しが目印に及ばない乱れは乱れに数えない。そのとき左ボタンが乱れたなら、乱れなしの失敗として 1 回で赤になる。
+    ///     破棄の直後に表を読む「元へ戻す」の表明も、戻してから読むまでの間に乱れたときは同じ。</item>
+    /// </list>
     /// </remarks>
-    internal static ControlRun RunPressedTableControl(
-        Func<ControlAttempt> attempt,
+    internal static TableCheckRun RunWrittenTableCheck(
+        TableCheck check,
+        Func<TableCheckAttempt> attempt,
         int maxAttempts,
         Action<string> report
     )
@@ -191,61 +208,117 @@ internal static class PhysicalMouseButtons
         {
             var result = attempt();
 
-            if (result.PressReached)
+            if (result.Passed)
             {
                 return new(true, number, disturbed, null);
             }
 
-            if (result.TableKeptPress)
+            if (result.TableKept)
             {
                 return new(
                     false,
                     number,
                     disturbed,
-                    "表に押下が残っていたのに、固定を外しても押下が WPF のコントロールに届かなかった"
-                        + "（外からの乱れなし＝固定の自己検査が効いていない）"
+                    result.Detail is null
+                        ? check.UndisturbedFailure
+                        : $"{check.UndisturbedFailure}：{result.Detail}"
                 );
             }
 
             disturbed++;
-            report(
-                string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"対照の途中で実際のマウスのボタンの状態が変わり、キーの状態の表に書いた押下が消えた（外からの乱れ）。対照を流し直す（{number} / {maxAttempts} 回目）"
-                )
-            );
+            report(check.Retry(number, maxAttempts));
         }
 
-        return new(
-            false,
-            maxAttempts,
-            disturbed,
-            string.Create(
-                CultureInfo.InvariantCulture,
-                $"対照を {maxAttempts} 回流したが、どの回も途中で実際のマウスのボタンの状態が変わり、表に書いた押下が消えた（外からの乱れ。人が触らない状態で流し直す）"
-            )
-        );
+        return new(false, maxAttempts, disturbed, check.LimitFailure(maxAttempts));
     }
 
-    /// <summary>固定の自己検査の対照の流し直しを、テストの出力と失敗の記録の時系列へ書く（待ちの経過と同じ先）</summary>
-    internal static void ReportControlRetry(string text) => Report(text);
+    /// <summary>表に書いた値を確かめる自己検査の流し直しを、テストの出力と失敗の記録の時系列へ書く（待ちの経過と同じ先）</summary>
+    internal static void ReportTableCheckRetry(string text) => Report(text);
 
-    /// <summary>固定の自己検査の対照を 1 回流した結果</summary>
-    /// <param name="PressReached">表に書いた押下が WPF のコントロールに届いたか（対照が期待どおりか）</param>
-    /// <param name="TableKeptPress">流した後（破棄の前）に、表の左ボタンがまだ押下か</param>
-    internal readonly record struct ControlAttempt(bool PressReached, bool TableKeptPress);
+    /// <summary>表に書いた値を確かめる自己検査を 1 回流した結果</summary>
+    /// <param name="Passed">表明がすべて成り立ったか</param>
+    /// <param name="TableKept">流した後に、テストが書いた値がまだ表に残っていたか</param>
+    /// <param name="Detail">合格しなかったとき、どの表明が外れたか（乱れなしの失敗の文に添える。無ければ null）</param>
+    internal readonly record struct TableCheckAttempt(
+        bool Passed,
+        bool TableKept,
+        string? Detail = null
+    );
 
-    /// <summary>固定の自己検査の対照を流した結果</summary>
-    /// <param name="PressReached">押下が届いたか（合格）</param>
+    /// <summary>表に書いた値を確かめる自己検査を流した結果</summary>
+    /// <param name="Passed">合格したか</param>
     /// <param name="Attempts">流した回数</param>
     /// <param name="Disturbed">外からの乱れで流し直した回数</param>
     /// <param name="Problem">失敗の文（合格なら null）</param>
-    internal readonly record struct ControlRun(
-        bool PressReached,
+    internal readonly record struct TableCheckRun(
+        bool Passed,
         int Attempts,
         int Disturbed,
         string? Problem
     );
+
+    /// <summary>表に書いた値を確かめる自己検査の種類（流し直しの輪の文言）</summary>
+    internal sealed class TableCheck
+    {
+        private readonly string _subject;
+        private readonly string _retry;
+        private readonly string _limit;
+
+        /// <param name="subject">流す部分の呼び名（上限の文の主語）</param>
+        /// <param name="undisturbedFailure">乱れなしの失敗の文</param>
+        /// <param name="retry">流し直しの報告の文（回数は後ろに足す）</param>
+        /// <param name="limit">上限の文の「{呼び名}を {回数} 」に続く部分</param>
+        private TableCheck(string subject, string undisturbedFailure, string retry, string limit)
+        {
+            _subject = subject;
+            UndisturbedFailure = undisturbedFailure;
+            _retry = retry;
+            _limit = limit;
+        }
+
+        /// <summary>
+        /// 固定を外した対照（表に左ボタンの押下を書き、固定を外して流すと押下が WPF のコントロールに届くことを見る。
+        /// 書いた値は表の左ボタンの押下）
+        /// </summary>
+        public static TableCheck PressedControl { get; } =
+            new(
+                "対照",
+                "表に押下が残っていたのに、固定を外しても押下が WPF のコントロールに届かなかった"
+                    + "（外からの乱れなし＝固定の自己検査が効いていない）",
+                "対照の途中で実際のマウスのボタンの状態が変わり、キーの状態の表に書いた押下が消えた（外からの乱れ）。対照を流し直す",
+                "回流したが、どの回も途中で実際のマウスのボタンの状態が変わり、表に書いた押下が消えた（外からの乱れ。人が触らない状態で流し直す）"
+            );
+
+        /// <summary>
+        /// 固定ありの本体の、ボタンでないキーに触らないことの目印（書いた値は表の <see cref="MarkerVirtualKey"/> の押下。
+        /// 固定と戻しは書き直さないので、破棄の後に読む）
+        /// </summary>
+        public static TableCheck MarkerKey { get; } =
+            new(
+                "固定ありの本体",
+                "目印のキーは表に残っていたのに、固定ありの本体の表明が外れた（外からの乱れなし）",
+                "固定ありの本体の途中でキーの状態の表が同期し直され、表に書いた目印のキーが消えた（外からの乱れ）。本体を流し直す",
+                "回流したが、どの回も固定ありの本体の途中で表に書いた目印のキーが消えた"
+                    + "（外からの乱れが続いたか、固定・戻しがボタンでないキーに触っている。人が触らない状態で流し直しても毎回消えるなら後者）"
+            );
+
+        /// <summary>目印に使うキー（VK_F24：ボタンでなく、普通は誰も押さないキー）</summary>
+        public const int MarkerVirtualKey = 0x87;
+
+        /// <summary>乱れなしの失敗の文</summary>
+        public string UndisturbedFailure { get; }
+
+        /// <summary>外からの乱れで流し直すときの報告の文</summary>
+        public string Retry(int number, int maxAttempts) =>
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"{_retry}（{number} / {maxAttempts} 回目）"
+            );
+
+        /// <summary>上限まで乱れ続けたときの失敗の文</summary>
+        public string LimitFailure(int maxAttempts) =>
+            string.Create(CultureInfo.InvariantCulture, $"{_subject}を {maxAttempts} {_limit}");
+    }
 
     /// <summary>待つ上限（0 なら待たない）と、待っている間に経過を書く間隔</summary>
     internal readonly record struct WaitPolicy(TimeSpan Limit, TimeSpan ReportInterval)
