@@ -46,6 +46,9 @@ namespace QuickER.Tests.Docs;
 /// 短い修飾を置いてよい）に書いた (3) の行 Id は、(3) の全体の照合に加えて、その持ち主のテストのソースだけで照合する
 /// （<see cref="FindForeignRowIds"/>）。地図の名前はその守りのソース、クラスの名前はそのクラスを宣言するファイルを含む守りのどれか
 /// （守りに属さなければ宣言するファイル）。
+/// (6) バッククォートの中身の全体が裸の <c>Pascal_Pascal</c> の形（クラスを付けないテストのメソッド名・resx のキーなど）の語は、
+/// src と tests の C# か resx のどこかに識別子として現れることで照合する（<see cref="FindMissingBareNames"/>）。
+/// 全部大文字の語・<c>*</c> を含む語・<c>Class.Method_Name</c> は拾わない（後ろ 2 つは (1)(2) の担当）。
 /// 書式を変えるときはこの契約も更新すること。
 /// </para>
 /// </remarks>
@@ -127,6 +130,14 @@ public class ClaudeMdReferenceTests
     /// <summary>バッククォートで囲んだ語（<see cref="ReferencesIn"/> が読めない語を探す）</summary>
     private static readonly Regex BacktickWord = new("`([^`]+)`", RegexOptions.CultureInvariant);
 
+    /// <summary>
+    /// 裸の <c>Pascal_Pascal</c> の形の語（バッククォートの中身の全体。先頭は大文字＋小文字か数字で、全部大文字の語は含まない）
+    /// </summary>
+    private static readonly Regex BareNameCandidate = new(
+        "`([A-Z][a-z0-9][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+)`",
+        RegexOptions.CultureInvariant
+    );
+
     /// <summary>CLAUDE.md への参照（見出しは任意）</summary>
     private static readonly Regex ClaudeMdLink = new(
         @"`([^`\s]+/CLAUDE\.md)`(?:「([^」]+)」)?",
@@ -202,6 +213,47 @@ public class ClaudeMdReferenceTests
 
     /// <summary>tests/ のソース（1 回だけ読む。src・ワークフローの名指しの規則〔SourceRules.Comments.cs〕も使う）</summary>
     internal static readonly Lazy<TestSources> Sources = new(ReadTestSources);
+
+    /// <summary>
+    /// 裸の名前の照合先（src と tests の C# と resx の本文）。1 回だけ読む
+    /// </summary>
+    /// <remarks>
+    /// 行 Id の照合（<see cref="Sources"/>）と違い、このファイル自身も入れる。CLAUDE.md が裸で書く名前には、このファイルの
+    /// テストのメソッド名（<c>Checker_ReportsFictitiousNamesIdsAndLinks</c> など）があるため。自己検査の架空の名前は
+    /// CLAUDE.md に書かないので、入れても偽の実在にはならない。残る隙は、誰かが自己検査の架空の名前（<c>Real_Meth</c> など）を
+    /// CLAUDE.md に書くと通ってしまうことで、書く動機が無いので許す。
+    /// </remarks>
+    private static readonly Lazy<IReadOnlyList<string>> NameCorpus = new(ReadNameCorpus);
+
+    /// <summary>src と tests の C# と resx の本文を読む</summary>
+    private static IReadOnlyList<string> ReadNameCorpus()
+    {
+        var texts = new List<string>();
+
+        foreach (var folder in new[] { "src", "tests" })
+        {
+            foreach (
+                var path in Directory
+                    .EnumerateFiles(Path.Combine(Root, folder), "*.*", SearchOption.AllDirectories)
+                    .Where(path =>
+                        path.EndsWith(".cs", StringComparison.Ordinal)
+                        || path.EndsWith(".resx", StringComparison.Ordinal)
+                    )
+            )
+            {
+                var relative = Path.GetRelativePath(Root, path).Replace('\\', '/');
+
+                if (relative.Split('/').Any(SkippedDirectories.Contains))
+                {
+                    continue;
+                }
+
+                texts.Add(File.ReadAllText(path));
+            }
+        }
+
+        return texts;
+    }
 
     /// <summary>リポジトリの全 CLAUDE.md（ルートからの相対パス → 本文）</summary>
     private static IReadOnlyDictionary<string, string> ClaudeMdFiles()
@@ -377,6 +429,61 @@ public class ClaudeMdReferenceTests
 
         return [.. missing];
     }
+
+    /// <summary>
+    /// 本文が裸で書いた <c>Pascal_Pascal</c> の形の語のうち、照合先のどれにも識別子として現れないものを返す
+    /// （クラスを付けないテストのメソッド名・resx のキーなど。<see cref="TestName"/> は <c>Class.Method</c> の形しか読まない）
+    /// </summary>
+    /// <param name="text">CLAUDE.md の本文</param>
+    /// <param name="corpus">照合先の本文（src と tests の C# と resx）</param>
+    internal static IReadOnlyList<string> FindMissingBareNames(
+        string text,
+        IEnumerable<string> corpus
+    )
+    {
+        var pending = BareNameCandidate
+            .Matches(text)
+            .Select(match => match.Groups[1].Value)
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var source in corpus)
+        {
+            if (pending.Count == 0)
+            {
+                break;
+            }
+
+            pending.RemoveWhere(name => ContainsIdentifier(source, name));
+        }
+
+        return [.. pending.Order(StringComparer.Ordinal)];
+    }
+
+    /// <summary>本文に識別子として（左右が識別子の文字でなく）現れるか</summary>
+    private static bool ContainsIdentifier(string source, string identifier)
+    {
+        var index = source.IndexOf(identifier, StringComparison.Ordinal);
+
+        while (index >= 0)
+        {
+            var end = index + identifier.Length;
+
+            if (
+                (index == 0 || !IsIdentifierChar(source[index - 1]))
+                && (end >= source.Length || !IsIdentifierChar(source[end]))
+            )
+            {
+                return true;
+            }
+
+            index = source.IndexOf(identifier, index + 1, StringComparison.Ordinal);
+        }
+
+        return false;
+    }
+
+    /// <summary>識別子を構成する文字か</summary>
+    private static bool IsIdentifierChar(char c) => char.IsLetterOrDigit(c) || c == '_';
 
     /// <summary>本文が名指す期待の行・シナリオの Id のうち、tests/ のソースに現れないものを返す</summary>
     /// <param name="text">CLAUDE.md の本文</param>
@@ -816,6 +923,36 @@ public class ClaudeMdReferenceTests
         );
     }
 
+    /// <summary>全 CLAUDE.md が裸で書いた <c>Pascal_Pascal</c> の形の語（メソッド名・resx のキー）が src と tests に実在すること</summary>
+    [Fact(
+        DisplayName = "CLAUDE.md 群が裸で書いた Pascal_Pascal の形の語（メソッド名・resx のキー）は、src と tests の C# か resx に実在する"
+    )]
+    public void BareNames_ExistInSourcesOrResources()
+    {
+        var files = ClaudeMdFiles();
+
+        files
+            .Values.SelectMany(text => BareNameCandidate.Matches(text))
+            .Should()
+            .NotBeEmpty("CLAUDE.md 群が裸の名前を書いていて、拾う形が空振りしていないこと");
+
+        var problems = files
+            .SelectMany(file =>
+                FindMissingBareNames(file.Value, NameCorpus.Value)
+                    .Select(name => $"{file.Key}: {name}")
+            )
+            .ToList();
+
+        problems
+            .Should()
+            .BeEmpty(
+                "CLAUDE.md に裸で書いたメソッド名・resx のキーが src にも tests にも無い（改名・削除に追従するか、名前を直すこと。"
+                    + "テストの行なら、行 Id かクラス名つきの形で書く）:"
+                    + Environment.NewLine
+                    + string.Join(Environment.NewLine, problems)
+            );
+    }
+
     /// <summary>全 CLAUDE.md が名指す CLAUDE.md とその見出しが実在すること</summary>
     [Fact(DisplayName = "CLAUDE.md 群が指す CLAUDE.md のパスと見出しは実在する")]
     public void ClaudeMdLinks_PointToExistingFilesAndHeadings()
@@ -1011,6 +1148,22 @@ public class ClaudeMdReferenceTests
                     + "（「の形の行」「の規則」のような修飾つきの続きも読む・中括弧の省略の組はどれかが持てば合格）、"
                     + "組み立てる Id・続けて書いていない行・修飾に区切りのある続き・ソースを持たない守り・知らないクラス・"
                     + "…ForTests のメンバーは名指ししない"
+            );
+
+        // 裸の Pascal_Pascal の形の語は、照合先の本文に識別子として現れなければ名指しする
+        FindMissingBareNames(
+                "`Real_Method`・`Real_Key`・`Real_Meth`・`Other_Thing`・`No_Such_Name`・`No_Such_Name`・"
+                    + "`QUICKER_REGEN_FIXTURES`・`No_Such_*`・`Foo.No_Such_Method`・`NoSuchWord`・No_Outside_Ticks",
+                [
+                    "public void Real_Method() { }",
+                    "<data name=\"Real_Key\"> XOther_Thing Real_MethodExtra",
+                ]
+            )
+            .Should()
+            .BeEquivalentTo(
+                ["No_Such_Name", "Other_Thing", "Real_Meth"],
+                "実在する語（メソッド名・resx のキー）は通し、左右の識別子の境界を見て、同じ語は 1 回だけ名指しする。"
+                    + "全部大文字の語・* を含む語・Class.Method_Name・アンダースコアの無い語・バッククォートの外の語は拾わない"
             );
     }
 }

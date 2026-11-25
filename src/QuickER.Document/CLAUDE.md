@@ -35,7 +35,7 @@ Id 重複・必須の値の欠落・図に無い表や列を指す参照の検�
   - リレーション・一意制約・クエリの Id のキーの欠落は新しい Guid で読む（図の中で誰も引かないので失うものが無い）。bool・列挙のキーの欠落は従来どおり既定値で吸収する（行 `load-omitted-keys-fall-back-to-defaults`）。
   - 欠落が起きるのは JSON の手編集だけ。0.1.0 以降の版はこれらのキーを必ず書く（初期値が非 null・Id は値型で、`WhenWritingNull` で消えるのはメモリ上が `null` のときだけ。`Guid.NewGuid` は空の Guid を作らない）。モデル側は非 NULL 許容宣言、`GetString()!` の呼び出しは全て `ValueKind == JsonValueKind.String` で守られ、他の経路は NRT ＋ `TreatWarningsAsErrors` がビルドで止める。要素そのものが `null`（`"Columns": [null]`）のときは従来どおり `Compact` が黙って捨てる。
   - 検査しない `Load`（テストのフィクスチャの読み戻し用・src から呼ばない）は、欠落も明示の `null` も空のまま返し、図に無い表・列を指す参照もそのまま返す（同じ設定で読む）。
-  - 表示側は Id 重複と同じ 4 経路（GUI＝`Open_MissingRequiredText`・CLI 2 箇所＝`Cli_SchemaMissingRequiredText`〔生文字列〕・MCP は英語リテラル）。
+  - 表示側は Id 重複と同じ 3 経路（GUI＝`Open_MissingRequiredText`・CLI＝`CliApp.LoadSchemaDiagram` の 1 箇所の `Cli_SchemaMissingRequiredText`〔どちらも resx のキー〕・MCP は英語リテラル）。
 - 図に無い表・列を指す参照も同じ置き場で拒否する（`FindBrokenReference`・`DocumentLoadError.BrokenReference`）。対象はリレーションの両端（`SourceEntityId`・`TargetEntityId`）・列ペアの列（親の列は親の表、子の列は子の表の列でなければならない＝別の表の列も断る）・一意制約の構成列の 3 つ。参照の Guid のキーが無いときは空の Guid（初期化子が無い）で、図に無い Id と同じに扱い、文言だけ「missing」と言い分ける。
   - 普通の操作ではこれらの参照は切れない（表の削除は接するリレーションを、列の削除はその列を使う列ペアを全部空にし、その列を含む一意制約を消す。GUI・MCP・内蔵チャットとも v0.1.0 から。MCP の `set_unique_constraint`・内蔵チャットのツールは列名を表の列へ引き当ててから書き、C# リバース・DBML・Excel 定義書の取込は自分が作った列の Id を使い、列を引けないと制約を捨てるか取込ごと断る）。そのまま開くと GUI がリレーション（`MainViewModel.ReplaceDiagram`）と列ペア（`RelationshipViewModel` の整合処理）を黙って読み飛ばし、上書き保存で消える。一意制約は保持されるが、DDL・生成が警告なしでその制約を出さない。
   - Id の重複より後に検査する（表・列を Id で一意に引ける前提で参照を解く）。

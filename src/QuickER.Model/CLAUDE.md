@@ -156,7 +156,8 @@ PK の順序の正本は `Entity.PrimaryKeyColumnIds`（列 Guid・宣言順）�
 主キーの順序を生成物・DBML へ載せるか、欠落として告知するかの判定は `Entity.GetReorderedPrimaryKeyColumnNames()` だけ。
 
 - MCP・内蔵チャットの `get_diagram_summary` は、主キーの順序が列の宣言順と食い違うときだけ `Primary key order:` 行を出す（判定は同じ関数）。
-- 使う 3 箇所：C# 生成の `[DbTableMeta].PrimaryKeyOrder`（`CSharpGenerationModelBuilder.BuildPrimaryKeyOrderArgument`）・DBML の `[pk]` 索引（`DbmlExporter`）・Mermaid の欠落告知（`MermaidExporter.DetectOmissions`）。
+- 出力に載せるかの判定に使う 3 箇所：C# 生成の `[DbTableMeta].PrimaryKeyOrder`（`CSharpGenerationModelBuilder.BuildPrimaryKeyOrderArgument`）・DBML の `[pk]` 索引（`DbmlExporter`）・Mermaid の欠落告知（`MermaidExporter.DetectOmissions`）。
+- 同じ関数を、上の要約の `Primary key order:` 行を出す 2 ホスト（`ErDiagramDynamicTools`＝内蔵チャット・`DocumentErDiagramToolHost`＝MCP）とモックのスキーマの書き出し（`MockSchemaSerializer`）も呼ぶ。
 - 独自に「主キーが 2 列以上なら出す」などへ変えると、順序を明示していない図・宣言順どおりの図まで生成物と DBML 出力が変わる。今は食い違う図でだけ変わる（全フィクスチャ・サンプルの Entity 宣言部はバイト不変）。
 - リバース側は主キー列とちょうど一致する指定だけを採り、部分的な指定を併合規則で「それらしく」受けない。生成側は常に主キー全列を実効順で書くので、欠けていれば手で壊した印。
 - C# は順序が宣言順と食い違うテーブルにだけ `[DbTableMeta(PrimaryKeyOrder = new[] { … })]` をプロパティ名で出し、リバースが読む（食い違わない図の生成物はバイト不変）。キー列とちょうど一致しない指定（未知の名前・キーでない列・重複・過不足）は採らずに警告して宣言順にする。

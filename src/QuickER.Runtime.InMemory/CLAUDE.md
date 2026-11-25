@@ -5,7 +5,7 @@
 
 ## 直接 CRUD は RowState を触らない
 
-- インメモリ Repository の直接 CRUD（Insert / BulkInsert / Update）は、引数の `RowState` を触らない。他 3 実装（SqlServer / EF Core / HTTP）と同じ契約で、確定させるのはグラフ保存成功後の `SaveAsync` だけ。
+- インメモリ Repository の直接 CRUD（Insert / BulkInsert / Update）は、引数の `RowState` を触らない。他 4 実装（SqlServer / SQLite / EF Core / HTTP）と同じ契約で、確定させるのはグラフ保存成功後の `SaveAsync` だけ。
 - 触ると、Added のまま Insert したエンティティが続く `SaveAsync` で「変更なし」に化ける。実 DB なら主キー重複で失敗するケースが、インメモリだけ黙って通る。
 - `Store.Insert` の版書き戻しは別機構なので無関係。
 - ガード：実装先の一致のシナリオ `direct-crud-leaves-row-state`（5 実装先）。mutation 実証済み。

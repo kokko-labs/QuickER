@@ -1,6 +1,6 @@
 ﻿# QuickER.AI.Chat
 
-チャット機能（ER 設計のプロファイル・ER 設計ツールの定義・チャットのダイアログ・`AiChatFeatureModule`）。
+チャット機能（ER 設計のプロファイル・ツール定義の束ね（正本は Mcp の `ErDiagramToolCatalog`）・チャットのダイアログ・`AiChatFeatureModule`）。
 接続設定・添付・API キー・エンジンの破棄の作法は `src/QuickER.AI.UI/CLAUDE.md`、エンジンの共通の契約は `src/QuickER.AI/CLAUDE.md`「チャットエンジンの共通の契約」を参照する。
 
 ## ダイアログの状態の不変条件

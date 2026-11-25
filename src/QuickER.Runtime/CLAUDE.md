@@ -31,7 +31,7 @@ ADO の 2 方言が共有する `EntitySaveMetadata` の規則もここに置く
 - `src/QuickER.Runtime.Sync/CLAUDE.md`：双方向同期エンジン
 
 ランタイムの正本は `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/*.scriban`（部品 `_00_HeaderAttributes` 〜 `_10_Sync`）で、`src/QuickER.Runtime*/Runtime*.g.cs` はそこから再生成するパッケージ用ソース（手編集禁止）。
-部品とパッケージのフォルダが 1:1 に対応するので、規則は対応するフォルダの CLAUDE.md に書く。
+部品 11 本とパッケージのフォルダは 1:1 ではない（`_07`〜`_10` は 1 本が 1 つのフォルダに対応し、`_00`〜`_06` の規則は Runtime を中心に SqlServer・Sqlite・AspNetCore のフォルダにもまたがる）。規則はそれを持つフォルダの CLAUDE.md に書き、どの部品の規則をどのフォルダが持つかは `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/CLAUDE.md`「部品と読む CLAUDE.md」の表で引く。
 
 ## 生成コードの汎用性
 
@@ -132,8 +132,9 @@ ADO の 2 方言が共有する `EntitySaveMetadata` の規則もここに置く
 - 同一エンティティに rowversion 列が 2 本以上ある図は生成時の診断エラーにする。版の読み書きは全経路が `FirstOrDefault` で「1 型につき 1 本」を前提にしており、SQL Server も 1 テーブル 1 本しか許さない。黙って生成すると「どちらが版か」が暗黙に決まり、DDL 適用で初めて落ちる。判定は `CSharpTypeInfo.IsRowVersion`（`[StoreGeneratedColumn]` の付与条件と同一）で、列型辞書が確定した後に検証する。
 - 主キー列が rowversion の図も同じ検証で生成時エラーにする。DB 採番で INSERT / UPDATE の対象から外れるため、生成 INSERT がキー列を送らず、行の同一性が更新のたびに変わる値に乗り、インメモリ辞書のキーも壊れる。
 - VO 併用時（GenerateValueObjects=true）は版プロパティが VO 型（例 `RowVerValue : ValueObjectBinaryBase`）になるため、リフレクション経由の版の読み書きは全経路で開き直す。
-  - 書き戻しは `SqlValueObjectActivator.Wrap`（ADO の `OUTPUT` 戻り・`RowVersionCollector.Apply`・InMemory の `StampRowVersion`・`RemoteEntityGraph.WriteRowVersion`）。
-  - 読み出しは `SqlParameterValue.Unwrap`（InMemory の版比較・`RemoteEntityGraph.ReadRowVersion`。転送は常に生 byte[]）。
+  - 書き戻しは `SqlValueObjectActivator.Wrap`（ADO の `OUTPUT` 戻り・`RowVersionCollector.Apply`・InMemory の `StampRowVersion`）。
+  - 読み出しは `SqlParameterValue.Unwrap`（InMemory の版比較）。
+  - リモートは版の専用の読み書きを持たず、版を列の値の 1 つとして運ぶ（`RemoteEntityGraph.ReadColumnValues`・`WriteColumnValues`。型は `RemoteJson.Options` で直列化する）。
 - DB 採番列は EditModel の入力必須にしない。rowversion 列は `IsRequired=false` で、Mapper の Entity へのコピーは「入力があるときだけ代入」（未入力は現在値維持）。さもないと新規行の EditModel 保存が `"{列} has no input value."` で必ず失敗する。
 - 既知の制限：他方言に `rowversion` 型が無く対象外／`SqlBulkCopy` は生成値を返せず版未反映／`OUTPUT` 句はトリガーのあるテーブルで使えない（QuickER の DDL はトリガー非生成）／「行なし削除」は ADO 黙認・EF グラフ例外の既存非対称／rowversion 列は `[DbColumnMeta]` トークンなしで C# リバース対象外／生 SQL・バイナリ Stream アクセサは非対象。
 - 実装先ごとの細部：QuickER 版 ADO（SQL Server のみ）は `src/QuickER.Runtime.SqlServer/CLAUDE.md`「行バージョンの OUTPUT と版の回収」、インメモリは `src/QuickER.Runtime.InMemory/CLAUDE.md`「保存単位のステージング」、EF Core は `src/QuickER.Runtime.EntityFrameworkCore/CLAUDE.md`「保存のやり直しと実行戦略」、リモートは `src/QuickER.Runtime.AspNetCore/CLAUDE.md`「保存の応答は列の値を運び位置で突き合わせる」。
@@ -178,7 +179,7 @@ ADO の 2 方言が共有する `EntitySaveMetadata` の規則もここに置く
   - 拡張面：`EntityBase` / `EditModelBase<TSelf>` / VO 基底 7 本 / 非ジェネリックマーカー `IValueObject` / `IRemoteRepository<,>` / `IRepository<,>` / バックエンド実装基底 5 本 / `MapperBase<,>`。
 - 拡張面はスキーマ依存側のバケット（Entity / ValueObject / EditModel / Repository 契約 / 各バックエンド実装 / Mapper）へ、パッケージ参照モードでも必ず出す。コンパイル済みパッケージのクラスへは partial を書けず、`UseRuntimePackages` の切り替えで利用者の拡張コードが書き直しになるため（層の存在理由）。
 - per-型の宣言句は現行名のままにする（`: EntityBase` / `: EditModelBase<X>` / `: ValueObjectStringBase<X>` / `I{E}Repository : IRepository<E, K>` / `{E}Repository : SqlServerRepository<E, K>(…)` / `{E}Mapper : MapperBase<E, M>`）。拡張面を経由して Core へ着地する。
-- `*Core` 型は 1 つも `partial` を名乗らない（11 宣言）。拡張面はシム側だけという線引きを言語レベルで担保する。インラインモードで利用者が Core のインターフェイスへ既定実装を書くと、シム側の既定実装とダイヤモンドになり CS0121 を招く。
+- `*Core` 型は 1 つも `partial` を名乗らない（13 宣言）。拡張面はシム側だけという線引きを言語レベルで担保する。インラインモードで利用者が Core のインターフェイスへ既定実装を書くと、シム側の既定実装とダイヤモンドになり CS0121 を招く。
 - 固定ランタイム内の参照は 1 つ残らず Core 名にする（`is IValueObjectCore` 判定・`EntitySaveMetadata` 等の引数型を含む）。固定コードが生成型を参照すると、パッケージ側から生成側の型を見ることになり成立しない。XmlDoc の cref も同じ理由で生成型を指せない（文言化するか新設ヘルパーへ向ける）。
 - 固定ランタイム内の派生はシムを通らず Core 直付けにする（`HttpSyncServerSource` → `HttpRemoteRepositoryCore`）。ランタイムは生成型を参照できない構造的必然で、ユーザー partial がそこへ届かないのは正しい意味論。
 - 拡張面（`EntityBase`）へ足した読み書きプロパティは列ではない。`[Column]` 許可リスト（列判定）により SQL・`HasSameValues`・列コピーの対象外で、JSON 経路（`ToJson` / `Clone`・リモート転送）にだけ載る。
@@ -341,7 +342,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 
 ## トランザクション失敗経路
 
-- 生成 Repository のトランザクション失敗経路は、catch から共有ヘルパー `SqlTransactions.RollbackQuietlyAsync` だけを呼ぶ（Save 単一 / 複数・SQLite の BulkInsert / blob write・ExecuteDelete の 5 箇所）。コミット後処理（`versions.Apply()` / `AcceptChanges`）は try の外に置く。
+- 生成 Repository のトランザクション失敗経路は、catch から共有ヘルパー `SqlTransactions.RollbackQuietlyAsync` だけを呼ぶ（Save 単一 / 複数・SQLite の BulkInsert / blob write・ExecuteDelete・複数の文を流す `ExecuteSqlBatchAsync` の 6 箇所）。コミット後処理（`versions.Apply()` / `AcceptChanges`）は try の外に置く。
 - ヘルパーは「完了済み（`Connection is null`）なら何もしない・Rollback 自身の例外は握り潰す・常に `CancellationToken.None`」。完了済みトランザクションへの Rollback は `InvalidOperationException` になり、catch から出た例外が伝播中の元の例外を置き換えて、失敗原因が完全に消える（ビルドでも型検査でも出ない）。
 - ガード：`SqlTransactionRollbackTests`（実 SQLite の挙動と生成コードの構造）。
 
@@ -419,7 +420,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 - 重複の事前チェックの NULL の規則は、方言の宣言を QuickER 版 Repository が共有の照合へ渡す。
   - `UniquenessChecker.CheckAsync` の `nullValuesCollide` の多重定義が本体。真なら NULL を含む組も照合する（等値の条件は、値の側の null を `IS NULL` へ補償する翻訳を通るので、同じ構成列に NULL を持つ行が見つかる）。
   - 方言の規則は `RepositoryDialectVariables.UniqueConstraintNullsCollide`（SQL Server＝true・SQLite＝false。テンプレート変数 `dialect_unique_nulls_collide`）で、方言の Repository の `CheckUniquenessAsync` だけが渡す。EF Core とインメモリは引数の無い多重定義（NULL を含む組を外す）のまま（EF Core は SQL Server でも外す＝docs の実装先の違い）。
-  - 外すと、SQL Server の UNIQUE 制約が断る 2 行目の NULL を事前チェックが見落とし、同期の `ExplainServerRefusalAsync` が断られた書き込みの理由を見つけられず、元の例外（2627）を投げ直して毎回止まる（Versioned＋ServerWins だけは送らずに捨てるので止まらない）。EditModel の `ValidateUniqueAsync` も同じ照合を通る。
+  - 外すと、SQL Server の UNIQUE 制約が断る 2 行目の NULL を事前チェックが見落とし、同期の `ExplainRefusalAsync` が断られた書き込みの理由を見つけられず、元の例外（2627）を投げ直して毎回止まる（Versioned＋ServerWins だけは送らずに捨てるので止まらない）。EditModel の `ValidateUniqueAsync` も同じ照合を通る。
 - ガード：`SyncSupportAdoSqlServerFixtureRuntimeTests.NullUniqueValueTakenOnServer_IsReportedOrSettled`・`ServerCheckUniqueness_ComparesNullsAsValues`、`SyncSupportRemoteAdoSqlServerFixtureRuntimeTests.NullUniqueValueTakenOnServer_IsReportedOverHttp`、`UniquenessCheckRuntimeTestsBase` の 3（期待は SQL Server の派生 `UniquenessCheckAdoSqlServerRuntimeTests` が上書きする＝条件スキップでなくサブクラスで分ける）と同じ派生の `ValidateUnique_SecondNull_IsReported`、`UniquenessGenerationTests.CheckUniqueness_PassesDialectNullRule`。図は SyncFixture の `sync_markers`（NULL を許す単一列と 2 列の複合の一意制約）。mutation 実証済み。
 - 重複事前チェックの契約と実装は基底に 1 回だけ置く（宣言はランタイム共通の `IRemoteRepositoryCore<TEntity,TKey>`、実装は 4 つのリポジトリ基底と `HttpRemoteRepositoryCore`）。per-entity に残るのは `UniquenessConstraintSet<TEntity>` と `CollectCustomUniquenessChecks` partial フックへの橋渡しのみ。基底の実行順は「制約テーブル→カスタムフック」。
 
