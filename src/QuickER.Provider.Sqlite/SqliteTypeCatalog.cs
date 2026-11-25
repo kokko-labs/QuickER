@@ -144,7 +144,7 @@ public sealed partial class SqliteTypeCatalog : ITypeCatalog
             case "datetime2":
                 return TryParsePrecisionOnly(arg1, CanonicalTypeKind.DateTime, out canonical);
 
-            // datetime は精度概念を持たない代表日時型として扱う
+            // datetime は精度概念を持たない代表日時型として扱う（smalldatetime も別名表でここへ来る）
             case "datetime":
                 canonical = new CanonicalType(CanonicalTypeKind.DateTime);
                 return true;

@@ -154,6 +154,16 @@ public static class TranslatorParityPredicateRows
             legacyBetweenReadBacks,
             legacyBeforeReadBack,
         };
+        // probes の small_at（smalldatetime）：id 1＝基準の 10:00・id 2＝10:01・id 3＝範囲の最後の値・id 5＝範囲の最初の値・
+        // ほかは NULL。SQL Server は秒を 29.998 秒以下なら切り下げ、29.999 秒以上なら切り上げて分へ丸めるので、列の型で束縛すると
+        // 10:00:30 は 10:01、10:00:29.998 は 10:00 として比べる。範囲の外の値は列の型で束縛すると例外になる
+        var smallBase = TranslatorParityRuntimeTestsBase.SmallAtBase;
+        var smallNextMinute = smallBase.AddMinutes(1);
+        var smallHalfMinute = smallBase.AddSeconds(30);
+        var smallRoundsDown = smallBase.AddSeconds(30).AddMilliseconds(-2);
+        var smallPastLast = TranslatorParityRuntimeTestsBase.SmallAtLast.AddSeconds(30);
+        var smallBeforeFirst = TranslatorParityRuntimeTestsBase.SmallAtFirst.AddSeconds(-1);
+        var smallMixed = new List<DateTime?> { smallNextMinute, smallHalfMinute, smallPastLast };
         // probes の at_offset：id 1＝2024-01-01 05:00+09:00（12/31 20:00Z）・id 2＝2023-12-31 22:00-03:00（1/1 01:00Z）・
         // id 3＝2024-06-30 23:30Z・id 5＝2024-01-01 00:00+09:00（12/31 15:00Z）・ほかは NULL。局所の時刻の順と瞬間の順が逆の組を持つ
         var sameInstantAsFirstUtc = new DateTimeOffset(2023, 12, 31, 20, 0, 0, TimeSpan.Zero);
@@ -556,6 +566,52 @@ public static class TranslatorParityPredicateRows
                 "legacy-in-mixed",
                 "datetime の列の IN は、読み戻した値の要素だけに一致し、読み戻せない要素はどの行にも一致しない",
                 x => legacyMixed.Contains(x.LegacyAt)
+            ),
+            // ---- smalldatetime の列（分ちょうど）と、秒のある値・範囲の外の値 ----
+            Probe(
+                "small-equals-exact",
+                "smalldatetime の列と分ちょうどの値の == はその行に一致する",
+                x => x.SmallAt == smallNextMinute
+            ),
+            Probe(
+                "small-equals-half-minute",
+                "smalldatetime の列と 30 秒のある値の == はどの行にも一致しない（分へ丸めて比べない）",
+                x => x.SmallAt == smallHalfMinute
+            ),
+            Probe(
+                "small-not-equals-half-minute",
+                "smalldatetime の列と 30 秒のある値の != は NULL の行を含む全行に一致する",
+                x => x.SmallAt != smallHalfMinute
+            ),
+            Probe(
+                "small-greater-half-minute",
+                "smalldatetime の列と 30 秒のある値の > は次の分の行を含む（切り上げた分と比べない）",
+                x => x.SmallAt > smallHalfMinute
+            ),
+            Probe(
+                "small-greater-or-equal-rounding-down-seconds",
+                "smalldatetime の列と 29.998 秒の値の >= は基準の分の行を含まない（切り下げた分と比べない）",
+                x => x.SmallAt >= smallRoundsDown
+            ),
+            Probe(
+                "small-less-past-last",
+                "smalldatetime の列と、範囲の最後の値より後ろの値の < は範囲の最後の値の行を含む",
+                x => x.SmallAt < smallPastLast
+            ),
+            Probe(
+                "small-greater-past-last",
+                "smalldatetime の列と、範囲の最後の値より後ろの値の > はどの行にも一致しない",
+                x => x.SmallAt > smallPastLast
+            ),
+            Probe(
+                "small-greater-before-first",
+                "smalldatetime の列と、範囲の最初の値より前の値の > は NULL でない全行に一致する",
+                x => x.SmallAt > smallBeforeFirst
+            ),
+            Probe(
+                "small-in-mixed",
+                "smalldatetime の列の IN は、分ちょうどの要素だけに一致し、秒のある要素・範囲の外の要素はどの行にも一致しない",
+                x => smallMixed.Contains(x.SmallAt)
             ),
             // ---- time の列と 0〜24 時間の外の TimeSpan（SQL Server の time の範囲の外。C# の答えは、等しくなく大小は決まる） ----
             Probe(

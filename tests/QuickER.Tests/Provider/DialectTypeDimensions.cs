@@ -153,6 +153,7 @@ internal static class DialectTypeDimensions
                 "tests/QuickER.Tests/Provider/DialectTypeRunner.cs",
                 "tests/QuickER.Tests/Provider/DialectTypeRows.cs",
                 "tests/QuickER.Tests/Provider/DialectTypeDimensions.cs",
+                "tests/QuickER.Tests/Provider/DialectTypeMultiTarget.cs",
                 "tests/QuickER.Tests/Provider/DialectTypeTableTests.cs",
             ],
             [

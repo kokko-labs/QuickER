@@ -49,6 +49,59 @@ public sealed class DialectTypeTableTests(ITestOutputHelper output)
         report.AssertGaps(DialectTypeDimensions.Gaps, DialectTypeDimensions.Scope, output: output);
     }
 
+    [Fact(
+        DisplayName = "[方言の型] マルチターゲットの方言のマッパーは、どの方言の図の型の名前も同じ C# 型へ写す（受け入れた食い違いは理由つきの一覧のとおり）"
+    )]
+    public void MultiTargetDialects_MapEveryTypeNameToSameCSharpType()
+    {
+        var result = DialectTypeMultiTarget.Run();
+        var problems = new List<string>();
+
+        // 空振りの防止：マルチターゲットの方言が 2 つ以上あり、どの方言の図にも名前がある
+        if (result.NamesByDialect.Count < 2)
+        {
+            problems.Add(
+                $"マルチターゲットの方言が {result.NamesByDialect.Count} 個（2 つ以上のはず）"
+            );
+        }
+
+        problems.AddRange(
+            result
+                .NamesByDialect.Where(pair => pair.Value.Count == 0)
+                .Select(pair => $"{pair.Key} の図の型の名前が 0 個（名前の出どころが空）")
+        );
+        problems.AddRange(
+            result.OtherErrors.Select(error => "型の食い違いでない生成のエラー：" + error)
+        );
+
+        var accepted = DialectTypeMultiTarget
+            .Accepted.Select(item => (item.Name, item.DiagramDialect))
+            .ToHashSet();
+        problems.AddRange(
+            result
+                .Mismatches.Where(item => !accepted.Contains((item.Name, item.DiagramDialect)))
+                .Select(item => $"{item.DiagramDialect} の図の「{item.Name}」：{item.Message}")
+        );
+
+        var observed = result
+            .Mismatches.Select(item => (item.Name, item.DiagramDialect))
+            .ToHashSet();
+        problems.AddRange(
+            DialectTypeMultiTarget
+                .Accepted.Where(item => !observed.Contains((item.Name, item.DiagramDialect)))
+                .Select(item =>
+                    $"受け入れた食い違い（{item.DiagramDialect} の図の「{item.Name}」）が起きない（一覧から外す）"
+                )
+        );
+
+        foreach (var (dialect, names) in result.NamesByDialect)
+        {
+            output.WriteLine($"{dialect} の図：型の名前 {names.Count} 個");
+        }
+
+        problems.Should().BeEmpty(string.Join("\n", problems));
+    }
+
     [Theory(
         DisplayName = "[方言の型] プロバイダは方言の名前・表示名・既定のポート・型の選択肢・部品を結線している"
     )]

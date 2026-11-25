@@ -2552,6 +2552,13 @@ var primary = provider.GetRequiredKeyedService<ICustomerRepository>("primary");
 var local   = provider.GetRequiredKeyedService<ICustomerRepository>("local");
 ```
 
+The shared Entity can only have one type, so each column type must map to the same C# type on both SQL Server and SQLite; when they differ, generation stops with an error that names the column.
+SQLite treats the SQL Server types `smalldatetime`, `smallmoney`, and `image` the same as `datetime`, `money`, and `blob` (SQLite keeps `smalldatetime` values without rounding them to the minute).
+Generation refuses single-precision `real` and `float(1)` to `float(24)` columns in a multi-target build.
+They are `float` on SQL Server, but SQLite's `REAL` is a double-precision `double`.
+Use `float(53)` (`FLOAT` in a SQLite diagram) for a multi-target build.
+SQLite-only type names such as `BLOB`, `BOOLEAN`, `INTEGER`, and `DOUBLE` are refused too, because they aren't SQL Server types.
+
 ### Row version columns in a multi-target build
 
 A `rowversion` column resolves to different C# types per dialect (`byte[]` on SQL Server, a date/time or an unknown type on SQLite), and the shared Entity can only have one.

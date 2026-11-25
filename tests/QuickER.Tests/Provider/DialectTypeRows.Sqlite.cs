@@ -13,6 +13,43 @@ internal static partial class DialectTypeRows
             .. SqliteFormatRows,
             .. SqliteMapRows,
             .. SqliteConvertRows,
+            .. SqliteSameTypeRows,
+        ];
+
+    /// <summary>
+    /// 同じ型の判定の行。型マッパーと型カタログの別名表（smalldatetime → datetime）は型表記の正規化へ漏れない
+    /// （SQLite は宣言の綴りのまま保存するので、綴りの違う宣言への同期は別の型として差分に出る）
+    /// </summary>
+    private static IEnumerable<DialectTypeRow> SqliteSameTypeRows =>
+        [
+            SameType(
+                    "same-type-sqlite-smalldatetime-case-only",
+                    "SMALLDATETIME と smalldatetime は大文字小文字だけの違いで同じ型",
+                    "SMALLDATETIME",
+                    "smalldatetime"
+                )
+                .Expect(DialectNames.Sqlite, "same"),
+            SameType(
+                    "same-type-sqlite-smalldatetime-vs-datetime-differs",
+                    "SMALLDATETIME と datetime は別名表で同じ C# 型でも、宣言の綴りが違うので別の型",
+                    "SMALLDATETIME",
+                    "datetime"
+                )
+                .Expect(DialectNames.Sqlite, "different"),
+            SameType(
+                    "same-type-sqlite-smallmoney-vs-money-differs",
+                    "SMALLMONEY と money は別名表で同じ C# 型でも、宣言の綴りが違うので別の型",
+                    "SMALLMONEY",
+                    "money"
+                )
+                .Expect(DialectNames.Sqlite, "different"),
+            SameType(
+                    "same-type-sqlite-image-vs-blob-differs",
+                    "IMAGE と blob は別名表で同じ C# 型でも、宣言の綴りが違うので別の型",
+                    "IMAGE",
+                    "blob"
+                )
+                .Expect(DialectNames.Sqlite, "different"),
         ];
 
     private static IEnumerable<DialectTypeRow> SqliteCatalogRows =>
@@ -62,6 +99,9 @@ internal static partial class DialectTypeRows
                 ("blob", "BLOB", "Binary"),
                 ("datetime", "DATETIME", "DateTime"),
                 ("timestamp", "TIMESTAMP", "DateTime"),
+                ("smalldatetime", "SMALLDATETIME", "DateTime"),
+                ("smallmoney", "SMALLMONEY", "Money"),
+                ("image", "IMAGE", "Binary len=-1"),
             ];
 
             foreach (var (slug, native, kind) in aliases)
@@ -518,6 +558,46 @@ internal static partial class DialectTypeRows
                 );
             }
 
+            // SQL Server の smalldatetime は別名表で datetime と同じに扱う（マルチターゲットの図は SQL Server の綴りの小文字で来る）
+            foreach (var native in new[] { "SMALLDATETIME", "smalldatetime" })
+            {
+                var slug = native == "smalldatetime" ? "smalldatetime-lower" : "smalldatetime";
+                rows.Add(
+                    Map(
+                            $"map-sqlite-{slug}-datetime",
+                            "SMALLDATETIME は DATETIME と同じく DateTime へ写す（代替の string にしない）",
+                            native
+                        )
+                        .Expect(DialectNames.Sqlite, "ok type=DateTime fallback=0")
+                );
+            }
+
+            // SQL Server の smallmoney・image は別名表で money・blob と同じに扱う（image は SQL Server と同じく無制限バイナリ＝
+            // 無制限バイナリ列の除外の対象が 2 方言でそろう）
+            foreach (var native in new[] { "SMALLMONEY", "smallmoney" })
+            {
+                rows.Add(
+                    Map(
+                            $"map-sqlite-{(native == "smallmoney" ? "smallmoney-lower" : "smallmoney")}-decimal",
+                            "SMALLMONEY は MONEY と同じく decimal へ写す（代替の string にしない）",
+                            native
+                        )
+                        .Expect(DialectNames.Sqlite, "ok type=decimal fallback=0")
+                );
+            }
+
+            foreach (var native in new[] { "IMAGE", "image" })
+            {
+                rows.Add(
+                    Map(
+                            $"map-sqlite-{(native == "image" ? "image-lower" : "image")}-unbounded-byte-array",
+                            "IMAGE は BLOB と同じく無制限バイナリの byte[] へ写す（SQL Server の image と同じ）",
+                            native
+                        )
+                        .Expect(DialectNames.Sqlite, "ok type=byte[] ref=1 unbounded=1 fallback=0")
+                );
+            }
+
             // 先のアフィニティ規則（INT → TEXT 系 → BLOB → REAL）に当たる名前は double にしない（元の表明は否定だけ）
             foreach (var native in new[] { "FLOATINT", "REALCHAR", "DOUBLEBLOB" })
             {
@@ -555,6 +635,9 @@ internal static partial class DialectTypeRows
                 ("decimal(18,2)", "DECIMAL(18,2)"),
                 ("uniqueidentifier", "UNIQUEIDENTIFIER"),
                 ("datetime2", "DATETIME2"),
+                ("smalldatetime", "DATETIME2"),
+                ("smallmoney", "MONEY"),
+                ("image", "VARBINARY(MAX)"),
                 ("datetimeoffset", "DATETIMEOFFSET"),
                 ("varbinary(max)", "VARBINARY(MAX)"),
             ];
@@ -581,6 +664,9 @@ internal static partial class DialectTypeRows
                 ("DECIMAL(18,2)", "decimal(18,2)"),
                 ("UNIQUEIDENTIFIER", "uniqueidentifier"),
                 ("DATETIME2", "datetime2"),
+                ("SMALLDATETIME", "datetime2"),
+                ("SMALLMONEY", "money"),
+                ("IMAGE", "varbinary(max)"),
                 ("VARBINARY(MAX)", "varbinary(max)"),
                 ("TEXT", "nvarchar(max)"),
                 ("BLOB", "varbinary(max)"),
