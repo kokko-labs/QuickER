@@ -134,6 +134,21 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - フィクスチャは `MultiTargetRowVersionFixture.g.cs`（1 テーブル `sync_items`・sqlserver/sqlite）
 - 実 DB 検証：`MultiTargetRowVersionRuntimeTests`（Docker。版ガード維持＋keyed DI での同期最小形）・`MultiTargetRowVersionAdoSqliteRuntimeTests`（CI 常時。ミラー列の読み書き・変換 DDL の BLOB / NULL 許容）
 
+## マルチターゲットの 2 方言の型の一致
+
+- マルチターゲット（QuickER 版 Repository の方言が sqlserver と sqlite）では、図の型の名前が 2 つの方言の型マッパーの両方に通る（SQL Server の図の名前は SQLite のマッパーへ、SQLite の図の名前は SQL Server のマッパーへ）。共有 Entity は 1 つの型なので、C# の型（型名と参照型か）が食い違うと `MultiDialectTypeReconciler.DiagnoseTypeMismatches` が生成時エラー `CodeGen_Error_TypeMismatch` で止める（黙って片方へ寄せない）。
+- どちらかの方言の図に書ける型の名前は、行バージョンの統一（上の節）と両方が代替の string になる組を除き、両方のマッパーで同じ C# 型へ写す。
+  - SQL Server の `smalldatetime`・`smallmoney`・`image` は、SQLite の別名表（`SqliteTypeAlias`）で `datetime`・`money`・`blob` と同じに扱う（SQLite で同じ振る舞い＝`src/QuickER.Provider.Sqlite/CLAUDE.md`「型表記」）。
+  - 受け入れた食い違いは 2 系統で、製品は生成を断ったまま（docs のマルチターゲットの節）。
+    - SQL Server の単精度（`real`・`float(1)`〜`float(24)`）と SQLite の図の `REAL`：SQL Server は float、SQLite は REAL アフィニティの倍精度の double。SQLite のマッパーは SQL Server の real と SQLite の REAL を見分けられず、float へ寄せると SQLite だけの図の倍精度の列を壊す。
+    - SQLite の綴りで SQL Server の型でないもの（`BLOB`・`BOOLEAN`・`INTEGER`・`DOUBLE`・`DOUBLE PRECISION`・`FLOAT8`）：SQL Server のマッパーは代替の string へ倒し、SQL Server の DDL にも出せない。SQL Server のマッパーに足さない。
+- 壊すと：型を足したときに片方のマッパーだけが知っている名前が増え、その型の列を持つ図のマルチターゲットの生成が `CodeGen_Error_TypeMismatch` で断られる（SQL Server の図で `smalldatetime`・`smallmoney`・`image` の列があると断られていた）。
+- ガード：`DialectTypeTableTests.MultiTargetDialects_MapEveryTypeNameToSameCSharpType`（部品は `tests/QuickER.Tests/Provider/DialectTypeMultiTarget.cs`）。
+  - 名前の集合は手で書かず、`CodeGenerationOptions.SupportedRepositoryDialects` の各方言の型カタログの選択肢（`DataTypes`）と、方言の型の表のその方言の型マッパーの行・解析が通る行の入力から作る。
+  - 判定は製品の入口 `DiagramCodeGenerator.Generate` を図の方言ごとに 1 回流し（名前ごとに 1 表）、診断の種類と名指す表・列を resx の書式で取り出す（`DiagnosticMatcher`。診断はコードを持たない）。型の食い違い以外の生成のエラーも赤にする。
+  - 受け入れた食い違いは理由つきの一覧（`DialectTypeMultiTarget.Accepted`）で、一覧にあるのに起きない組も赤にする（陳腐化）。
+  - mutation 実証済み（別名を 1 つずつ外すとその名前を名指しして赤・一覧の名前を 1 つ外すと赤・名前の出どころから解析の行を外すと、その行だけから来る名前の宣言が陳腐化して赤）。
+
 ## FK 列の値オブジェクト型統一
 
 `GenerateValueObjects=true` のとき、リレーションの子側列は親側列の VO 型を共有する（`ship_customer_id` → `CustomerIdValue`＝「同じ識別子は同じ値型」）。利用者向けの規則は `docs/code-generation.md`（.ja）の値オブジェクト節。

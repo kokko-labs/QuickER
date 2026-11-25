@@ -99,7 +99,8 @@ public abstract class TranslatorParityRuntimeTestsBase
                 ansi: "abc",
                 bin: [0x01],
                 binFixed: [0x01],
-                legacyAt: LegacyAtBase
+                legacyAt: LegacyAtBase,
+                smallAt: SmallAtBase
             ),
             Probe(
                 2,
@@ -115,7 +116,8 @@ public abstract class TranslatorParityRuntimeTestsBase
                 ansi: "??",
                 bin: [0x01, 0x00],
                 binFixed: [0x01, 0x00],
-                legacyAt: LegacyAtBase.AddMilliseconds(3)
+                legacyAt: LegacyAtBase.AddMilliseconds(3),
+                smallAt: SmallAtBase.AddMinutes(1)
             ),
             Probe(
                 3,
@@ -127,7 +129,8 @@ public abstract class TranslatorParityRuntimeTestsBase
                 amount: 300m,
                 bin: [0x01, 0x00, 0x00, 0x00],
                 binFixed: [0x01],
-                legacyAt: LegacyAtBase.AddMilliseconds(7)
+                legacyAt: LegacyAtBase.AddMilliseconds(7),
+                smallAt: SmallAtLast
             ),
             Probe(4, "\t", null, null, null, false, ansi: "?", bin: [0xFF]),
             Probe(
@@ -139,7 +142,8 @@ public abstract class TranslatorParityRuntimeTestsBase
                 true,
                 amount: 100m,
                 binFixed: [0x01, 0x00, 0x00, 0x00],
-                legacyAt: new DateTime(2024, 1, 2)
+                legacyAt: new DateTime(2024, 1, 2),
+                smallAt: SmallAtFirst
             ),
             Probe(6, "", "Zc", new DateTime(2024, 1, 15, 0, 0, 0), null, false),
             Probe(7, "Bob\n", null, new DateTime(2025, 1, 15, 8, 0, 0), null, true, amount: 250m),
@@ -165,7 +169,8 @@ public abstract class TranslatorParityRuntimeTestsBase
         string? ansi = null,
         byte[]? bin = null,
         byte[]? binFixed = null,
-        DateTime? legacyAt = null
+        DateTime? legacyAt = null,
+        DateTime? smallAt = null
     ) =>
         new()
         {
@@ -185,10 +190,22 @@ public abstract class TranslatorParityRuntimeTestsBase
             Bin = bin,
             BinFixed = binFixed,
             LegacyAt = legacyAt,
+            SmallAt = smallAt,
         };
 
     /// <summary>datetime の列 legacy_at のシードの基準の値（id 1。id 2・3 はこれに .003・.007 を足した値）</summary>
     internal static readonly DateTime LegacyAtBase = new(2024, 1, 1, 10, 0, 0);
+
+    /// <summary>
+    /// smalldatetime の列 small_at のシードの基準の値（id 1。id 2 はこれに 1 分を足した値。id 3・5 は範囲の最後と最初の値）
+    /// </summary>
+    internal static readonly DateTime SmallAtBase = new(2024, 1, 1, 10, 0, 0);
+
+    /// <summary>smalldatetime の範囲の最後の値（2079-06-06 23:59）</summary>
+    internal static readonly DateTime SmallAtLast = new(2079, 6, 6, 23, 59, 0);
+
+    /// <summary>smalldatetime の範囲の最初の値（1900-01-01 00:00）</summary>
+    internal static readonly DateTime SmallAtFirst = new(1900, 1, 1);
 
     /// <summary>
     /// 実装先の Query() が返す行の集合が、同じ実装先から読み戻した全行へ C# のラムダを当てた結果と一致することを表明する。

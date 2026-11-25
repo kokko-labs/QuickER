@@ -82,6 +82,7 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 
 - **生成した HTTP クライアントの blob のアップロードが、HttpClient の `DefaultRequestVersion` と `DefaultVersionPolicy` に従うようになりました** — これまでは、HttpClient を HTTP/2 に設定しても、`Write{列}Async` と双方向同期の blob のアップロードだけが HTTP/1.1 で送られていました。HTTP/2 を設定していなければ振る舞いは変わりません。
 - **EF Core 版で、SQL Server の `datetime`・`smalldatetime` の列へ QuickER 版と同じ値を保存するようになりました** — 生成 DbContext が列の型を教えるので、`smalldatetime` は 29.999 秒から切り上げ、丸めると範囲の外になる `datetime` の値は断ります（これまでは 23:59:59.997 で保存）。
+- **SQL Server の `smalldatetime`・`smallmoney`・`image` の列を持つ図を、SQLite とのマルチターゲットで生成できるようになりました** — SQLite がこれらを `datetime`・`money`・`blob` と同じに扱います。SQLite の図のこれらの列は、`string` でなく `DateTime`・`decimal`・`byte[]` のプロパティになります。
 - **SQL Server の `datetime`・`smalldatetime` の列の条件が、両方の版で C# と同じ答えになりました** — 列が持てない値を、列の精度へ丸めずに比べます。EF Core 版で手書きの LINQ に直接書いた日時の定数は、例外にならず列の精度へ丸めて比べるようになりました。
 
 ## [0.4.0] - 2026-11-16

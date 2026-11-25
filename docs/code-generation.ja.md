@@ -2665,6 +2665,13 @@ var primary = provider.GetRequiredKeyedService<ICustomerRepository>("primary");
 var local   = provider.GetRequiredKeyedService<ICustomerRepository>("local");
 ```
 
+共有 Entity は 1 つの型しか持てないので、列の型は SQL Server と SQLite の両方で同じ C# 型へ写る必要があり、食い違うと生成は列を名指しするエラーで止まります。
+SQL Server の `smalldatetime`・`smallmoney`・`image` は、SQLite では `datetime`・`money`・`blob` と同じに扱います（SQLite は `smalldatetime` の値を分へ丸めずに持ちます）。
+単精度の `real`・`float(1)`〜`float(24)` の列はマルチターゲットで生成を断ります。
+SQL Server では `float` ですが、SQLite の `REAL` は倍精度の `double` だからです。
+マルチターゲットでは `float(53)`（SQLite の図では `FLOAT`）を使ってください。
+`BLOB`・`BOOLEAN`・`INTEGER`・`DOUBLE` などの SQLite だけの型の名前も、SQL Server の型ではないので断ります。
+
 ### マルチターゲットでの rowversion 列
 
 `rowversion` 列は方言ごとに別の C# 型へ解決されます（SQL Server は `byte[]`、SQLite は日時または未知の型）が、共有 Entity は 1 つの型しか持てません。

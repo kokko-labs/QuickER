@@ -29,6 +29,15 @@ internal static partial class SqliteTypeAlias
             "character" => "char",
             "guid" => "uniqueidentifier",
             "timestamp" => "datetime2",
+            // SQL Server の型の名前で、SQLite で同じ振る舞いの代表名があるもの。写さないと型マッパーが string へ倒し、
+            // sqlserver と sqlite のマルチターゲットの生成が型の食い違いで断られる（DialectTypeTableTests の
+            // MultiTargetDialects_MapEveryTypeNameToSameCSharpType）。
+            // smalldatetime は datetime と同じ NUMERIC アフィニティで、ドライバも同じ文字列で書いて読む（分への丸めは無い）
+            "smalldatetime" => "datetime",
+            // smallmoney は money と同じ NUMERIC アフィニティの数（範囲の検査は無い）
+            "smallmoney" => "money",
+            // image は blob と同じ無制限バイナリ（byte[] で書く値は blob のまま保存される）
+            "image" => "blob",
             var name => name,
         };
 

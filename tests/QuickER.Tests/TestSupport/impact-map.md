@@ -283,7 +283,7 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 ### `Dialect/Types`
 
 - 名前：方言の型の表（解析・書き出しの境界・正規化・マッパー・方言切替・型トークン・型の表記の安全性）
-- テストのソース：`tests/QuickER.Tests/Provider/DialectTypeAdapters.cs`・`tests/QuickER.Tests/Provider/DialectTypeCase.cs`・`tests/QuickER.Tests/Provider/DialectTypeRunner.cs`・`tests/QuickER.Tests/Provider/DialectTypeRows.cs`・`tests/QuickER.Tests/Provider/DialectTypeDimensions.cs`・`tests/QuickER.Tests/Provider/DialectTypeTableTests.cs`
+- テストのソース：`tests/QuickER.Tests/Provider/DialectTypeAdapters.cs`・`tests/QuickER.Tests/Provider/DialectTypeCase.cs`・`tests/QuickER.Tests/Provider/DialectTypeRunner.cs`・`tests/QuickER.Tests/Provider/DialectTypeRows.cs`・`tests/QuickER.Tests/Provider/DialectTypeDimensions.cs`・`tests/QuickER.Tests/Provider/DialectTypeMultiTarget.cs`・`tests/QuickER.Tests/Provider/DialectTypeTableTests.cs`
 - 範囲：`src/QuickER.Provider`・`src/QuickER.Provider.SqlServer`・`src/QuickER.Provider.PostgreSql`・`src/QuickER.Provider.MySql`・`src/QuickER.Provider.Oracle`・`src/QuickER.Provider.Sqlite`
 
 ### `Dialect/Identifiers`

@@ -19,10 +19,10 @@ namespace QuickER.Provider.Sqlite;
 /// <list type="bullet">
 /// <item><description>BIT → bool、TINYINT → byte、SMALLINT → short、INT → int、BIGINT/INTEGER → long（SQLite の INTEGER は 8 バイト格納のため）</description></item>
 /// <item><description>REAL → float、FLOAT/DOUBLE → double</description></item>
-/// <item><description>DECIMAL/NUMERIC/MONEY → decimal（精度・スケールを保持）</description></item>
-/// <item><description>DATE/DATETIME/DATETIME2 → DateTime、TIME → TimeSpan、DATETIMEOFFSET → DateTimeOffset</description></item>
+/// <item><description>DECIMAL/NUMERIC/MONEY/SMALLMONEY → decimal（精度・スケールを保持。SMALLMONEY は別名表で MONEY と同じに扱う）</description></item>
+/// <item><description>DATE/DATETIME/DATETIME2/SMALLDATETIME → DateTime、TIME → TimeSpan、DATETIMEOFFSET → DateTimeOffset（SMALLDATETIME は別名表で DATETIME と同じに扱う）</description></item>
 /// <item><description>UNIQUEIDENTIFIER → Guid</description></item>
-/// <item><description>BINARY/VARBINARY/BLOB → byte[]（参照型）。長さ宣言なし（および (MAX)）は無制限バイナリ、BLOB(n) 等の長さ付きは有界</description></item>
+/// <item><description>BINARY/VARBINARY/BLOB/IMAGE → byte[]（参照型）。長さ宣言なし（および (MAX)）は無制限バイナリ、BLOB(n) 等の長さ付きは有界（IMAGE は別名表で BLOB と同じに扱う）</description></item>
 /// <item><description>CHAR/VARCHAR/NCHAR/NVARCHAR/TEXT/XML/JSON → string（長さ指定があれば MaxLength として保持）</description></item>
 /// <item><description>未知の型 → string（生成失敗を避けるための安全側フォールバック。<c>CSharpTypeInfo.IsFallbackType</c> に true を刻む）</description></item>
 /// </list>

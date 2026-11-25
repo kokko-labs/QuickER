@@ -832,9 +832,34 @@ internal static class DialectTypeRealDbRows
             ),
         ];
 
-    /// <summary>SQLite の EF Core の経路（REAL アフィニティの倍精度・BIT の真偽値）</summary>
+    /// <summary>
+    /// SQLite の EF Core の経路（REAL アフィニティの倍精度・BIT の真偽値と、SQL Server の型の名前の別名＝SMALLDATETIME・
+    /// SMALLMONEY・IMAGE。SMALLDATETIME は DATETIME と同じく文字列で持ち、分へ丸めずに tick まで読み書きする。SMALLMONEY は
+    /// MONEY と同じ数、IMAGE は BLOB と同じバイト列）
+    /// </summary>
     private static IEnumerable<DialectTypeRealDbProbe> SqliteEfCore() =>
         [
+            EfCore(
+                "map-sqlite-smalldatetime-datetime",
+                DialectNames.Sqlite,
+                "'2026-03-10 10:00:40.1234567'",
+                new DateTime(2026, 3, 10, 10, 0, 40).AddTicks(1234567),
+                new DateTime(1899, 12, 31, 23, 59, 30)
+            ),
+            EfCore(
+                "map-sqlite-smallmoney-decimal",
+                DialectNames.Sqlite,
+                "12.3456",
+                12.3456m,
+                -214748.3648m
+            ),
+            EfCore(
+                "map-sqlite-image-unbounded-byte-array",
+                DialectNames.Sqlite,
+                "X'01020003'",
+                new byte[] { 1, 2, 0, 3 },
+                new byte[] { 0xFF, 0x00 }
+            ),
             EfCore(
                 "map-sqlite-real-affinity-real-double",
                 DialectNames.Sqlite,

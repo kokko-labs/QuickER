@@ -152,11 +152,12 @@
   <ItemGroup>
     <!--
       方言の型の表（行・アダプタ・実行部・次元表。実体は QuickER.Tests の Provider）。実 DB の段（Dialects/DialectTypeRealDb*）が
-      同じ行のうち実 DB の印のあるものを流す（行と期待は 1 か所で持つ）。単体の Theory（DialectTypeTableTests）はリンクしない
+      同じ行のうち実 DB の印のあるものを流す（行と期待は 1 か所で持つ）。単体の Theory（DialectTypeTableTests）と、それだけが使う
+      マルチターゲットの型の一致の部品（DialectTypeMultiTarget。生成の診断の照合に QuickER.Tests の DiagnosticMatcher を使う）はリンクしない
     -->
     <Compile
       Include="..\QuickER.Tests\Provider\DialectType*.cs"
-      Exclude="..\QuickER.Tests\Provider\DialectTypeTableTests.cs"
+      Exclude="..\QuickER.Tests\Provider\DialectTypeTableTests.cs;..\QuickER.Tests\Provider\DialectTypeMultiTarget.cs"
       LinkBase="Provider"
     />
   </ItemGroup>
