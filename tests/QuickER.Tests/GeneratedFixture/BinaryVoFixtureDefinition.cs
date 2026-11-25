@@ -27,7 +27,7 @@ namespace QuickER.Tests.GeneratedBinaryVoFixture;
 /// </para>
 /// <para>
 /// オプションは最小（SQLite 方言のQuickER 版 Repository＋EditModel＋Mapper＋VO＋除外）で、
-/// EF Core・インメモリ・リモートは持たない。SQLite ＝ Docker 不要のため実 DB 往復テストが CI で常時実行できる。
+/// インメモリ Repository を併せて生成する（同じ往復をインメモリでも流す）。EF Core・リモートは持たない。SQLite ＝ Docker 不要のため実 DB 往復テストが CI で常時実行できる。
 /// </para>
 /// </remarks>
 public static class BinaryVoFixtureDefinition
@@ -51,6 +51,7 @@ public static class BinaryVoFixtureDefinition
             GenerateMappers = true,
             GenerateRepositories = true,
             GenerateValueObjects = true,
+            GenerateInMemoryRepositories = true,
             RepositoryDialects = ["sqlite"],
             ExcludeUnboundedBinaryColumns = true,
             SplitFilesByCategory = false,

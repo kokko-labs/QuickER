@@ -28,6 +28,12 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <para>
 /// 今わかっている違いは <see cref="Known"/> が名指しし、厳格に扱う（載っているケースが一致したら失敗＝直したら外す）。
 /// </para>
+/// <para>
+/// リモートで流す系統（代替キーの行と同じ保存のほかの行・書く列を持たない表・代替キーの手放しと取り・キーと表名の形〔全機能面を除く〕）は、
+/// サーバーが EF Core 版 Repository のリモートと QuickER 版 Repository（SQL Server）のリモートの両方でも流す。リモートの担当は
+/// この系統の機能（実装先どうしの一致・グラフ保存・Save フック）だけで、CRUD の照合のシナリオの群（<c>RemoteServiceRuntimeTestsBase</c>）は
+/// SQL Server のサーバーで流していない（行列の CrudParity × リモートの空き）。
+/// </para>
 /// </remarks>
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
@@ -38,6 +44,13 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
     RuntimeTarget.Remote,
     Server = RuntimeTarget.EfCoreSqlServer
 )]
+[RuntimeCell(
+    RuntimeFeatures.BackendParity,
+    RuntimeTarget.Remote,
+    Server = RuntimeTarget.AdoSqlServer
+)]
+[RuntimeCell(RuntimeFeatures.GraphSave, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlServer)]
+[RuntimeCell(RuntimeFeatures.SaveHook, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlServer)]
 [RuntimeCell(RuntimeFeatures.SaveHook, RuntimeTarget.AdoSqlServer)]
 [RuntimeCell(RuntimeFeatures.SaveHook, RuntimeTarget.EfCoreSqlServer)]
 [RuntimeCell(RuntimeFeatures.GraphSave, RuntimeTarget.EfCoreSqlServer)]
@@ -407,18 +420,10 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
         var baseline = await RunAsync(name, efCore: false);
         var efCore = await RunAsync(name, efCore: true);
 
-        // 代替キーの行と同じ保存のほかの行の組は、サーバーが EF Core 版 Repository のリモートでも流す
-        var remoteEfCore =
-            AlternateKeyCompanionCase.Find(name) is { } companionCase
-                ? await RunOnRemoteEfCoreAsync(companionCase)
-            : OwnWriteCase.Find(name) is { } ownWriteCase
-                ? await OwnWriteAsync(efCore: true, ownWriteCase, remoteEfCore: true)
-            : HandoffCase.Find(name) is { } handoffCase
-                ? await HandoffAsync(efCore: true, handoffCase, remoteEfCore: true)
-            : SqlServerKeyShapeCase.Find(name)
-                is { Surface: not SqlServerKeyShapeSurface.Full } keyShapeCase
-                ? await KeyShapeAsync(keyShapeCase, KeyShapeHost.RemoteEfCore)
-            : null;
+        // 代替キーの行と同じ保存のほかの行の組・書く列を持たない表・代替キーの手放しと取り・キーと表名の形（全機能面を除く）は、
+        // サーバーが EF Core 版 Repository のリモートと、QuickER 版 Repository のリモートでも流す
+        var remoteEfCore = await RunOnRemoteAsync(name, RemoteServer.EfCore);
+        var remoteAdo = await RunOnRemoteAsync(name, RemoteServer.Ado);
 
         // キーと表名の形のケースは、インメモリ（同じ図の生成物）でも流す
         var inMemory = SqlServerKeyShapeCase.Find(name) is { } inMemoryCase
@@ -430,6 +435,11 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
                 remoteEfCore is null
                     ? ""
                     : $"\nRemote (EF Core server):\n  {string.Join("\n  ", remoteEfCore)}"
+            )
+            + (
+                remoteAdo is null
+                    ? ""
+                    : $"\nRemote (QuickER server):\n  {string.Join("\n  ", remoteAdo)}"
             )
             + (inMemory is null ? "" : $"\nInMemory:\n  {string.Join("\n  ", inMemory)}");
 
@@ -468,6 +478,12 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
             observed.Add(new EngineFailure(name, "remote-efcore-differs", report));
         }
 
+        // サーバーが QuickER 版のリモートは、受け入れた差（EF Core の書く順）を持たないので、いつも基準と同じになる
+        if (remoteAdo is not null && !remoteAdo.SequenceEqual(baseline, StringComparer.Ordinal))
+        {
+            observed.Add(new EngineFailure(name, "remote-ado-differs", report));
+        }
+
         if (inMemory is not null && !inMemory.SequenceEqual(baseline, StringComparer.Ordinal))
         {
             observed.Add(new EngineFailure(name, "inmemory-differs", report));
@@ -476,6 +492,34 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
         KnownSet
             .Classify(observed, scope => scope == name)
             .AssertClean($"[Parity/SqlServer] ケース {name}");
+    }
+
+    /// <summary>
+    /// リモートで流す系統のケースを、サーバーが <paramref name="server"/> の Repository のリモートで流す（リモートで流さないケースは null）
+    /// </summary>
+    private async Task<IReadOnlyList<string>?> RunOnRemoteAsync(string name, RemoteServer server) =>
+        AlternateKeyCompanionCase.Find(name) is { } companionCase
+            ? await RunOnRemoteAsync(companionCase, server)
+        : OwnWriteCase.Find(name) is { } ownWriteCase
+            ? await OwnWriteAsync(efCore: true, ownWriteCase, server)
+        : HandoffCase.Find(name) is { } handoffCase
+            ? await HandoffAsync(efCore: true, handoffCase, server)
+        : SqlServerKeyShapeCase.Find(name)
+            is { Surface: not SqlServerKeyShapeSurface.Full } keyShapeCase
+            ? await KeyShapeAsync(
+                keyShapeCase,
+                server == RemoteServer.EfCore ? KeyShapeHost.RemoteEfCore : KeyShapeHost.RemoteAdo
+            )
+        : null;
+
+    /// <summary>リモートのサーバーが持つ Repository</summary>
+    private enum RemoteServer
+    {
+        /// <summary>EF Core 版 Repository</summary>
+        EfCore,
+
+        /// <summary>QuickER 版 Repository（SQL Server）</summary>
+        Ado,
     }
 
     [Fact(

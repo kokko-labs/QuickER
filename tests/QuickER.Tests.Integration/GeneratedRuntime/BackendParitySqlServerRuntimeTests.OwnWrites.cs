@@ -132,21 +132,21 @@ public sealed partial class BackendParitySqlServerRuntimeTests
             );
     }
 
-    /// <summary>1 つのケースを空のスキーマから流す（<paramref name="remoteEfCore"/> ならサーバーが EF Core 版 Repository のリモート）</summary>
+    /// <summary>1 つのケースを空のスキーマから流す（<paramref name="remote"/> があれば、サーバーがその Repository のリモート）</summary>
     private async Task<IReadOnlyList<string>> OwnWriteAsync(
         bool efCore,
         OwnWriteCase ownWriteCase,
-        bool remoteEfCore = false
+        RemoteServer? remote = null
     )
     {
-        if (remoteEfCore)
+        if (remote is not null)
         {
             await _fixture.ResetSchemaAsync(Ct);
             await _fixture.ApplyDdlAsync(ConcurrencyFixtureDefinition.Build(), Ct);
         }
 
-        await using var host = remoteEfCore
-            ? await CompanionHost.RemoteEfCoreAsync(_fixture.ConnectionString, [])
+        await using var host = remote is { } server
+            ? await CompanionHost.RemoteAsync(server, _fixture.ConnectionString, [])
             : new CompanionHost(Build(efCore, withHooks: false), null);
 
         return ownWriteCase.Shape switch

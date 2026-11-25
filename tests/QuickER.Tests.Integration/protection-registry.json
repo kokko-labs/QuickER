@@ -408,6 +408,24 @@
       ]
     },
     {
+      "name": "NamedQueryRawSql",
+      "title": "名前付きクエリの自由 SQL の戻り形の表（QuickER 版と EF Core 版の SQLite・QuickER 版の SQL Server が同じ行を流す。SQL Server だけの行は生 SQL のバインダの IN の展開の置換の境界）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/NamedQueryRawSqlRows.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/NamedQueryRawSqlRuntimeTestsBase.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/NamedQueryRawSqlAdoSqliteRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/NamedQueryRawSqlEfCoreSqliteRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/NamedQueryRawSqlAdoSqlServerRuntimeTests.cs"
+      ],
+      "covers": [
+        "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_04_RepositoryContractCore.scriban",
+        "src/QuickER.Runtime",
+        "src/QuickER.Runtime.Sqlite",
+        "src/QuickER.Runtime.SqlServer",
+        "src/QuickER.Runtime.EntityFrameworkCore"
+      ]
+    },
+    {
       "name": "SyncTriggerRecording",
       "title": "同期のトリガーの記録の表（ローカルの SQLite のトリガーが、書き込みの道ごとに行の状態の表へ何を残すか）",
       "sourceFiles": [

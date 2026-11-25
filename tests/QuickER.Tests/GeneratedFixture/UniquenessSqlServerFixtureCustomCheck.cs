@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace QuickER.Tests.GeneratedUniquenessSqlServerFixture;
 
 /// <summary>
-/// SQL Server 方言リポジトリ側の重複事前チェック拡張点（<c>CollectCustomUniquenessChecks</c>）の実装。
+/// SQL Server 方言リポジトリ側の重複事前チェック拡張点（<c>CollectCustomUniquenessChecks</c>）と manual クエリの実装。
 /// </summary>
 /// <remarks>
 /// 図の UNIQUE 制約では表せない業務ルールを足す拡張点の見本で、金額が予約値なら違反を返す。
@@ -35,4 +35,14 @@ public sealed partial class OrderRepository
                         : null
                 )
         );
+
+    /// <summary>顧客IDに紐づく注文のうち最初の 1 件を返す（manual クエリ SpecialLookup の実装＝クエリフィクスチャ側と同じ意味論）</summary>
+    public Task<OrderEntity?> SpecialLookupAsync(
+        int customerId,
+        CancellationToken cancellationToken = default
+    ) =>
+        Query()
+            .Where(e => e.CustomerId == CustomerIdValue.Create(customerId))
+            .OrderBy(e => e.OrderId)
+            .FirstOrDefaultAsync(cancellationToken);
 }

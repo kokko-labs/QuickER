@@ -264,7 +264,8 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 
 ## 生 SQL バインダ
 
-- 生 SQL バインダはコレクション値を `@名0,@名1,...` へ IN 展開する。置換の境界は左右両方にする：`(?<![@0-9A-Za-z_])@名(?![0-9A-Za-z_])`。右だけだと `@@ROWCOUNT` のようなシステム変数の末尾まで置換して SQL が壊れる。
+- 生 SQL バインダはコレクション値を `@名0,@名1,...` へ IN 展開する。置換の境界は左右両方にする：`(?<![@0-9A-Za-z_])@名(?![0-9A-Za-z_])`。右だけだと `@@ROWCOUNT` のようなシステム変数の末尾まで置換して SQL が壊れる。左だけだと、名前がその前置きで始まるほかのパラメータ（`@名Min`）を置換して壊れる。
+  - ガード：`table:NamedQueryRawSql`（行 `raw-sql-in-expansion-keeps-prefixed-names-and-system-variables`）。SQL Server の生成物だけが持つクエリ `GetByIdsBoundaryRaw`（`UniquenessSqlServerFixture`・`... IN (@rowcount) AND [order_id] >= @rowcountMin AND @@rowcount >= 0 ...`）を実 SQL Server で流し、左右どちらの境界を外しても SQL Server が SQL を断ってその行だけが赤になる（mutation 実証済み）。
 - テキスト置換なので、文字列リテラル / コメント内の同名も置換される（docs に明記）。
 - 空リストは `(NULL)` 展開で、`IN` は不一致（正）、`NOT IN` は全行 UNKNOWN で「全件除外」になる。空なら SQL を分岐する（docs に明記）。
 - 生成前の静的検証（`RawSqlAnalyzer`）は生成器側の規則。
@@ -401,7 +402,7 @@ NULL の扱いは「C# の意味論と同じ」に揃える。揃える相手は
 - 除外した無制限バイナリ列がある図は、EF Core のリポジトリを生成しない構成でだけ、生成 Mapper の `LoadSavedColumns` が読み戻しの前に Entity の除外列を未取得の値へ戻す（NOT NULL の非 VO＝空配列・NULL 許容＝null・NOT NULL の VO＝`null!`）。外すと、保存した Entity を使い回した次の保存が更新ガードで止まる。
   - EF Core を生成する構成（QuickER 版と併せる構成も）では出さない。EF Core は全列を読み書きするので、戻すと次の保存が空の値で blob を黙って消す（併せる構成で blob を持つ EditModel を QuickER 版で保存すると更新ガードが断る＝docs に明記）。
 - Added のまま削除の印を付けた行（`IsDiscardedNewRow`＝RowState の setter が Added から Removed へ変わったときだけ立てる）は、Entity のグラフに入れない（コレクションは `CreateEntities` の絞り込み・単一の子は `IsLeftOutOfSave`）。入れると、キーが未入力の行は `Required` で例外になり、キーのある行は存在しない行の削除になる。受け入れはその行をコレクションから外す（挿入し直さない。単一の子はナビゲーションに残る）。
-- ガード：`EditModelSaveRuntimeTestsBase`（ConcurrencyFixture・7 シナリオ × インメモリ・リモート・SQL Server・EF Core の派生）、`BinaryColumnEditModelAdoSqliteRuntimeTests.AcceptSaved_NewRowWithBlobs_NextSaveKeepsStoredBlobs`、`BinaryColumnEfCoreSqliteRuntimeTests.AcceptSaved_ThenSaveAgain_KeepsStoredBlobs`、`CodegenCaseTests` の行 `exec-accept-saved-excluded-binary-override-*`（QuickER 版だけ・インメモリだけでは出て、EF Core だけ・QuickER 版と併せる構成では出ない）、`CrudParityInMemoryRuntimeTests.EditModel_SingleChildAddedThenMarkedRemoved_IsLeftOutOfTheSave`。mutation 実証済み。
+- ガード：`EditModelSaveRuntimeTestsBase`（ConcurrencyFixture・7 シナリオ × インメモリ・リモート・SQL Server・EF Core の派生）、`BinaryColumnEditModelRuntimeTestsBase.AcceptSaved_NewRowWithBlobs_NextSaveKeepsStoredBlobs`（QuickER 版 SQLite とインメモリの派生）、`BinaryColumnEfCoreSqliteRuntimeTests.AcceptSaved_ThenSaveAgain_KeepsStoredBlobs`、`CodegenCaseTests` の行 `exec-accept-saved-excluded-binary-override-*`（QuickER 版だけ・インメモリだけでは出て、EF Core だけ・QuickER 版と併せる構成では出ない）、`CrudParityInMemoryRuntimeTests.EditModel_SingleChildAddedThenMarkedRemoved_IsLeftOutOfTheSave`。mutation 実証済み。
 
 ### Save フックが無制限バイナリ列を書いたとき
 

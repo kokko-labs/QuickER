@@ -32,7 +32,7 @@
   - 空き（`Gap`）：まだ検証していない。直す区切りの名前が必須（決まっていなければ `RuntimeMatrixRows.Trigger`＝きっかけ待ち）。
   - 割り切り（`Accepted`）：意図して検証しない。根拠（`リポジトリの相対パス「見出し」`）が必須で、docs か CLAUDE.md の見出しの実在を照合する。根拠の無い「代表させている」は空きにする。
   - 非該当（`NotApplicable`）：その組み合わせが原理的に成り立たない。
-  - リモートの担当のうち、まだ流していないサーバーは `MissingServers`（理由・区切り）に書く（今は 0 件）。担当のサーバーに現れたら赤になるので消す。
+  - リモートの担当のうち、まだ流していないサーバーは `MissingServers`（理由・区切り）に書く（今は 1 件＝CrudParity の QuickER 版 SQL Server。CRUD の照合のシナリオの群は RemoteServiceFixture〔SQLite 方言だけ〕に固定のため）。担当のサーバーに現れたら赤になるので消す。
 - 照合（`RuntimeTestMatrixTests`）：
   - どの機能 × どの実装先も、担当か宣言のちょうど一方（両方なら「埋まったので宣言を消す」、どちらも無ければ「担当も宣言も無い」で名指し）。実装先を足すと全機能のその列が赤になる。
   - 走査の規約（`RuntimeMatrix` の remarks・このフォルダの名前空間の全部と、`QuickER.Tests.Generated…` の `*RuntimeTests`）に合うクラスは、どれも属性を持つかエンジンの登録にある。担当の機能は行の表にある。リモートのサーバーの名乗り方。
@@ -139,7 +139,7 @@
 - `alternate-key-taken-from-deleted-twice-{作り方}`：DbContext のファクトリの作り方（接続文字列で構成した文脈を使い回す＝プールの形／実行時に付けた接続／オプションで渡した接続＝対照）で、2 つめの文脈の保存を 2 回続け、その間に読む。値オブジェクトありの生成コードは EF Core の本物のプールを断るので、破棄を飛ばして同じインスタンスを貸し出し直す派生（`ReusedDbContext`）でプールの観測できる振る舞いを作る。
 - `alternate-key-swap-{扱い}`・`alternate-key-new-takes-released-{順}`・`alternate-key-gone-insert-takes-released-{順}`・`alternate-key-part-moved-off-released-{順}`・`alternate-key-gone-part-then-taker-first`（`HandoffCase`）：2 行の code の入れ替え（docs のとおりどの実装先も最初の更新で断る）と、更新する行が手放す code を挿入する行（新しい行・insertWhenUpdateMissing の挿入）が取る形と、手放す code を参照する部品を別の kit へ付け替える形を、渡す順（releaser-first／taker-first。付け替えの取る行は部品を持たせる kit）で流し、他者が消した部品の後ろでどの実装先でも断られる取りの順を 1 つ流す。リモートの EF Core のサーバーでも流す。new-takes-released と gone-insert-takes-released の taker-first は受け入れた差（G3-B）、part-moved-off-released の taker-first は H2-D1、gone-part-then-taker-first は H2-D2 で、基準の値を `ExpectedLines`、EF Core とリモートの値を `ExpectedEfCoreLines` で固定し、既知の違いの一覧 `Known` に docs を出典にした Accepted として載せる（載っていて一致すれば赤）。
 - `key-shape-{guidkey|binary|dotted}[-full|-cascade]`・`key-shape-binary-short-key-full`（`SqlServerKeyShapeCase`）：ConcurrencyFixture の親子 3 組（GuidKey の `vouchers`・`binary(4)` の `badges`・既定のスキーマで修飾した `dbo.zones`）へ実装先どうしの一致の `key-shape-*` と同じ手を流し、QuickER 版・EF Core 版・インメモリ（リモート面と cascade はリモートの EF Core のサーバーも）を比べる（失敗の署名 `differs`・`remote-efcore-differs`・`inmemory-differs`）。短い binary のキーは SQL Server が 0x00 で詰める（docs のインメモリの節「実 DB との既知の乖離」）ので、インメモリとの差を `Known` に Accepted で載せる。
-- `alternate-key-{形}-with-*`・`own-write-*`・`HandoffCase` の行・`key-shape-*`（`-full` を除く）は、サーバーが EF Core 版 Repository のリモート（ConcurrencyFixture の RemoteServer）でも流し、QuickER 版と比べる（`alternate-key-taken-from-deleted-twice-*` はリモートで流さない）（失敗の署名 `remote-efcore-differs`）。リモートでサーバーの DB が断った保存は `RemoteRepositoryException`（500）で届くので、`OutcomeAsync` が `throws store-rejected` にまとめる（`ParityFormat` と同じ扱い）。
+- `alternate-key-{形}-with-*`・`own-write-*`・`HandoffCase` の行・`key-shape-*`（`-full` を除く）は、サーバーが EF Core 版 Repository のリモートと QuickER 版 Repository（SQL Server）のリモート（どちらも ConcurrencyFixture の RemoteServer）でも流し、QuickER 版と比べる（`alternate-key-taken-from-deleted-twice-*` はリモートで流さない）（失敗の署名 `remote-efcore-differs`・`remote-ado-differs`）。QuickER 版のサーバーは受け入れた差（G3-B・H2-D1・H2-D2）を持たないので、いつも基準と同じになる（サーバーを EF Core 版へ取り違えると、この 4 ケースが `remote-ado-differs` で赤になる＝mutation 実証済み）。行列では、この系統の機能（実装先どうしの一致・グラフ保存・Save フック）のリモートのサーバー QuickER 版 SQL Server の担当になる（CRUD の照合のシナリオの群とは別物なので CrudParity は名乗らない）。リモートでサーバーの DB が断った保存は `RemoteRepositoryException`（500）で届くので、`OutcomeAsync` が `throws store-rejected` にまとめる（`ParityFormat` と同じ扱い）。
 
 ### SQL Server の系統の乱数の保存
 

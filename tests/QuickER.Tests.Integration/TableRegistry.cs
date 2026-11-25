@@ -39,6 +39,24 @@ internal static class TableRegistry
             ]
         ),
         new(
+            "NamedQueryRawSql",
+            "名前付きクエリの自由 SQL の戻り形の表（QuickER 版と EF Core 版の SQLite・QuickER 版の SQL Server が同じ行を流す。SQL Server だけの行は生 SQL のバインダの IN の展開の置換の境界）",
+            [
+                Runtime + "NamedQueryRawSqlRows.cs",
+                Runtime + "NamedQueryRawSqlRuntimeTestsBase.cs",
+                Runtime + "NamedQueryRawSqlAdoSqliteRuntimeTests.cs",
+                Runtime + "NamedQueryRawSqlEfCoreSqliteRuntimeTests.cs",
+                Runtime + "NamedQueryRawSqlAdoSqlServerRuntimeTests.cs",
+            ],
+            [
+                "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_04_RepositoryContractCore.scriban",
+                "src/QuickER.Runtime",
+                "src/QuickER.Runtime.Sqlite",
+                "src/QuickER.Runtime.SqlServer",
+                "src/QuickER.Runtime.EntityFrameworkCore",
+            ]
+        ),
+        new(
             "SyncTriggerRecording",
             "同期のトリガーの記録の表（ローカルの SQLite のトリガーが、書き込みの道ごとに行の状態の表へ何を残すか）",
             [

@@ -1,7 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using AwesomeAssertions;
 using QuickER.Tests.GeneratedQueryFixture;
 using QuickER.Tests.Integration;
 
@@ -19,12 +19,15 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 条件スキップではなく<b>この階層に置かないこと</b>で対象外にする（スキップ 0 の原則）。
 /// </para>
 /// <para>
-/// 検証する戻り形は一覧（IN のリスト展開・空リスト）・単一・件数・スカラー集計・射影（列別名の DTO マップ）。
-/// EF Core 側は同じ意味論の partial 実装（<c>QueryFixtureManualImplementations</c>）が担うため、
-/// 両派生が同じアサーションで緑になること自体が「実装先が違っても意味論が揃う」ことの証明になる。
+/// 戻り形ごとの表明は行の表 <see cref="NamedQueryRawSqlRows"/> が持ち、この基底はクエリフィクスチャの型のアダプタ
+/// （<see cref="INamedQueryRawSqlBackend"/>）として表を流す。SQL Server の QuickER 版
+/// （<see cref="NamedQueryRawSqlAdoSqlServerRuntimeTests"/>）も同じ表を流す。
 /// </para>
 /// </remarks>
-public abstract class NamedQueryRawSqlRuntimeTestsBase : NamedQueryRuntimeTestsBase, IDisposable
+public abstract class NamedQueryRawSqlRuntimeTestsBase
+    : NamedQueryRuntimeTestsBase,
+        INamedQueryRawSqlBackend,
+        IDisposable
 {
     /// <summary>各テストが読み書きする一時ファイル DB</summary>
     private readonly SqliteTempDatabase _db = SqliteTempDatabase.Create();
@@ -41,76 +44,41 @@ public abstract class NamedQueryRawSqlRuntimeTestsBase : NamedQueryRuntimeTestsB
         await SeedAsync();
     }
 
-    /// <summary>7. 自由 SQL のスカラー集計（SumAmounts）が合計を返す（該当なしは null）</summary>
-    [Fact(DisplayName = "[NamedQuery] 7: 自由 SQL スカラー（SUM）が合計を返す")]
-    public async Task SqlScalar_ReturnsSum()
-    {
-        await ResetAndSeedAsync();
-        var orders = CreateOrderRepository();
+    /// <summary>自由 SQL の戻り形の表の 1 行（SQLite の派生には SQL Server だけの行を流さない）</summary>
+    /// <param name="id">行の Id</param>
+    [Theory(DisplayName = "[NamedQuery] 自由 SQL の戻り形の表の行が成り立つ")]
+    [MemberData(nameof(NamedQueryRawSqlRows.SqliteIds), MemberType = typeof(NamedQueryRawSqlRows))]
+    public Task RawSqlRow_Holds(string id) => NamedQueryRawSqlRows.RunAsync(id, this);
 
-        (await orders.SumAmountsAsync(1, Ct)).Should().Be(225m);
-        (await orders.SumAmountsAsync(999, Ct)).Should().BeNull();
-    }
+    Task INamedQueryRawSqlBackend.ResetAndSeedAsync() => ResetAndSeedAsync();
 
-    /// <summary>8. 自由 SQL の IN リスト展開（GetByIdsRaw）が正しい行を返し、空リストは空を返す</summary>
-    [Fact(DisplayName = "[NamedQuery] 8: 自由 SQL の IN リスト展開が機能する（空リスト含む）")]
-    public async Task SqlList_WithCollectionParameter_ExpandsIn()
-    {
-        await ResetAndSeedAsync();
-        var orders = CreateOrderRepository();
+    Task<decimal?> INamedQueryRawSqlBackend.SumAmountsAsync(int customerId) =>
+        CreateOrderRepository().SumAmountsAsync(customerId, Ct);
 
-        var found = await orders.GetByIdsRawAsync([12, 10], Ct);
-        found.Select(o => o.OrderId.Value).Should().Equal(10, 12);
+    async Task<IReadOnlyList<int>> INamedQueryRawSqlBackend.GetByIdsRawAsync(
+        IReadOnlyList<int> ids
+    ) =>
+        (await CreateOrderRepository().GetByIdsRawAsync(ids, Ct))
+            .Select(order => order.OrderId.Value)
+            .ToList();
 
-        // 空リストは IN (NULL) へ展開され、どの行にも一致しない
-        (await orders.GetByIdsRawAsync([], Ct))
-            .Should()
-            .BeEmpty();
-    }
+    async Task<NamedQueryRawSqlOrderRow?> INamedQueryRawSqlBackend.FindTopRawAsync() =>
+        await CreateOrderRepository().FindTopRawAsync(Ct) is { } order
+            ? new NamedQueryRawSqlOrderRow(order.OrderId.Value, order.Memo?.Value)
+            : null;
 
-    /// <summary>12. 自由 SQL の単一戻り形（FindTopRaw）が 1 件を返す（行なしは null）</summary>
-    [Fact(DisplayName = "[NamedQuery] 12: 自由 SQL の単一戻り形が 1 件（行なしは null）を返す")]
-    public async Task SqlSingle_ReturnsFirstRowOrNull()
-    {
-        await ResetAndSeedAsync();
-        var orders = CreateOrderRepository();
+    Task<int> INamedQueryRawSqlBackend.CountByCustomerRawAsync(int customerId) =>
+        CreateOrderRepository().CountByCustomerRawAsync(customerId, Ct);
 
-        var top = await orders.FindTopRawAsync(Ct);
-        top.Should().NotBeNull();
-        top!.OrderId.Value.Should().Be(13);
-        top.Memo.Should().BeNull("注文 13 のメモは NULL（VO 復元込みの行マップを確認）");
+    async Task<
+        IReadOnlyList<NamedQueryRawSqlOrderRow>
+    > INamedQueryRawSqlBackend.GetMemoRowsRawAsync(int customerId) =>
+        (await CreateOrderRepository().GetMemoRowsRawAsync(customerId, Ct))
+            .Select(row => new NamedQueryRawSqlOrderRow(row.OrderId, row.Memo))
+            .ToList();
 
-        // 全行削除後は null
-        await orders.ExecuteSqlAsync("DELETE FROM \"orders\"", null, Ct);
-        (await orders.FindTopRawAsync(Ct)).Should().BeNull();
-    }
-
-    /// <summary>13. 自由 SQL の件数戻り形（CountByCustomerRaw）が条件一致数を返す</summary>
-    [Fact(DisplayName = "[NamedQuery] 13: 自由 SQL の件数戻り形が条件一致数を返す")]
-    public async Task SqlCount_ReturnsMatchingCount()
-    {
-        await ResetAndSeedAsync();
-        var orders = CreateOrderRepository();
-
-        (await orders.CountByCustomerRawAsync(1, Ct)).Should().Be(3);
-        (await orders.CountByCustomerRawAsync(2, Ct)).Should().Be(1);
-        (await orders.CountByCustomerRawAsync(999, Ct)).Should().Be(0);
-    }
-
-    /// <summary>14. 自由 SQL の射影戻り形（GetMemoRowsRaw）が列別名で DTO へマップされる（NULL 列含む）</summary>
-    [Fact(DisplayName = "[NamedQuery] 14: 自由 SQL の射影戻り形が DTO 一覧を返す（NULL 列含む）")]
-    public async Task SqlProjection_ReturnsDtoRows()
-    {
-        await ResetAndSeedAsync();
-        var orders = CreateOrderRepository();
-
-        // 顧客 1 の注文（10, 11, 13 の昇順）。13 のメモは NULL＝DTO の null 許容プロパティで受ける
-        var rows = await orders.GetMemoRowsRawAsync(1, Ct);
-        rows.Select(r => r.OrderId).Should().Equal(10, 11, 13);
-        rows.Select(r => r.Memo).Should().Equal("apple pie", "banana", null);
-
-        (await orders.GetMemoRowsRawAsync(999, Ct)).Should().BeEmpty();
-    }
+    Task INamedQueryRawSqlBackend.DeleteAllOrdersAsync() =>
+        CreateOrderRepository().ExecuteSqlAsync("DELETE FROM \"orders\"", null, Ct);
 
     /// <summary>使い終えた一時 DB を破棄する（派生の DI コンテナ破棄は派生側で行う）</summary>
     public virtual void Dispose()
