@@ -39,7 +39,7 @@
 ### ガード
 
 - `SourceRuleTests` の規則 `schema-name-comparisons`：`src/` の素の比較・変換を構文木で全数拾い、理由つきの既知の一覧と件数まで厳密に一致させる。拾う単位は文で、何かは文のトークンを空白なしで連結した先頭 90 字（一覧はファイル・先頭 90 字・件数）。未移行の置き場は持たない（新しい出現は直すか、理由つきの例外として一覧に載せる）。比較の指定は修飾を除いた右端の 2 つの名前で見る（`System.StringComparison.Ordinal`・`global::System.StringComparer.Ordinal` の綴りでも拾う）。
-- `SourceRuleTests` の規則 `sync-name-comparison-tokens`：同期の差分と計画の 6 ファイル（`SchemaDiffService` / `SyncPlanner` / `NameMatching` / `UniqueConstraintNaming` / `Sync/State/SchemaIds` / `Sync/State/LiveSchema`）に、`Trim` 系・`ToLower` / `ToUpper` 系・大小を無視する比較の指定が識別子として現れないこと。比較器をフィールドに入れて使う形や、引数名がモデルの名前でないキーの関数は本体のガードが拾えないための補助。Ordinal は綴りの判定とキーどうしの比較にだけ使ってよい。
+- `SourceRuleTests` の規則 `sync-name-comparison-tokens`：同期の差分と計画（`SchemaDiffService` / `SyncPlanner` / `SyncPlanContext` / `NameMatching` / `UniqueConstraintNaming` と `src/QuickER.Provider/Sync/` のフォルダの全体）に、`Trim` 系・`ToLower` / `ToUpper` 系・大小を無視する比較の指定が識別子として現れないこと。比較器をフィールドに入れて使う形や、引数名がモデルの名前でないキーの関数は本体のガードが拾えないための補助。Ordinal は綴りの判定とキーどうしの比較にだけ使ってよい。
 - `SchemaNamesKeyTests`：Unicode の全スカラー値で `Key` の一致が `AreSame` と同じ。前後の空白の扱い・対になっていないサロゲートも固定する。
 - mutation 実証済み。
 
@@ -169,7 +169,7 @@ PK の順序の正本は `Entity.PrimaryKeyColumnIds`（列 Guid・宣言順）�
 
 - 列が NULL を持てるかは `ColumnNullability.AllowsNull`（NULL 許容の印があり、主キーの列でない）。主キーの列は図の `IsNullable` に依らず NULL を持てない（DB の主キーの制約。DDL も NOT NULL で作る）
 - `Column` は JSON で保存する POCO なので、プロパティにせず静的な判定にする（読み取り専用のプロパティも書き出しの対象になり、図のファイルの形が変わる）
-- 使う側：Provider の DDL（`DdlGeneratorBase`・SQLite の DDL）・同期スクリプト（`SyncScriptBuilderHelper`・MySQL / Oracle / PostgreSQL）・差分（`SchemaDiffService`）・同期計画（`SyncPlanner`）・計算列の注記（`ComputedColumnComment`）・GUI の列の読込（`ColumnViewModel`）・C# 生成の入口（`src/QuickER.CodeGen.CSharp/CLAUDE.md`「主キーの列の NULL 許容」）。DDL と差分が別々の写しを持つと、1 か所だけ規則が変わって適用した直後に偽の差分が出る
+- 使う側：Provider の DDL（`DdlGeneratorBase`・SQLite の DDL）・同期スクリプト（`SyncScriptBuilderHelper`・MySQL / Oracle / PostgreSQL）・差分（`SchemaDiffService`）・同期計画（`src/QuickER.Provider/Sync/`）・計算列の注記（`ComputedColumnComment`）・GUI の列の読込（`ColumnViewModel`）・C# 生成の入口（`src/QuickER.CodeGen.CSharp/CLAUDE.md`「主キーの列の NULL 許容」）。DDL と差分が別々の写しを持つと、1 か所だけ規則が変わって適用した直後に偽の差分が出る
 - 写さない：`ColumnNullability` の外で、同じ列の `IsPrimaryKey` と `IsNullable` を 1 つの式で組まない（NOT NULL が欲しい箇所は `!AllowsNull`、三項は NULL 許容の分岐を先に書く）。否定の別名は持たない
 - 例外は、主キーを NULL 許容と別の理由で外す「主キーでない NOT NULL の列」の判定の 3 か所だけ（主キーでない列では印がそのまま実効値で、`AllowsNull` だけでは値が決まらない）
   - `IdentityColumnComment`：主キーの採番列は生成コードの INSERT が送るので、外れるのは主キーでない採番列だけ

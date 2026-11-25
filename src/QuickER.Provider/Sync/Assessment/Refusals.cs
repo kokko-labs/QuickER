@@ -16,9 +16,9 @@ namespace QuickER.Provider.Sync.Assessment;
 /// から読む。どちらの判定も文の並び・状態・事実を書き換えない。
 /// </para>
 /// <para>
-/// 制約 1 つと事実で決まる述語は、選択と評価の規則と共有する（<see cref="SyncPlanner.CanSupportForeignKey"/>・
-/// <see cref="SyncPlanner.HasPostSyncTypeMismatch"/>・<see cref="SyncPlanner.UsesSetNull"/>・<see cref="SyncPlanner.ColumnTypeOf"/>・
-/// <see cref="SyncPlanner.HoldsInLiveRows"/>）。
+/// 制約 1 つと事実で決まる述語は、選択と評価の規則と共有する（<see cref="PlanFacts.CanSupportForeignKey"/>・
+/// <see cref="PlanFacts.HasPostSyncTypeMismatch"/>・<see cref="PlanFacts.UsesSetNull"/>・<see cref="PlanFacts.ColumnTypeOf"/>・
+/// <see cref="PlanFacts.HoldsInLiveRows"/>）。
 /// </para>
 /// </remarks>
 internal static class Refusals
@@ -38,7 +38,7 @@ internal static class Refusals
     /// <list type="number">
     /// <item>
     /// キーの削除（一意制約を外す文・主キーを外す文）：残す外部キーのうち、その表を親に持ち、支えうるキー（DB の今の主キーと一意制約の
-    /// うち <see cref="SyncPlanner.CanSupportForeignKey"/> が真のもの）にこの文のキーが入り、支えうるキーが文の並びで全部外れるもの。
+    /// うち <see cref="PlanFacts.CanSupportForeignKey"/> が真のもの）にこの文のキーが入り、支えうるキーが文の並びで全部外れるもの。
     /// 移すのは、その外部キーを支えうるキーを外す文の全部（並びの順）を、後ろで付け直すキーの削除が最後に来るように安定に並べたもの。
     /// </item>
     /// <item>
@@ -151,7 +151,7 @@ internal static class Refusals
                 var supporters = Enumerable
                     .Range(0, keys.Count)
                     .Where(i =>
-                        SyncPlanner.CanSupportForeignKey(capabilities, keys[i].Columns, referenced)
+                        PlanFacts.CanSupportForeignKey(capabilities, keys[i].Columns, referenced)
                     )
                     .ToList();
 
@@ -227,7 +227,7 @@ internal static class Refusals
                     capabilities.AlterColumnRequiresForeignKeyRebuild
                         ? retained.Any(fk =>
                             Touches(fk, column)
-                            && SyncPlanner.HasPostSyncTypeMismatch(
+                            && PlanFacts.HasPostSyncTypeMismatch(
                                 fk.Relationship,
                                 fk.Child,
                                 fk.Parent,
@@ -256,7 +256,7 @@ internal static class Refusals
                 && ColumnNullability.AllowsNull(liveColumn)
                 && !ColumnNullability.AllowsNull(alter.Column)
                 && retained.Any(fk =>
-                    SyncPlanner.UsesSetNull(fk.Relationship.Relationship, capabilities)
+                    PlanFacts.UsesSetNull(fk.Relationship.Relationship, capabilities)
                     && fk.Relationship.ColumnPairs.Any(p =>
                         ColumnId.Of(fk.Child, p.ChildColumn) == column
                     )
@@ -349,7 +349,7 @@ internal static class Refusals
     /// </para>
     /// <para>ほかの断られうる文：</para>
     /// <list type="bullet">
-    /// <item>主キーを付ける文・一意制約を付ける文で、DB の今のキーで一意と証明できない（<see cref="SyncPlanner.HoldsInLiveRows"/>）もの。</item>
+    /// <item>主キーを付ける文・一意制約を付ける文で、DB の今のキーで一意と証明できない（<see cref="PlanFacts.HoldsInLiveRows"/>）もの。</item>
     /// <item><see cref="SyncDialectCapabilities.AddNotNullColumnRequiresEmptyTable"/> の方言の NOT NULL の列の追加。</item>
     /// <item>
     /// DB の今の列を変える文のうち、NULL を許す列の NOT NULL 化・型を狭める変更（<see cref="SyncDialectCapabilities.NarrowsType"/>）・
@@ -416,7 +416,7 @@ internal static class Refusals
                 case AddPrimaryKeyStep add:
                     return
                         add.Columns.Count > 0
-                        && !SyncPlanner.HoldsInLiveRows(
+                        && !PlanFacts.HoldsInLiveRows(
                             liveTable,
                             table,
                             add.Columns,
@@ -427,7 +427,7 @@ internal static class Refusals
                 case AddUniqueConstraintStep add:
                     return
                         add.Columns.Count > 0
-                        && !SyncPlanner.HoldsInLiveRows(
+                        && !PlanFacts.HoldsInLiveRows(
                             liveTable,
                             table,
                             add.Columns,
@@ -554,7 +554,7 @@ internal static class Refusals
             {
                 yield return (
                     ColumnId.Of(fk.Parent, pair.ParentColumn),
-                    SyncPlanner.ColumnTypeOf(fk.Relationship.Parent, pair.ParentColumn)
+                    PlanFacts.ColumnTypeOf(fk.Relationship.Parent, pair.ParentColumn)
                 );
             }
 
@@ -562,7 +562,7 @@ internal static class Refusals
             {
                 yield return (
                     ColumnId.Of(fk.Child, pair.ChildColumn),
-                    SyncPlanner.ColumnTypeOf(fk.Relationship.Child, pair.ChildColumn)
+                    PlanFacts.ColumnTypeOf(fk.Relationship.Child, pair.ChildColumn)
                 );
             }
         }

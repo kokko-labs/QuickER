@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using QuickER.Provider.Sync.State;
 
 namespace QuickER.Provider.Sync.Scheduling;
 
@@ -10,7 +11,7 @@ internal static partial class RebuildDeclarations
     /// </summary>
     /// <remarks>
     /// 対象は、主キーを変える表を参照し、参照する列を DB の今の主キーが支えうる外部キー
-    /// （<see cref="SyncPlanner.DependsOnOldPrimaryKey"/>＝同じ列の集合。外部キーが参照先の索引の先頭の列を要する方言では、参照する列を
+    /// （<see cref="PlanFacts.DependsOnOldPrimaryKey"/>＝同じ列の集合。外部キーが参照先の索引の先頭の列を要する方言では、参照する列を
     /// 先頭に並べる主キーも）。一意制約に支えられた外部キーは、主キーの解除に巻き込まれない。
     /// </remarks>
     private static IEnumerable<LiveConstraint> RequireForeignKeysOffDroppedPrimaryKeys(
@@ -25,7 +26,7 @@ internal static partial class RebuildDeclarations
 
             if (
                 primaryKeyChanges.ContainsKey(parentTable)
-                && SyncPlanner.DependsOnOldPrimaryKey(
+                && PlanFacts.DependsOnOldPrimaryKey(
                     input.Live.Tables,
                     input.Capabilities,
                     parentTable,

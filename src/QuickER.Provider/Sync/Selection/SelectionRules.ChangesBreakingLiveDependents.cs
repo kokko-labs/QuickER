@@ -26,7 +26,7 @@ internal static partial class SelectionRules
     /// 判定は DB 自身に試させる（<see cref="ILiveDependentCheck"/>。SQL を解析しない）。まず計画全体の同期後の列名で試し、壊れるビュー・トリガーが
     /// 無ければ何も外さない（<c>SELECT *</c> のビューの列の削除・列の数が変わらない名前の変更・トリガーが読まない列の削除などに偽の警告を
     /// 出さない）。壊れるときだけ、表ごとに試して原因の表を決め、その表の名前を変える項目を外す。表どうしの組み合わせでだけ壊れるときは、
-    /// 名前を変える表をすべて原因とする。外した後の計画は <see cref="SyncPlanner.ExcludeUntilStable"/> の次の周でもう一度試す。
+    /// 名前を変える表をすべて原因とする。外した後の計画は <see cref="PlanSelection.ExcludeUntilStable"/> の次の周でもう一度試す。
     /// </para>
     /// </remarks>
     private static IReadOnlyList<Withdrawal> ExcludeChangesBreakingLiveDependents(
@@ -131,7 +131,7 @@ internal static partial class SelectionRules
         // （列の追加・表の削除では壊れないので、索引だけが原因の表の列の追加は流す）
         static bool BreaksDependents(SchemaDiffItem item, LiveDependentBreaks breaks) =>
             (breaks.Views.Count > 0 || breaks.Triggers.Count > 0)
-                && SyncPlanner.IsColumnNameSetChange(item.Kind)
+                && PlanFacts.IsColumnNameSetChange(item.Kind)
             || breaks.Indexes.Count > 0 && item.Kind == SchemaDiffKind.DropColumn;
 
         static IReadOnlyDictionary<string, IReadOnlyList<string>?> ToTableChanges(

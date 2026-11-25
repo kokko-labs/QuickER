@@ -66,7 +66,7 @@ internal static partial class SelectionRules
     /// </summary>
     /// <param name="selected">依存の除外を済ませた選んだ項目</param>
     /// <param name="protectedTables">
-    /// 表 → 名指しする物（<see cref="SyncPlanner.CollectImportDiscardedContent"/>・<see cref="SyncPlanner.CollectRebuildBlockedTables"/>）
+    /// 表 → 名指しする物（<see cref="PlanSelection.CollectImportDiscardedContent"/>・<see cref="PlanSelection.CollectRebuildBlockedTables"/>）
     /// </param>
     /// <param name="kind">
     /// 警告の種類（<see cref="SyncPlanWarningKind.TableRebuildLosesImportDiscardedContent"/>・

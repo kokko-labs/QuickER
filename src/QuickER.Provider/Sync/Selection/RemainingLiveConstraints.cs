@@ -13,7 +13,7 @@ namespace QuickER.Provider.Sync.Selection;
 /// </summary>
 /// <remarks>
 /// 主キーの名前は取り込まない（同期は実行時に逆引きする）ので数えない。端が消える外部キー・構成列が消える一意制約は、同期が追加より前の
-/// 段で暗黙に外すので残る側に数えない（<see cref="SyncPlanner.InjectVanishingForeignKeyDrops"/>・<see cref="SyncPlanner.InjectVanishingUniqueConstraintDrops"/>）。
+/// 段で暗黙に外すので残る側に数えない（<see cref="PostSyncDifferenceItems.InjectVanishingForeignKeyDrops"/>・<see cref="PostSyncDifferenceItems.InjectVanishingUniqueConstraintDrops"/>）。
 /// 名前は図全体から求めた実効名で、比べ方は <see cref="SchemaNames"/> の規則。
 /// </remarks>
 internal sealed class RemainingLiveConstraints
@@ -52,7 +52,13 @@ internal sealed class RemainingLiveConstraints
             if (
                 droppedObjects.Touches(fk, child, parent)
                 || droppedForeignKeys.Contains(
-                    SyncPlanner.ForeignKeyKey(child, parent, fk.ColumnPairs, fk.Relationship, limit)
+                    PlanIdentity.ForeignKeyKey(
+                        child,
+                        parent,
+                        fk.ColumnPairs,
+                        fk.Relationship,
+                        limit
+                    )
                 )
             )
             {
@@ -86,7 +92,7 @@ internal sealed class RemainingLiveConstraints
                     )
                     && !droppedObjects.TouchesColumns(table, columns)
                     && !droppedUniques.Contains(
-                        SyncPlanner.UniqueConstraintKey(table, constraint.Name, columns)
+                        PlanIdentity.UniqueConstraintKey(table, constraint.Name, columns)
                     )
                 )
                 {

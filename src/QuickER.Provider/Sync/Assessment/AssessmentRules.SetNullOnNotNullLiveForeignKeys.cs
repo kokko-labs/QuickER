@@ -44,9 +44,9 @@ internal static partial class AssessmentRules
             var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
 
             if (
-                !SyncPlanner.UsesSetNull(fk.Relationship, capabilities)
+                !PlanFacts.UsesSetNull(fk.Relationship, capabilities)
                 || explicitlyDropped.Contains(
-                    SyncPlanner.ForeignKeyKey(
+                    PlanIdentity.ForeignKeyKey(
                         childTable,
                         parentTable,
                         fk.ColumnPairs,
@@ -70,16 +70,16 @@ internal static partial class AssessmentRules
             if (madeNotNull)
             {
                 warnings.Add(
-                    SyncPlanner.SetNullWarning(
+                    PlanFacts.SetNullWarning(
                         childTable,
-                        SyncPlanner.ResolveForeignKeyName(
+                        PlanIdentity.ResolveForeignKeyName(
                             fk.Relationship,
                             childTable,
                             parentTable,
                             limit,
                             liveSchema
                         ),
-                        SyncPlanner.PostSyncNotNullChildColumns(fk, childTable, postSyncNullable)
+                        PlanFacts.PostSyncNotNullChildColumns(fk, childTable, postSyncNullable)
                     )
                 );
             }

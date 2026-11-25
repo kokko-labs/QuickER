@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using QuickER.Provider.Sync.State;
 
 namespace QuickER.Provider.Sync.Scheduling;
 
@@ -47,20 +48,20 @@ internal static partial class RebuildDeclarations
             if (
                 fk.ColumnPairs.Any(pair =>
                     typeDecidingColumns.TryGetValue(
-                        SyncPlanner.ColumnKey(childTable, pair.ChildColumn),
+                        PlanIdentity.ColumnKey(childTable, pair.ChildColumn),
                         out var newChild
                     )
                     && typeDecidingColumns.TryGetValue(
-                        SyncPlanner.ColumnKey(parentTable, pair.ParentColumn),
+                        PlanIdentity.ColumnKey(parentTable, pair.ParentColumn),
                         out var newParent
                     )
                     && (
                         !capabilities.AreForeignKeyCompatibleTypes(
                             newChild,
-                            SyncPlanner.ColumnTypeOf(fk.Parent, pair.ParentColumn)
+                            PlanFacts.ColumnTypeOf(fk.Parent, pair.ParentColumn)
                         )
                         || !capabilities.AreForeignKeyCompatibleTypes(
-                            SyncPlanner.ColumnTypeOf(fk.Child, pair.ChildColumn),
+                            PlanFacts.ColumnTypeOf(fk.Child, pair.ChildColumn),
                             newParent
                         )
                     )

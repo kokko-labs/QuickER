@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using QuickER.Provider.Sync.State;
 
 namespace QuickER.Provider.Sync.Assessment;
 
@@ -13,7 +14,7 @@ internal static partial class AssessmentRules
     /// <remarks>
     /// <para>
     /// 逐次 DDL の方言（どの方言も）で名指しする。計画はこの外部キーを外し直さない（付け直しが必ず断られる）ので、外部キーを張ったまま
-    /// 列を変え、DB が断れば列の変更が何も変えずに失敗する。判定は <see cref="SyncPlanner.HasPostSyncTypeMismatch"/>（DB が受け入れている
+    /// 列を変え、DB が断れば列の変更が何も変えずに失敗する。判定は <see cref="PlanFacts.HasPostSyncTypeMismatch"/>（DB が受け入れている
     /// 組は数えない）。
     /// </para>
     /// <para>
@@ -47,7 +48,7 @@ internal static partial class AssessmentRules
 
             if (
                 !explicitlyDropped.Contains(
-                    SyncPlanner.ForeignKeyKey(
+                    PlanIdentity.ForeignKeyKey(
                         childTable,
                         parentTable,
                         fk.ColumnPairs,
@@ -55,7 +56,7 @@ internal static partial class AssessmentRules
                         limit
                     )
                 )
-                && SyncPlanner.HasPostSyncTypeMismatch(
+                && PlanFacts.HasPostSyncTypeMismatch(
                     fk,
                     childTable,
                     parentTable,
@@ -68,7 +69,7 @@ internal static partial class AssessmentRules
                     new SyncPlanWarning(
                         SyncPlanWarningKind.ForeignKeyColumnTypeMismatch,
                         childTable,
-                        SyncPlanner.ResolveForeignKeyName(
+                        PlanIdentity.ResolveForeignKeyName(
                             fk.Relationship,
                             childTable,
                             parentTable,

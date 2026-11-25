@@ -17,7 +17,7 @@ internal static partial class AssessmentRules
     /// <para>
     /// 同期後の主キーは、主キーの変更を選んだ表はその新しい主キー、追加を選んだ表は図の主キー、それ以外は live の主キー。
     /// 同期後の一意制約は <see cref="PostSyncSchema.UniqueColumnSets"/>（live − 削除 ＋ 追加、追加を選んだ表の一意制約を含む）。
-    /// 比べ方は暗黙の付け直しと同じ <see cref="SyncPlanner.StaysCandidateKey"/>（列の集合）。
+    /// 比べ方は暗黙の付け直しと同じ <see cref="PlanFacts.StaysCandidateKey"/>（列の集合）。
     /// </para>
     /// <para>
     /// 参照先の表が live にも追加にも無い項目は対象外（選んでいない表の追加を前提にする項目は計画の入口で外している）。
@@ -64,7 +64,7 @@ internal static partial class AssessmentRules
 
             if (
                 referencedColumns.Count == 0
-                || SyncPlanner.StaysCandidateKey(
+                || PlanFacts.StaysCandidateKey(
                     postSyncKey,
                     postSyncUniques,
                     parentTable,
@@ -79,7 +79,7 @@ internal static partial class AssessmentRules
                 new SyncPlanWarning(
                     SyncPlanWarningKind.ForeignKeyNotOnCandidateKey,
                     childTable,
-                    SyncPlanner.SelectedForeignKeyName(add, capabilities.IdentifierLengthLimit)
+                    PlanIdentity.SelectedForeignKeyName(add, capabilities.IdentifierLengthLimit)
                 )
             );
         }

@@ -4,6 +4,7 @@ using System.Linq;
 using QuickER.Dialects;
 using QuickER.Provider.Sync.Assessment;
 using QuickER.Provider.Sync.Scheduling;
+using QuickER.Provider.Sync.Selection;
 using QuickER.Provider.Sync.State;
 using QuickER.Provider.Sync.Steps;
 using QuickER.Provider.Sync.TableRebuilds;
@@ -16,7 +17,7 @@ namespace QuickER.Provider.Sync;
 /// </summary>
 /// <remarks>
 /// <para>
-/// テーブル再構築の方言（<see cref="TableRebuildDialects.Requires"/>）は、選択（<see cref="SyncPlanner.PrepareSelection"/>）→ 組み立て
+/// テーブル再構築の方言（<see cref="TableRebuildDialects.Requires"/>）は、選択（<see cref="PlanSelection.PrepareSelection"/>）→ 組み立て
 /// （<see cref="TableRebuildScheduler"/>）→ 評価（<see cref="AssessmentRules.Assess"/>）を 1 回だけ流す。前寄せ・取り下げ・前後の名指しは無い。
 /// 計画の入力か DB の今の図が無ければ、選択の後に <see cref="InvalidOperationException"/>。
 /// </para>
@@ -24,7 +25,7 @@ namespace QuickER.Provider.Sync;
 /// <list type="number">
 /// <item>
 /// 選択：取り下げた項目を除いた選んだ項目を外し終え、選んだ項目の最終形とその同期後の事実を作る
-/// （<see cref="SyncPlanner.PrepareSelection"/>）。警告と外した項目の積み先は周ごとに新しく作る。
+/// （<see cref="PlanSelection.PrepareSelection"/>）。警告と外した項目の積み先は周ごとに新しく作る。
 /// </item>
 /// <item>組み立て：文の並びを組む（<see cref="SequentialScheduler"/>）。</item>
 /// <item>評価：規則の表を流して、項目を外さずに積む警告を決める（<see cref="AssessmentRules.Assess"/>）。</item>
@@ -84,7 +85,7 @@ internal static class StepPlanner
             var warnings = new List<SyncPlanWarning>();
             var excluded = new List<SchemaDiffItem>();
 
-            var prepared = SyncPlanner.PrepareSelection(
+            var prepared = PlanSelection.PrepareSelection(
                 all.Where(i => !withdrawn.Contains(i)),
                 capabilities,
                 context,
@@ -185,7 +186,7 @@ internal static class StepPlanner
         var warnings = new List<SyncPlanWarning>();
         var excluded = new List<SchemaDiffItem>();
 
-        var prepared = SyncPlanner.PrepareSelection(
+        var prepared = PlanSelection.PrepareSelection(
             all,
             capabilities,
             context,

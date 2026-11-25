@@ -15,6 +15,12 @@
     "mutate": [
       "**/*.cs",
       "!**/SyncPlanner.cs",
+      "!**/SyncPlanContext.cs",
+      "!**/PlanFacts.cs",
+      "!**/PlanIdentity.cs",
+      "!**/ColumnReorders.cs",
+      "!**/PlanSelection.cs",
+      "!**/PostSyncDifferenceItems.cs",
       "!**/SchemaIds.cs",
       "!**/LiveSchema.cs",
       "!**/PostSyncSchema.cs",

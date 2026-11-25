@@ -266,7 +266,7 @@ internal static partial class SourceRules
                     "-- の行コメントを組み立てる文"
                 ),
             },
-            // 同期の差分と計画の照合（差分と計画器の 4 ファイルと、Sync の State・Selection・TableRebuilds のフォルダ）は大文字小文字・空白を自前で畳まず SchemaNames を通す。Trim 系・ToLower / ToUpper 系・
+            // 同期の差分と計画の照合（差分と計画器の 5 ファイルと、Sync のフォルダの全体）は大文字小文字・空白を自前で畳まず SchemaNames を通す。Trim 系・ToLower / ToUpper 系・
             // 大小を無視する比較の指定が識別子として現れたら数える（コメント・文字列の中は数えない）。例外は無い
             SourceRule.Forbid(
                 "sync-name-comparison-tokens",
@@ -275,11 +275,10 @@ internal static partial class SourceRules
                     .Under("src/QuickER.Provider")
                     .Within("SchemaDiffService.cs")
                     .Within("SyncPlanner.cs")
+                    .Within("SyncPlanContext.cs")
                     .Within("NameMatching.cs")
                     .Within("UniqueConstraintNaming.cs")
-                    .Within("Sync/State/")
-                    .Within("Sync/Selection/")
-                    .Within("Sync/TableRebuilds/"),
+                    .Within("Sync/"),
                 GuardFinder.Tokens(token =>
                     token.IsKind(SyntaxKind.IdentifierToken)
                     && SyncNameForbiddenIdentifiers.Contains(token.Text)
@@ -288,7 +287,8 @@ internal static partial class SourceRules
                 )
             ) with
             {
-                MinimumFiles = 7,
+                // 範囲が Sync のフォルダの全体を読んでいること（いまは根の 5 ファイルと Sync の 75 ファイル）
+                MinimumFiles = 80,
             },
             // 同期の計画で「この同期で型が決まる列」は CollectTypeDecidingColumns の 1 か所が決める（NULL 許容だけの列の変更は型を
             // 決めない）。外部キーの型の照合の 3 か所がそれぞれ列の変更の新しい型を辞書へ写していたため、NULL 許容だけの変更まで
@@ -297,7 +297,11 @@ internal static partial class SourceRules
             SourceRule.Forbid(
                 "sync-type-deciding-column-copies",
                 "同期の計画で差分の項目の列の新しい型を読むのは、型が決まる列の正本（CollectTypeDecidingColumns）と理由つきの一覧だけ",
-                SourceScope.Under("src/QuickER.Provider").Within("SyncPlanner.cs").Within("Sync/"),
+                SourceScope
+                    .Under("src/QuickER.Provider")
+                    .Within("SyncPlanner.cs")
+                    .Within("SyncPlanContext.cs")
+                    .Within("Sync/"),
                 GuardFinder.Symbols(DiffItemNewTypeReads.Describe),
                 new(
                     "src/QuickER.Provider/Sync/State/PostSyncSchema.cs",
@@ -331,7 +335,11 @@ internal static partial class SourceRules
             SourceRule.Forbid(
                 "sync-selected-foreign-key-names",
                 "同期の計画で差分の項目のリレーション・名前から外部キーの名前を作り直さず、選んだ外部キーの名前は SelectedForeignKeyName を通す",
-                SourceScope.Under("src/QuickER.Provider").Within("SyncPlanner.cs").Within("Sync/"),
+                SourceScope
+                    .Under("src/QuickER.Provider")
+                    .Within("SyncPlanner.cs")
+                    .Within("SyncPlanContext.cs")
+                    .Within("Sync/"),
                 GuardFinder.Symbols(DiffItemForeignKeyNameRebuilds.Describe),
                 new GuardKnown(
                     "src/QuickER.Provider/Sync/TableRebuilds/TableRebuildForeignKeys.cs",
@@ -340,7 +348,7 @@ internal static partial class SourceRules
                     "再構築の合成で、外す外部キーの項目（削除の項目のリレーションは live のもの）を live の外部キーと名前で突き合わせる（警告の名指しではない）"
                 )
             ),
-            // 同期の計画の選んだ項目を外す規則（SelectionRules の Exclude*）は、何も外れなくなるまで繰り返す周（SyncPlanner.ExcludeUntilStable）の
+            // 同期の計画の選んだ項目を外す規則（SelectionRules の Exclude*）は、何も外れなくなるまで繰り返す周（PlanSelection.ExcludeUntilStable）の
             // 中からだけ流す。周の外で項目を外すと、周の中の判定（名前の重なり・前提の欠け）が外れた項目を「選ばれている」と数えたまま残り、
             // 追加が名指しなしに DB で断られた（列が残らない表の除外の後の同じ名前の一意制約・作り直しを外した表の主キーの変更を前提にする
             // 外部キー・型の食い違いで外した作り直しと同じ定義の外部キー）。警告だけの関数は Warn* で、周の後に置く。周は規則の表
@@ -375,31 +383,31 @@ internal static partial class SourceRules
                 SourceScope.Under("src/QuickER.Provider"),
                 GuardFinder.Nodes(PlanMarkUses.Describe),
                 new GuardKnown(
-                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "src/QuickER.Provider/Sync/Selection/PlanSelection.cs",
                     "ExpandAlters: init",
                     4,
                     "外部キー・一意制約の作り直しを展開した削除と追加（元の作り直しの項目と、削除と追加の対）"
                 ),
                 new GuardKnown(
-                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "src/QuickER.Provider/Sync/Selection/PostSyncDifferenceItems.cs",
                     "InjectPrimaryKeyNotNullChanges: init",
                     1,
                     "主キーに加わる列の暗黙の NOT NULL 化"
                 ),
                 new GuardKnown(
-                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "src/QuickER.Provider/Sync/Selection/PostSyncDifferenceItems.cs",
                     "InjectVanishingUniqueConstraintDrops: init",
                     1,
                     "構成列が消える一意制約の暗黙の削除"
                 ),
                 new GuardKnown(
-                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "src/QuickER.Provider/Sync/Selection/PostSyncDifferenceItems.cs",
                     "InjectUniqueConstraintsReplacedByPrimaryKey: init",
                     1,
                     "主キーが置き換える一意制約の暗黙の削除"
                 ),
                 new GuardKnown(
-                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "src/QuickER.Provider/Sync/Selection/PostSyncDifferenceItems.cs",
                     "BuildImplicitForeignKeyDrop: init",
                     1,
                     "暗黙の外部キーの削除（端が消える外部キーと、外して付け直す外部キー。印は呼び出し側が渡す）"
@@ -438,6 +446,7 @@ internal static partial class SourceRules
                 SourceScope
                     .Under("src/QuickER.Provider")
                     .Within("SyncPlanner.cs")
+                    .Within("SyncPlanContext.cs")
                     .Within("Sync/")
                     .Except(
                         "Sync/State/LiveSchema.cs",
@@ -466,7 +475,7 @@ internal static partial class SourceRules
                 SourceScope.Under("src/QuickER.Provider"),
                 GuardFinder.Nodes(PostSyncSchemaCalls.Describe),
                 new GuardKnown(
-                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "src/QuickER.Provider/Sync/Selection/PlanSelection.cs",
                     "PrepareSelection: Selected",
                     1,
                     "選んだ項目の最終形（暗黙の削除まで足した並び）の同期後の事実を、警告・外し直しの注入・並べ替え・再構築の合成で共有する。作った後に selected へ項目を足さない"
@@ -490,19 +499,19 @@ internal static partial class SourceRules
                     "同期後の主キーを、この段で外さない主キーの変更だけの独自の辞書（構成列が同期後に在るもの・同じ表は先勝ち）から引く。依存の除外は前提が同期後に在るかを問うので、正本の辞書（全部・後勝ち）と別にしている"
                 ),
                 new GuardKnown(
-                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "src/QuickER.Provider/Sync/Selection/PostSyncDifferenceItems.cs",
                     "InjectVanishingForeignKeyDrops: Expanded",
                     1,
                     "展開と主キーの NOT NULL 化の後で、端が消える外部キーを、利用者が既に外す外部キーと比べて足す（自分が足す前の並びを見る）"
                 ),
                 new GuardKnown(
-                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "src/QuickER.Provider/Sync/Selection/PostSyncDifferenceItems.cs",
                     "InjectVanishingUniqueConstraintDrops: WithVanishingForeignKeyDrops",
                     1,
                     "構成列が消える一意制約を、それまでの並びが既に外す一意制約と比べて足す（自分が足す前の並びを見る）"
                 ),
                 new GuardKnown(
-                    "src/QuickER.Provider/SyncPlanner.cs",
+                    "src/QuickER.Provider/Sync/Selection/PostSyncDifferenceItems.cs",
                     "InjectUniqueConstraintsReplacedByPrimaryKey: WithVanishingUniqueDrops",
                     1,
                     "主キーが置き換える一意制約を、それまでの並びが既に外す一意制約と比べて足す（自分が足す前の並びを見る）"
@@ -784,15 +793,22 @@ internal static partial class SourceRules
                 Witness = new(
                     SourceScope.Files(
                         "src",
-                        "src/QuickER.Provider/SyncPlanner.cs",
+                        "src/QuickER.Provider/Sync/Selection/PlanSelection.cs",
+                        "src/QuickER.Provider/Sync/Selection/PostSyncDifferenceItems.cs",
                         "src/QuickER.Provider/Sync/Selection/SelectionRules.TablesWithoutColumns.cs"
                     ),
                     [
                         new(
-                            "src/QuickER.Provider/SyncPlanner.cs",
+                            "src/QuickER.Provider/Sync/Selection/PlanSelection.cs",
                             "new SchemaDiffItem",
-                            7,
-                            "選択の前半が作り直しの展開と同期後の状態の差の項目を作る所（範囲の外の実在の項目の生成を拾えること）"
+                            4,
+                            "選択の前半が作り直しを展開した項目を作る所（範囲の外の実在の項目の生成を拾えること）"
+                        ),
+                        new(
+                            "src/QuickER.Provider/Sync/Selection/PostSyncDifferenceItems.cs",
+                            "new SchemaDiffItem",
+                            3,
+                            "選択の前半が同期後の状態の差の項目を作る所（範囲の外の実在の項目の生成を拾えること）"
                         ),
                         new(
                             "src/QuickER.Provider/Sync/Selection/SelectionRules.TablesWithoutColumns.cs",
@@ -836,13 +852,23 @@ internal static partial class SourceRules
             {
                 MinimumFiles = 26,
                 Witness = new(
-                    SourceScope.Files("src", "src/QuickER.Provider/SyncPlanner.cs"),
+                    SourceScope.Files(
+                        "src",
+                        "src/QuickER.Provider/Sync/Selection/PlanSelection.cs",
+                        "src/QuickER.Provider/Sync/Selection/PostSyncDifferenceItems.cs"
+                    ),
                     [
                         new(
-                            "src/QuickER.Provider/SyncPlanner.cs",
+                            "src/QuickER.Provider/Sync/Selection/PlanSelection.cs",
                             "new SchemaDiffItem",
-                            7,
-                            "選択の前半が作り直しの展開と同期後の状態の差の項目を作る所（範囲の外の実在の項目の生成を拾えること）"
+                            4,
+                            "選択の前半が作り直しを展開した項目を作る所（範囲の外の実在の項目の生成を拾えること）"
+                        ),
+                        new(
+                            "src/QuickER.Provider/Sync/Selection/PostSyncDifferenceItems.cs",
+                            "new SchemaDiffItem",
+                            3,
+                            "選択の前半が同期後の状態の差の項目を作る所（範囲の外の実在の項目の生成を拾えること）"
                         ),
                     ]
                 ),

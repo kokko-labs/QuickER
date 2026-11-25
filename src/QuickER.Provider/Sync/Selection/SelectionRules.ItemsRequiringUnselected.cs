@@ -61,7 +61,7 @@ internal static partial class SelectionRules
             .ToHashSet(SchemaNames.Comparer);
         var addedColumns = selected
             .Where(i => i.Kind == SchemaDiffKind.AddColumn && i.ColumnName is not null)
-            .Select(i => SyncPlanner.ColumnKey(i.TableName, i.ColumnName!))
+            .Select(i => PlanIdentity.ColumnKey(i.TableName, i.ColumnName!))
             .ToHashSet();
         // この段で外す主キーの変更（構成列が同期後に無い）は、同期後の主キーに数えない（数えると、その変更の後にだけ
         // 主キーから外れる列の削除を残してしまう）
@@ -181,7 +181,7 @@ internal static partial class SelectionRules
                     }
 
                     // 名指しの名前はスクリプトが付ける名前（警告の名前の正本を 1 か所にする）
-                    var name = SyncPlanner.SelectedForeignKeyName(
+                    var name = PlanIdentity.SelectedForeignKeyName(
                         item,
                         capabilities.IdentifierLengthLimit
                     );
@@ -218,7 +218,7 @@ internal static partial class SelectionRules
                     if (
                         missing.Count == 0
                         && !capabilities.SupportsUniqueConstraintOnPrimaryKey
-                        && SyncPlanner.IsSameColumnSet(
+                        && PlanFacts.IsSameColumnSet(
                             PostSyncPrimaryKey(table),
                             item.UniqueConstraintColumns
                         )
@@ -314,7 +314,7 @@ internal static partial class SelectionRules
             foreach (var column in columns)
             {
                 if (
-                    !addedColumns.Contains(SyncPlanner.ColumnKey(table, column))
+                    !addedColumns.Contains(PlanIdentity.ColumnKey(table, column))
                     && !live.Columns.Any(c => SchemaNames.AreSame(c.Name, column))
                 )
                 {
@@ -347,9 +347,9 @@ internal static partial class SelectionRules
                         constraint,
                         out var liveColumns
                     )
-                    && SyncPlanner.IsSameColumnSet(liveColumns, columns)
+                    && PlanFacts.IsSameColumnSet(liveColumns, columns)
                     && !droppedUniques.Contains(
-                        SyncPlanner.UniqueConstraintKey(table, constraint.Name, liveColumns)
+                        PlanIdentity.UniqueConstraintKey(table, constraint.Name, liveColumns)
                     )
                 )
                 {
@@ -383,7 +383,7 @@ internal static partial class SelectionRules
                     UniqueConstraintNaming.ColumnSetSignature(referencedColumns),
                     StringComparison.Ordinal
                 )
-                && !SyncPlanner.StaysCandidateKey(
+                && !PlanFacts.StaysCandidateKey(
                     PostSyncPrimaryKey(parentTable),
                     postSyncUniques,
                     parentTable,

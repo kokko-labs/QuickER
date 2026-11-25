@@ -89,11 +89,11 @@ internal static partial class SourceRuleProbes
                             internal static List<int> Shared(List<int> items) => ExcludeDirect(items);
                         }
 
-                        internal sealed class SyncPlanner
+                        internal sealed class PlanSelection
                         {
                             private List<int> ExcludedItems { get; } = [];
 
-                            public List<int> BuildPlan(List<int> items)
+                            public List<int> PrepareSelection(List<int> items)
                             {
                                 var stable = ExcludeUntilStable(items);
                                 var direct = SelectionRules.ExcludeDirect(stable);
@@ -129,7 +129,7 @@ internal static partial class SourceRuleProbes
                             {
                                 List<int> Local() => SelectionRules.ExcludeDirect(items);
                                 Func<List<int>> lambda = () => SelectionRules.ExcludeNested(items);
-                                Func<List<int>, List<int>> group = new SyncPlanner().ExcludeQualified;
+                                Func<List<int>, List<int>> group = new PlanSelection().ExcludeQualified;
                                 return lambda().Count > 0 ? Local() : group(items);
                             }
                         }
@@ -146,10 +146,10 @@ internal static partial class SourceRuleProbes
                         """,
                         "OtherRules: ExcludeNested",
                         "Shared: ExcludeDirect",
-                        "BuildPlan: ExcludeDirect",
-                        "BuildPlan: ExcludeNested",
-                        "BuildPlan: EachRound",
-                        "BuildPlan: ExcludeQualified",
+                        "PrepareSelection: ExcludeDirect",
+                        "PrepareSelection: ExcludeNested",
+                        "PrepareSelection: EachRound",
+                        "PrepareSelection: ExcludeQualified",
                         "Helper: ExcludeDirect",
                         "Helper: ExcludeNested",
                         "Helper: ExcludeQualified",

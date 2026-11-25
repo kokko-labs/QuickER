@@ -54,7 +54,7 @@ internal static class TableRebuildForeignKeys
                 .ToList();
             var dropName = dropFk.ChildEntity is null
                 ? null
-                : SyncPlanner.ResolveForeignKeyName(
+                : PlanIdentity.ResolveForeignKeyName(
                     dropFk.Relationship,
                     SchemaDiffService.NormalizeTable(dropFk.ChildEntity),
                     parentTable,
@@ -104,7 +104,7 @@ internal static class TableRebuildForeignKeys
         var parentTable = SchemaDiffService.NormalizeTable(fk.Parent);
 
         return new TableRebuildForeignKey(
-            SyncPlanner.ResolveForeignKeyName(
+            PlanIdentity.ResolveForeignKeyName(
                 fk.Relationship,
                 SchemaDiffService.NormalizeTable(fk.Child),
                 parentTable,

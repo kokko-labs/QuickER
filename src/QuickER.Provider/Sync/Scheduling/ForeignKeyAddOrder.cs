@@ -107,7 +107,7 @@ internal static class ForeignKeyAddOrder
 
             return postSyncKey is null
                 || referencedColumns.Count == 0
-                || SyncPlanner.StaysCandidateKey(
+                || PlanFacts.StaysCandidateKey(
                     postSyncKey,
                     postSyncUniques,
                     parentTable,

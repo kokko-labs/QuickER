@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using QuickER.Provider.Sync.State;
 using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider.Sync.Assessment;
@@ -15,7 +16,7 @@ namespace QuickER.Provider.Sync.Assessment;
 /// </para>
 /// <para>
 /// 名指しは <see cref="SyncPlanWarningKind.UniqueConstraintRebuildKeptForForeignKey"/>：表は外す文の表名のまま、Detail は
-/// 「一意制約の名前 (阻む外部キーの実効名)」（実効名は DB の今の図の外部キーの実効名＝<see cref="SyncPlanner.ResolveForeignKeyName"/>）。
+/// 「一意制約の名前 (阻む外部キーの実効名)」（実効名は DB の今の図の外部キーの実効名＝<see cref="PlanIdentity.ResolveForeignKeyName"/>）。
 /// </para>
 /// </remarks>
 internal static class UniqueRebuildWithdrawal
@@ -51,7 +52,7 @@ internal static class UniqueRebuildWithdrawal
         }
 
         var limit = facts.Capabilities.IdentifierLengthLimit;
-        var foreignKeyName = SyncPlanner.ResolveForeignKeyName(
+        var foreignKeyName = PlanIdentity.ResolveForeignKeyName(
             blocking.Relationship,
             SchemaDiffService.NormalizeTable(blocking.Child),
             SchemaDiffService.NormalizeTable(blocking.Parent),

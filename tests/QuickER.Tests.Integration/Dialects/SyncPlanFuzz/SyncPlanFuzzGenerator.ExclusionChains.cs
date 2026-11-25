@@ -31,7 +31,7 @@ internal sealed record FuzzExclusionChain(
 /// <remarks>
 /// <para>
 /// ある除外が外した項目を、別の除外の判定が前提にしていた形を作る（製品は除外を何も外れなくなるまで繰り返す周
-/// <c>SyncPlanner.ExcludeUntilStable</c> の中で呼ぶ＝<c>src/QuickER.Provider/CLAUDE.md</c>「除外の周」）。形は 3 つで、どれを組むかは
+/// <c>PlanSelection.ExcludeUntilStable</c> の中で呼ぶ＝<c>src/QuickER.Provider/CLAUDE.md</c>「除外の周」）。形は 3 つで、どれを組むかは
 /// 方言の宣言で決める（方言名で分岐しない）。
 /// </para>
 /// <list type="bullet">

@@ -14,6 +14,12 @@
     "ignore-methods": ["*.ThrowIfNull", "*Exception.ctor"],
     "mutate": [
       "**/SyncPlanner.cs",
+      "**/SyncPlanContext.cs",
+      "**/PlanFacts.cs",
+      "**/PlanIdentity.cs",
+      "**/ColumnReorders.cs",
+      "**/PlanSelection.cs",
+      "**/PostSyncDifferenceItems.cs",
       "**/SelectionContext.cs",
       "**/SelectionRule.cs",
       "**/SelectionWithdrawals.cs",

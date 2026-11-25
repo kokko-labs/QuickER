@@ -106,7 +106,7 @@ internal static class SequentialScheduler
             yield break;
         }
 
-        foreach (var reorder in SyncPlanner.BuildReorderPlans([.. items], live))
+        foreach (var reorder in ColumnReorders.BuildReorderPlans([.. items], live))
         {
             foreach (var move in reorder.Moves)
             {

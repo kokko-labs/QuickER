@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using QuickER.Provider.Sync.State;
 using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Provider.Sync.Scheduling;
@@ -38,7 +39,7 @@ internal static partial class RebuildDeclarations
                 if (
                     UniqueConstraintNaming.TryResolveColumnNames(table, constraint, out var columns)
                     && columns.Any(column =>
-                        alteredColumns.Contains(SyncPlanner.ColumnKey(tableName, column))
+                        alteredColumns.Contains(PlanIdentity.ColumnKey(tableName, column))
                     )
                 )
                 {
@@ -76,7 +77,7 @@ internal static partial class RebuildDeclarations
                 table
                     .GetPrimaryKeyColumnsInOrder()
                     .Any(column =>
-                        alteredColumns.Contains(SyncPlanner.ColumnKey(tableName, column.Name))
+                        alteredColumns.Contains(PlanIdentity.ColumnKey(tableName, column.Name))
                     )
             )
             {
@@ -90,6 +91,6 @@ internal static partial class RebuildDeclarations
         input
             .Steps.Select(s => s.Step)
             .OfType<AlterColumnStep>()
-            .Select(alter => SyncPlanner.ColumnKey(alter.TableName, alter.Column.Name))
+            .Select(alter => PlanIdentity.ColumnKey(alter.TableName, alter.Column.Name))
             .ToHashSet();
 }

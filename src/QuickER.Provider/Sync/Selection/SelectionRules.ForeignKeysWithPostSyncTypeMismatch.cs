@@ -72,11 +72,11 @@ internal static partial class SelectionRules
                 // IsMismatchedUnacceptedPair）。DB にまだ無い組は、両端とも型の決まらない live の列でも数える
                 if (
                     pairs.Any(pair =>
-                        SyncPlanner.IsMismatchedUnacceptedPair(
+                        PlanFacts.IsMismatchedUnacceptedPair(
                             PostSyncType(child, childTable, pair.ChildColumn),
                             PostSyncType(parent, parentTable, pair.ParentColumn),
                             livePairs.Contains(
-                                SyncPlanner.ForeignKeyPairKey(
+                                PlanIdentity.ForeignKeyPairKey(
                                     childTable,
                                     pair.ChildColumn,
                                     parentTable,
@@ -91,7 +91,10 @@ internal static partial class SelectionRules
                     var warning = new SyncPlanWarning(
                         SyncPlanWarningKind.ForeignKeyColumnTypeMismatch,
                         childTable,
-                        SyncPlanner.SelectedForeignKeyName(item, capabilities.IdentifierLengthLimit)
+                        PlanIdentity.SelectedForeignKeyName(
+                            item,
+                            capabilities.IdentifierLengthLimit
+                        )
                     );
                     withdrawals.Add(new Withdrawal(item, [warning]));
                 }
@@ -106,7 +109,7 @@ internal static partial class SelectionRules
                 {
                     if (
                         typeDecidingColumns.TryGetValue(
-                            SyncPlanner.ColumnKey(table, column),
+                            PlanIdentity.ColumnKey(table, column),
                             out var decided
                         )
                     )
@@ -123,7 +126,7 @@ internal static partial class SelectionRules
                         return (liveColumn.DataType, false);
                     }
 
-                    return (SyncPlanner.ColumnTypeOf(diagramEntity, column), true);
+                    return (PlanFacts.ColumnTypeOf(diagramEntity, column), true);
                 }
             }
         }
