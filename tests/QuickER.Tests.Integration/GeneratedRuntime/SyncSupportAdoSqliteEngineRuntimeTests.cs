@@ -130,82 +130,14 @@ public sealed class SyncSupportAdoSqliteEngineRuntimeTests(ITestOutputHelper out
     [Fact(
         DisplayName = "[Sync/新しいエンジン] 小さい塊の端末で流した決定的なシナリオは、直結の Theory と同じ結果（違う行は理由の宣言どおり）"
     )]
-    public async Task SmallChunkScenarios_MatchDirect()
-    {
-        var results = new ConcurrentDictionary<
-            string,
-            (string Outcome, string Detail, long Chunked, long Carried)
-        >(StringComparer.Ordinal);
-
-        // 直結の Theory が流す行を、小さい塊の端末で流す
-        await Parallel.ForEachAsync(
-            SyncModelScenarios.All.Where(scenario => scenario.RunsOn(SyncModelTransport.Direct)),
-            new ParallelOptions
-            {
-                MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 8),
-                CancellationToken = Ct,
-            },
-            async (scenario, ct) =>
-            {
-                var routes = new SyncModelDownloadRoutes();
-                var (outcome, detail) = await SyncModelScenarioLedger.RunAsync(
-                    scenario,
-                    ct,
-                    SyncModelEngineDevice.OnSmallChunks(SyncModelWorldOptions.Direct, routes),
-                    SyncModelKnownFailures.EngineSet
-                );
-                results[scenario.Name] = (outcome, detail, routes.Chunked, routes.Carried);
-            }
+    public Task SmallChunkScenarios_MatchDirect() =>
+        SyncModelSmallChunkScenarioRuns.AssertMatchesDirectAsync(
+            SyncModelTransport.Direct,
+            SyncModelWorldOptions.Direct,
+            Math.Clamp(Environment.ProcessorCount, 1, 8),
+            output,
+            Ct
         );
-
-        // 直結の Theory は、同じ行が 1 回で全部の道の端末で既知の失敗の一覧どおり（一覧は空＝緑）であることを表明する。
-        // 小さい塊の端末でそうならない行が、塊の道で結果の違う行
-        var differing = results
-            .Where(pair =>
-                pair.Value.Outcome
-                    is not (SyncModelScenarioLedger.Green or SyncModelScenarioLedger.Known)
-            )
-            .OrderBy(pair => pair.Key, StringComparer.Ordinal)
-            .ToList();
-
-        foreach (var (name, (outcome, detail, _, _)) in differing)
-        {
-            output.WriteLine($"differs from the direct run: {name}: {outcome} {detail}");
-        }
-
-        var chunkedRows = results.Count(pair => pair.Value.Chunked > 0);
-        output.WriteLine(
-            $"rows: {results.Count}, rows with a chunked fetch: {chunkedRows}, rows differing from the direct run: {differing.Count}"
-        );
-        chunkedRows
-            .Should()
-            .BePositive("塊の道を通った実行のある行が 1 つも無ければ、照合が空振りしている");
-
-        // 塊をまたぐ形の印のある行は、小さい塊の端末で持ち越し（最後の段で書く行）が起きていなければ形が塊をまたいでいない
-        var notCarried = SyncModelScenarios
-            .All.Where(scenario => scenario.CarriesAcrossChunks)
-            .Where(scenario =>
-                !results.TryGetValue(scenario.Name, out var result) || result.Carried == 0
-            )
-            .Select(scenario => scenario.Name)
-            .ToList();
-        notCarried
-            .Should()
-            .BeEmpty("CarriesAcrossChunks の行は、小さい塊の端末で持ち越しを 1 行以上起こす");
-
-        SyncModelSmallChunkScenarioDifferences
-            .All.Values.Where(string.IsNullOrWhiteSpace)
-            .Should()
-            .BeEmpty("違う行の理由の宣言は理由を書く");
-
-        GuardKnownList.AssertMatches(
-            differing.ToDictionary(pair => pair.Key, _ => 1, StringComparer.Ordinal),
-            SyncModelSmallChunkScenarioDifferences.All.Keys.Select(name => (name, 1)),
-            (name, _) => name,
-            "直結の実行と結果の違う行には理由の宣言（SyncModelSmallChunkScenarioDifferences）が要る",
-            "直結の実行と同じ結果の行の理由の宣言は消す"
-        );
-    }
 
     [Theory(
         DisplayName = "[Sync/新しいエンジン] 決まった形の行（実行の入口・blob の運び方）が期待どおりに振る舞う"

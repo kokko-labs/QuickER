@@ -38,6 +38,12 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// 通らずに入れた行のキーは端末のキーの範囲の別の帯（<see cref="SyncModelWorldShape.UntrackedKeyOffset"/>）に置き、ほかの書き手の
 /// 同じキー・一意な値の別表記の候補にしない（サーバーにあるキーの追跡しない行・追跡しない行と同じ一意な値の行を作らない）。
 /// </para>
+/// <para>
+/// 4 本目の乱数（<see cref="ShapeSeed"/>）は、本流がその歩の手を引き終えた後にだけ引き、本流の手を置き換える：release-take の
+/// 形を閉じた入れ替え・回転へ（<see cref="UniqueCycleRate"/>）、フォルダーの更新をピン留めへ（<see cref="PinRate"/>）、端末の
+/// フォルダー・品目の更新をミラー版の持ち込みへ（<see cref="MirrorRate"/>）。本流の乱数の引き方は変えないが、置き換えた手で
+/// 書き手の DB が変わるので、その後の手の対象・値は変わりうる。ピン留めされた品目は消す候補にしない（<see cref="IsDeletableItem"/>）。
+/// </para>
 /// </remarks>
 internal sealed class SyncModelGenerator
 {
@@ -90,9 +96,29 @@ internal sealed class SyncModelGenerator
     /// <param name="seed">本流の種</param>
     public static int PreloadSeed(int seed) => unchecked(seed * 104723 + 7907);
 
+    /// <summary>
+    /// 本流が選んだ手を、一意な値の入れ替え・回転、ピン留め、ミラー版の持ち込みへ置き換える 4 本目の乱数の種（本流の種から
+    /// 決定的に作る。本流・2 本目・最初の行の乱数と混ぜない）
+    /// </summary>
+    /// <param name="seed">本流の種</param>
+    public static int ShapeSeed(int seed) => unchecked(seed * 15485863 + 32452843);
+
+    /// <summary>本流が選んだ release-take・release-take-chain を、閉じた入れ替え・回転にする割合（4 本目の乱数）</summary>
+    public const double UniqueCycleRate = 0.5;
+
+    /// <summary>本流が選んだフォルダーの更新を、ピン留めの手にする割合（4 本目の乱数）</summary>
+    public const double PinRate = 0.3;
+
+    /// <summary>
+    /// 本流が選んだ端末のフォルダー・品目の更新を、その行のミラー版の持ち込みにする割合（4 本目の乱数で引く 1 つの値の幅。
+    /// フォルダーは <see cref="PinRate"/> の幅の後ろに続く幅）
+    /// </summary>
+    public const double MirrorRate = 0.15;
+
     private readonly Random _random;
     private readonly Random _side;
     private readonly Random _preload;
+    private readonly Random _shapes;
     private IReadOnlyDictionary<ModelActor, ModelDbState> _states =
         new Dictionary<ModelActor, ModelDbState>();
     private readonly Dictionary<ModelActor, int> _nextId = new()
@@ -129,6 +155,7 @@ internal sealed class SyncModelGenerator
         _random = new Random(seed);
         _side = new Random(SideSeed(seed));
         _preload = new Random(PreloadSeed(seed));
+        _shapes = new Random(ShapeSeed(seed));
         var modes = Enum.GetValues<SyncMode>();
         var policies = Enum.GetValues<SyncConflictPolicy>();
         var settings = seed / 4 % (modes.Length * policies.Length);
@@ -664,7 +691,7 @@ internal sealed class SyncModelGenerator
         }
     }
 
-    /// <summary>葉の行（その行を参照する行が書き手の DB に無いもの）</summary>
+    /// <summary>葉の行（その行を参照する行が書き手の DB に無いもの。品目は <see cref="IsDeletableItem"/>）</summary>
     private static List<(string Table, string Key)> LeafRows(ModelDbState state)
     {
         var leaves = new List<(string Table, string Key)>();
@@ -687,7 +714,7 @@ internal sealed class SyncModelGenerator
         leaves.AddRange(
             state
                 .Items.Keys.Order()
-                .Where(i => !state.Events.Values.Any(v => v.ItemId == i))
+                .Where(i => IsDeletableItem(state, i))
                 .Select(i => (ModelTables.Items, ModelDbState.Key(i)))
         );
         leaves.AddRange(
@@ -821,7 +848,11 @@ internal sealed class SyncModelGenerator
 
                 var (name, spelling) = UniqueFor(actor, items: false, Value("f"));
 
-                return [new UpdateFolderOp(actor, via, id, parent, name) { Spelling = spelling }];
+                return PinOrMirror(
+                    actor,
+                    state,
+                    new UpdateFolderOp(actor, via, id, parent, name) { Spelling = spelling }
+                );
             }
 
             case 3:
@@ -917,12 +948,16 @@ internal sealed class SyncModelGenerator
                     label = labels.Count == 0 || _random.Next(3) == 0 ? null : Pick(labels);
                 }
 
-                return [new UpdateItemOp(actor, via, id, folder, label, row.Code, Value("t"))];
+                var update = new UpdateItemOp(actor, via, id, folder, label, row.Code, Value("t"));
+
+                return _shapes.NextDouble() < MirrorRate
+                    ? MirrorOr(actor, state, ModelTables.Items, id, update)
+                    : [update];
             }
 
             case 10:
             {
-                var free = items.Where(i => !state.Events.Values.Any(v => v.ItemId == i)).ToList();
+                var free = items.Where(i => IsDeletableItem(state, i)).ToList();
 
                 return free.Count == 0 ? null : [new DeleteItemOp(actor, via, Pick(free))];
             }
@@ -941,7 +976,7 @@ internal sealed class SyncModelGenerator
                     return null;
                 }
 
-                var free = items.Where(i => !state.Events.Values.Any(v => v.ItemId == i)).ToList();
+                var free = items.Where(i => IsDeletableItem(state, i)).ToList();
 
                 if (free.Count == 0)
                 {
@@ -1003,11 +1038,95 @@ internal sealed class SyncModelGenerator
         }
     }
 
+    /// <summary>
+    /// 本流が選んだフォルダーの更新を、4 本目の乱数で 1 つの値を引いて置き換える：<see cref="PinRate"/> の幅ならピン留めの手
+    /// （ピン留めがあれば半分で null へ戻し＝循環を外す手、ほかは別の品目へ。書き手の DB に品目が無く外すものも無ければ更新のまま）、
+    /// 続く <see cref="MirrorRate"/> の幅ならミラー版の持ち込み（<see cref="MirrorOr"/>）、それ以外は更新のまま
+    /// </summary>
+    private IReadOnlyList<ModelOp> PinOrMirror(
+        ModelActor actor,
+        ModelDbState state,
+        UpdateFolderOp update
+    )
+    {
+        var roll = _shapes.NextDouble();
+
+        if (roll >= PinRate)
+        {
+            return roll < PinRate + MirrorRate
+                ? MirrorOr(actor, state, ModelTables.Folders, update.Id, update)
+                : [update];
+        }
+
+        var current = state.Folders[update.Id].PinnedItemId;
+        var others = state.Items.Keys.Where(item => item != current).Order().ToList();
+
+        if (current is not null && (others.Count == 0 || _shapes.Next(2) == 0))
+        {
+            return [new PinFolderOp(actor, update.Via, update.Id, null)];
+        }
+
+        return others.Count == 0
+            ? [update]
+            : [new PinFolderOp(actor, update.Via, update.Id, others[_shapes.Next(others.Count)])];
+    }
+
+    /// <summary>
+    /// 端末の行のミラー版の持ち込み（<see cref="MirrorServerRowOp"/>）を作る。サーバーにその行があり、写す内容が端末の DB で
+    /// 成り立つ（参照先が端末にある・フォルダーの親が自分の子孫でない・写す一意な値を端末のほかの行が持たない〔序数〕）ときだけ。
+    /// 作れなければ <paramref name="fallback"/>（本流が選んだ更新）のまま。サーバーの他者は持ち込まない
+    /// </summary>
+    private IReadOnlyList<ModelOp> MirrorOr(
+        ModelActor actor,
+        ModelDbState state,
+        string table,
+        int id,
+        ModelWriteOp fallback
+    )
+    {
+        if (actor == ModelActor.Server || !_states.TryGetValue(ModelActor.Server, out var server))
+        {
+            return [fallback];
+        }
+
+        var fits =
+            table == ModelTables.Folders
+                ? server.Folders.TryGetValue(id, out var folder)
+                    && (
+                        folder.ParentId is not { } parent
+                        || state.Folders.ContainsKey(parent)
+                            && !IsDescendantOrSelf(state, parent, id)
+                    )
+                    && (folder.PinnedItemId is not { } pinned || state.Items.ContainsKey(pinned))
+                    && !state.Folders.Any(other =>
+                        other.Key != id
+                        && string.Equals(other.Value.Name, folder.Name, StringComparison.Ordinal)
+                    )
+                : server.Items.TryGetValue(id, out var item)
+                    && state.Folders.ContainsKey(item.FolderId)
+                    && (item.LabelCode is not { } label || state.Labels.ContainsKey(label))
+                    && !state.Items.Any(other =>
+                        other.Key != id
+                        && string.Equals(other.Value.Code, item.Code, StringComparison.Ordinal)
+                    );
+
+        return fits ? [new MirrorServerRowOp(actor, table, id)] : [fallback];
+    }
+
     /// <summary>形：更新で一意な値を空け、別の行がその値を更新で取る（4m-D3）</summary>
     public const string ReleaseTakeShape = "release-take";
 
-    /// <summary>形：空けた値を取った行の値を、さらに別の行が取る（3 行の連鎖。入れ替えは作らない＝<see cref="SyncModelNotGenerated"/>）</summary>
+    /// <summary>形：空けた値を取った行の値を、さらに別の行が取る（3 行の連鎖）</summary>
     public const string ReleaseTakeChainShape = "release-take-chain";
+
+    /// <summary>
+    /// 形：2 行の一意な値の厳密な入れ替え（release-take を閉じる＝先頭の行を仮の値にし、2 番目の行が先頭の元の値を取り、
+    /// 先頭の行が 2 番目の元の値を取る）
+    /// </summary>
+    public const string ExactSwapShape = "exact-swap";
+
+    /// <summary>形：3 行の一意な値の回転（release-take-chain を閉じる＝最後の行の元の値を先頭の行が取る）</summary>
+    public const string RotationShape = "rotation";
 
     /// <summary>形：行を消して一意な値を空け、別の行がその値を更新で取る（4m-B3 の材料）</summary>
     public const string DeleteTakeShape = "delete-take";
@@ -1017,7 +1136,8 @@ internal sealed class SyncModelGenerator
 
     /// <summary>
     /// 一意な値の付け替えの形（品目の code かフォルダーの name）を 1 つ作る。どれも書き手の DB で各手が成り立つ順に並べ、
-    /// 値を取る手は、それより前の手が値を空けた後に置く（入れ替えは作らない＝<see cref="SyncModelNotGenerated"/>）。
+    /// 値を取る手は、それより前の手が値を空けた後に置く。release-take の形は、本流が引き終えた後に 4 本目の乱数で
+    /// <see cref="UniqueCycleRate"/> の割合で閉じる（先頭の行が最後の行の元の値を取る＝入れ替え・回転。先頭の行の最初の値は仮の値）。
     /// </summary>
     private ModelShapeStep? TryUniqueShape(ModelActor actor, ModelWriteVia via, ModelDbState state)
     {
@@ -1030,27 +1150,43 @@ internal sealed class SyncModelGenerator
             2 => DeleteTakeShape,
             _ => DeleteTakeReparentShape,
         };
+        var chain = new List<int>();
         var ops = shape switch
         {
-            ReleaseTakeShape => ReleaseTake(actor, via, state, items, 2),
-            ReleaseTakeChainShape => ReleaseTake(actor, via, state, items, 3),
+            ReleaseTakeShape => ReleaseTake(actor, via, state, items, 2, chain),
+            ReleaseTakeChainShape => ReleaseTake(actor, via, state, items, 3, chain),
             DeleteTakeShape => DeleteTake(actor, via, state, items),
             _ => DeleteTakeReparent(actor, via, state, items),
         };
 
-        return ops is null ? null : new ModelShapeStep(shape, table, ops);
+        if (ops is null)
+        {
+            return null;
+        }
+
+        if (chain.Count > 0 && _shapes.NextDouble() < UniqueCycleRate)
+        {
+            ops.Add(
+                WithValue(actor, via, state, items, chain[0], UniqueOf(state, items, chain[^1]))
+            );
+            shape = chain.Count == 2 ? ExactSwapShape : RotationShape;
+        }
+
+        return new ModelShapeStep(shape, table, ops);
     }
 
     /// <summary>
     /// <paramref name="length"/> 行の連鎖：先頭の行の値を新しい値へ、続く行はそれぞれ直前の行の元の値へ更新する。
-    /// 半分の確率で、2 番目の行（最初に値を取る行）を先に別の更新で触る（取る側の記録を先にする＝4m-D3 の記録の順）
+    /// 半分の確率で、2 番目の行（最初に値を取る行）を先に別の更新で触る（取る側の記録を先にする＝4m-D3 の記録の順）。
+    /// 選んだ行のキーを <paramref name="chain"/> へ並べる（形を閉じる <see cref="TryUniqueShape"/> が読む）
     /// </summary>
     private List<ModelOp>? ReleaseTake(
         ModelActor actor,
         ModelWriteVia via,
         ModelDbState state,
         bool items,
-        int length
+        int length,
+        List<int> chain
     )
     {
         var keys = items ? state.Items.Keys.Order().ToList() : state.Folders.Keys.Order().ToList();
@@ -1059,8 +1195,6 @@ internal sealed class SyncModelGenerator
         {
             return null;
         }
-
-        var chain = new List<int>();
 
         for (var i = 0; i < length; i++)
         {
@@ -1200,13 +1334,21 @@ internal sealed class SyncModelGenerator
                 .Order()
                 .ToList();
 
-    /// <summary>消せる子か（品目はイベントが参照しない・フォルダーは葉）</summary>
+    /// <summary>消せる子か（品目は <see cref="IsDeletableItem"/>・フォルダーは葉）</summary>
     private static bool IsLeafChild(ModelDbState state, bool items, int key) =>
-        items ? !state.Events.Values.Any(e => e.ItemId == key) : LeafFolders(state).Contains(key);
+        items ? IsDeletableItem(state, key) : LeafFolders(state).Contains(key);
 
-    /// <summary>イベントが参照しない品目</summary>
+    /// <summary>
+    /// 書き手の DB で消せる品目（イベントが参照せず、どのフォルダーもピン留めしていない。ピン留めは表どうしの循環の外部キーで、
+    /// 消す前にピン留めを外す＝<see cref="PinOrMirror"/> が null へ戻す手を作る）
+    /// </summary>
+    private static bool IsDeletableItem(ModelDbState state, int item) =>
+        !state.Events.Values.Any(v => v.ItemId == item)
+        && !state.Folders.Values.Any(v => v.PinnedItemId == item);
+
+    /// <summary>消せる品目（<see cref="IsDeletableItem"/>）</summary>
     private static List<int> FreeItems(ModelDbState state) =>
-        state.Items.Keys.Order().Where(i => !state.Events.Values.Any(v => v.ItemId == i)).ToList();
+        state.Items.Keys.Order().Where(i => IsDeletableItem(state, i)).ToList();
 
     /// <summary>葉のフォルダー（子のフォルダー・ラベル・品目のどれからも参照されない）</summary>
     private static List<int> LeafFolders(ModelDbState state) =>
@@ -1343,9 +1485,10 @@ internal sealed class SyncModelGenerator
     }
 
     /// <summary>
-    /// 書き込みの手が書き手の DB で成功する約束（<see cref="SyncModelGenerator"/> の remarks）のうち、主キーと一意な値の分を
-    /// 確かめる。手の列を順に当てた書き手の DB の写しで、挿入するキーがまだ無いことと、フォルダーの name・品目の code を
-    /// ほかの行が持っていないこと（序数）を見る。失敗を期待する手（<see cref="ModelWriteOp.ExpectFailure"/>）は当てない。
+    /// 書き込みの手が書き手の DB で成功する約束（<see cref="SyncModelGenerator"/> の remarks）のうち、主キーと一意な値と
+    /// ピン留め（表どうしの循環の外部キー）の分を確かめる。手の列を順に当てた書き手の DB の写しで、挿入するキーがまだ無いことと、
+    /// フォルダーの name・品目の code をほかの行が持っていないこと（序数）と、ピン留めが書き手の DB にある品目を指し、
+    /// ピン留めされた品目を消さないことを見る。失敗を期待する手（<see cref="ModelWriteOp.ExpectFailure"/>）は当てない。
     /// 破っていれば <see cref="SyncModelGeneratorContractException"/>（生成器の誤りを、書き込みの失敗 <c>op/failed</c> と分けて名指しする）
     /// </summary>
     /// <param name="actor">書き手</param>
@@ -1361,6 +1504,9 @@ internal sealed class SyncModelGenerator
         var items = state.Items.ToDictionary(p => p.Key, p => p.Value.Code);
         var labels = state.Labels.Keys.ToHashSet(StringComparer.Ordinal);
         var events = state.Events.Keys.ToHashSet(StringComparer.Ordinal);
+        var pins = state
+            .Folders.Where(p => p.Value.PinnedItemId is not null)
+            .ToDictionary(p => p.Key, p => p.Value.PinnedItemId!.Value);
 
         void Fail(ModelWriteOp op, string what, string table) =>
             throw new SyncModelGeneratorContractException(
@@ -1401,12 +1547,32 @@ internal sealed class SyncModelGenerator
                     break;
                 case DeleteFolderOp delete:
                     folders.Remove(delete.Id);
+                    pins.Remove(delete.Id);
+                    break;
+                case PinFolderOp pin when pin.ItemId is { } target && !items.ContainsKey(target):
+                    // ピン留めの外部キー（表どうしの循環）：書き手の DB に無い品目は指せない
+                    Fail(op, "pinned-item-missing", ModelTables.Items);
+                    break;
+                case PinFolderOp pin:
+                    if (pin.ItemId is { } pinned)
+                    {
+                        pins[pin.Id] = pinned;
+                    }
+                    else
+                    {
+                        pins.Remove(pin.Id);
+                    }
+
                     break;
                 case AddItemOp add:
                     Put(op, items, add.Id, add.Code, insert: true);
                     break;
                 case UpdateItemOp update:
                     Put(op, items, update.Id, update.Code, insert: false);
+                    break;
+                case DeleteItemOp delete when pins.ContainsValue(delete.Id):
+                    // ピン留めされた品目は消せない（消す前にピン留めを外す）
+                    Fail(op, "pinned", ModelTables.Items);
                     break;
                 case DeleteItemOp delete:
                     items.Remove(delete.Id);

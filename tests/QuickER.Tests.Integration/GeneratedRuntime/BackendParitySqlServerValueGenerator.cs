@@ -42,6 +42,18 @@ public enum SqlServerValueColumn
 
     /// <summary><c>payload varbinary(max)</c>（除外する無制限バイナリ列）</summary>
     Payload,
+
+    /// <summary><c>legacy_at datetime</c>（1/300 秒）</summary>
+    LegacyAt,
+
+    /// <summary><c>small_at smalldatetime</c>（分）</summary>
+    SmallAt,
+
+    /// <summary><c>price money</c></summary>
+    Price,
+
+    /// <summary><c>fee smallmoney</c></summary>
+    Fee,
 }
 
 /// <summary>値の往復の書く経路</summary>
@@ -264,6 +276,35 @@ public static class SqlServerValueShapes
             ],
             SqlServerValueColumn.Tag => [Short, Empty, ExactLength, OverPadding, OverContent],
             SqlServerValueColumn.Payload => [Empty, Short, Long],
+            SqlServerValueColumn.LegacyAt =>
+            [
+                Exact,
+                RoundDown,
+                RoundUp,
+                RangeEnd,
+                OutOfRange,
+                KindUtc,
+            ],
+            SqlServerValueColumn.SmallAt =>
+            [
+                Exact,
+                RoundDown,
+                RoundUp,
+                CarryDay,
+                RangeEnd,
+                OutOfRange,
+            ],
+            SqlServerValueColumn.Price or SqlServerValueColumn.Fee =>
+            [
+                Exact,
+                Max,
+                Min,
+                RoundDown,
+                RoundUp,
+                Half,
+                RoundsToOverflow,
+                Overflow,
+            ],
             _ => throw new ArgumentOutOfRangeException(nameof(column), column, null),
         };
 
@@ -287,8 +328,113 @@ public static class SqlServerValueShapes
             SqlServerValueColumn.Label => Text(shape, 20, unicode: true, random),
             SqlServerValueColumn.Tag => Binary(shape, 16, random),
             SqlServerValueColumn.Payload => Blob(shape, random),
+            SqlServerValueColumn.LegacyAt => LegacyDateTime(shape, random),
+            SqlServerValueColumn.SmallAt => SmallDateTime(shape, random),
+            SqlServerValueColumn.Price => Money(shape, random, small: false),
+            SqlServerValueColumn.Fee => Money(shape, random, small: true),
             _ => throw new ArgumentOutOfRangeException(nameof(column), column, null),
         };
+
+    /// <summary>datetime の 1 単位（1/300 秒）の tick（端数を持つ）</summary>
+    private const double LegacyUnitTicks = TimeSpan.TicksPerSecond / 300.0;
+
+    /// <summary>datetime の最小の値（1753-01-01）</summary>
+    public static readonly DateTime LegacyMin = new(1753, 1, 1);
+
+    /// <summary>datetime の最後の値（9999-12-31 23:59:59.997 を DateTime で表した値）</summary>
+    public static readonly DateTime LegacyMax = System.Data.SqlTypes.SqlDateTime.MaxValue.Value;
+
+    /// <summary>
+    /// datetime の値。Exact は 10 ミリ秒の倍数（1/300 秒の 3 単位＝ちょうど表せる）、RoundDown・RoundUp は 10 ミリ秒の倍数から
+    /// 半単位未満・半単位を超えた位置（半単位のちょうどは tick で表せない）、RangeEnd は最後の値から半単位未満だけ前、OutOfRange は
+    /// 最小の値から 1 単位を超えて前。最後の値から半単位を超えて後ろ（丸めると範囲の外）は作らない
+    /// （<c>BackendParitySqlServerValueNotGenerated</c> の <c>datetime-rounds-past-max</c>）
+    /// </summary>
+    private static DateTime LegacyDateTime(string shape, Random? random)
+    {
+        var half = (long)(LegacyUnitTicks / 2);
+
+        return shape switch
+        {
+            Exact => BaseTime.AddTicks(100_000 * Pick(random, 0, 99, 12)),
+            RoundDown => BaseTime.AddTicks(
+                100_000 * Pick(random, 0, 99, 12) + Pick(random, 1, half, 12_345)
+            ),
+            RoundUp => BaseTime.AddTicks(
+                100_000 * Pick(random, 0, 99, 12) + Pick(random, half + 1, 33_332, 23_456)
+            ),
+            RangeEnd => LegacyMax.AddTicks(-Pick(random, 0, half, 0)),
+            OutOfRange => LegacyMin.AddTicks(
+                -Pick(random, 33_334, TimeSpan.TicksPerDay, TimeSpan.TicksPerDay)
+            ),
+            KindUtc => DateTime.SpecifyKind(LegacyDateTime(Exact, random), DateTimeKind.Utc),
+            _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, null),
+        };
+    }
+
+    /// <summary>smalldatetime の最小の値</summary>
+    public static readonly DateTime SmallMin = new(1900, 1, 1);
+
+    /// <summary>smalldatetime の最後の値</summary>
+    public static readonly DateTime SmallMax = new(2079, 6, 6, 23, 59, 0);
+
+    /// <summary>
+    /// smalldatetime の値（秒はミリ秒の単位で作る：29.998 秒以下は分を切り下げ、30.001 秒以上は切り上げる）。
+    /// CarryDay は日の最後の分の後半、RangeEnd は最後の分の前半、OutOfRange は最小の値の前の分か、最後の分の後半。
+    /// 秒が 29.999 以上 30.000 以下の値は作らない（<c>BackendParitySqlServerValueNotGenerated</c> の
+    /// <c>smalldatetime-half-minute-boundary</c>）
+    /// </summary>
+    private static DateTime SmallDateTime(string shape, Random? random)
+    {
+        var minute = new DateTime(2026, 1, 2, 3, 4, 0).AddMinutes(Pick(random, 0, 1_000, 7));
+
+        return shape switch
+        {
+            Exact => minute,
+            RoundDown => minute.AddMilliseconds(Pick(random, 1, 29_998, 29_998)),
+            RoundUp => minute.AddMilliseconds(Pick(random, 30_001, 59_999, 30_001)),
+            CarryDay => BaseDay
+                .AddDays(1)
+                .AddMinutes(-1)
+                .AddMilliseconds(Pick(random, 30_001, 59_999, 30_001)),
+            RangeEnd => SmallMax.AddMilliseconds(Pick(random, 0, 29_998, 29_998)),
+            OutOfRange => Pick(random, 0, 1, 1) == 0
+                ? SmallMin.AddMinutes(-1).AddMilliseconds(Pick(random, 0, 29_998, 0))
+                : SmallMax.AddMilliseconds(Pick(random, 30_001, 59_999, 30_001)),
+            _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, null),
+        };
+    }
+
+    /// <summary>money の範囲（最小・最大）</summary>
+    public static (decimal Min, decimal Max) MoneyRange(bool small) =>
+        small
+            ? (-214_748.3648m, 214_748.3647m)
+            : (-922_337_203_685_477.5808m, 922_337_203_685_477.5807m);
+
+    /// <summary>money・smallmoney の値（小数 4 桁の外の 5 桁目で丸めの向きを作る）</summary>
+    private static decimal Money(string shape, Random? random, bool small)
+    {
+        var (min, max) = MoneyRange(small);
+        var whole = Pick(random, -99_999, 99_999, 1);
+        var sign = whole < 0 ? -1m : 1m;
+        var basis = whole + sign * Pick(random, 0, 9_999, 2_345) / 10_000m;
+        var positive = Pick(random, 0, 1, 0) == 0;
+
+        return shape switch
+        {
+            Exact => basis,
+            Max => max,
+            Min => min,
+            RoundDown => basis + sign * Pick(random, 1, 4, 2) / 100_000m,
+            RoundUp => basis + sign * Pick(random, 6, 9, 7) / 100_000m,
+            Half => basis + sign * 0.00005m,
+            RoundsToOverflow => positive ? max + 0.00005m : min - 0.00005m,
+            Overflow => positive
+                ? max + 1m + Pick(random, 0, 99, 0)
+                : min - 1m - Pick(random, 0, 99, 0),
+            _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, null),
+        };
+    }
 
     /// <summary>小数秒 2 桁の単位の中の端数（形ごと）</summary>
     private static long Fraction(string shape, Random? random) =>

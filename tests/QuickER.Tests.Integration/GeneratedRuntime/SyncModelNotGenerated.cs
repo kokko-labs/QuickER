@@ -30,7 +30,7 @@ internal static class SyncModelNotGenerated
                     "null-unique-values",
                     "一意な値の null",
                     "同期のモデルの図の一意な列（model_folders.name・model_items.code）は NOT NULL で、null を作るには図を変える必要がある。docs の「競合」の節の「サーバーが SQL Server なら NULL も値として数える」の約束は SyncFixture の実 SQL Server のテストが持つ",
-                    "`SyncSqlServerRuntimeTests.NullUniqueValueTakenOnServer_IsReportedOrSettled`・`SyncSqlServerRuntimeTests.ServerCheckUniqueness_ComparesNullsAsValues`・`SyncSqlServerHttpRuntimeTests.NullUniqueValueTakenOnServer_IsReportedOverHttp`"
+                    "`SyncSupportAdoSqlServerFixtureRuntimeTests.NullUniqueValueTakenOnServer_IsReportedOrSettled`・`SyncSupportAdoSqlServerFixtureRuntimeTests.ServerCheckUniqueness_ComparesNullsAsValues`・`SyncSupportRemoteAdoSqlServerFixtureRuntimeTests.NullUniqueValueTakenOnServer_IsReportedOverHttp`"
                 ),
                 NotGenerated.Accepted(
                     "empty-blobs",
@@ -45,17 +45,15 @@ internal static class SyncModelNotGenerated
                     "モードとポリシーは種の番号から決めて種の中で固定する（24 種ごとに全積）。前の実行の設定が残る壊し方は今の種の列で赤になる（後勝ちの実行が送った行の基準の版を行の状態に書かない・ポリシーやモードを最初の実行のまま使い回す）。種の中の切り替えは、静止化が毎周 Collect → ServerWins → 後勝ちへ切り替えることが受け持つ",
                     Random + "・`SyncModel/Outcomes`"
                 ),
-                NotGenerated.Pending(
-                    "cross-table-cycle-writes",
-                    "表どうしの循環（フォルダーが品目を指す列）を書く手",
-                    "R3 の後の生成器の区切り",
-                    "生成器は書き手の DB で成功する手だけを選び、循環に入った行の削除は書き手の DB の外部キーが断るので、循環の列を書く手を足すには、消す前に循環を外す手を選ぶ規則も要る（並行の書き手が行の循環を作るのは防げない）。今のエンジンは循環の行を 1 つの適用で降ろし、削除伝搬も外部キーの検査を切った同じ適用で流す（src/QuickER.Runtime.Sync/CLAUDE.md「段の順と適用」）ので、作らない事実の理由は無い。表の循環の経路は決まった形の行が持つ",
-                    Random
-                        + " の行 `cycle-pin-to-new-item-uploads-in-rounds` / `cycle-pinned-item-is-read-back-before-folder` / `cycle-serverwins-restores-folder-pinned-to-new-item` / `refresh-empties-tables-in-a-foreign-key-cycle` / `refresh-force-in-a-foreign-key-cycle`"
+                NotGenerated.Accepted(
+                    "transport-wide-seed-mode-policy",
+                    "HTTP・実 SQL Server の転送の普段の広い世界の種で、後勝ち × ServerWins と 後勝ち × LocalWins",
+                    "普段の広い世界の種は 4 種で、モード×ポリシーの 6 組のうち 4 組しか作れない（選び方は組が重ならない形で、4 組を作る）。広い世界の種が見るのは端末 3 台と端末ごとの最初の形で、モード×ポリシーの 6 組は同じ転送の普通の種（普段 10 種）が全部作り、夜間の広い世界の種（40 種）も 6 組を作る",
+                    "`EngineFingerprintDriftTests.SyncModel_TransportSeedsAreRecorded`"
                 ),
                 NotGenerated.Accepted(
                     "refresh-interrupt-apply-skip",
-                    "洗い替え・割り込み・ピン留め",
+                    "洗い替え・割り込み",
                     "生成器は毎歩実際の DB を読んで操作を選ぶので、これらを混ぜると既存の種の操作の列が変わる。決まった形のシナリオ（割り込みの網）が受け持つ",
                     "`SyncModelRuntimeTests.InterruptScenarios_CoverEveryPointAndShape`"
                 ),
@@ -64,14 +62,6 @@ internal static class SyncModelNotGenerated
                     "実行ごとに blob を運ぶかを変える",
                     "docs の「無制限バイナリ列」の節（列を運ぶかどうかは端末ごとに決め、変えない）で、運ばない実行を挟むと収束の表明が成り立たない。乱数の列は常に運び、運ばない実行は対照のシナリオが持つ",
                     "`SyncModelRuntimeTests.EmptyBlobWithoutConflict_IsStillAViolation`"
-                ),
-                NotGenerated.Pending(
-                    "exact-unique-swap",
-                    "一意な値の厳密な入れ替え（循環）",
-                    "R3 の後の生成器の区切り",
-                    "付け替えの形は値を空けた後に取る順だけを作り、2 行以上が互いの値を持ち合う形は作らない。docs の「競合」の節は、一意な値を入れ替えた行・回転した行が 1 回の適用で降りると約束し、決まった形の行がそれを表明するので、作らない事実の理由は無い。乱数の列へ入れるには、入れ替えを作る手と、端末の入れ替えを送るときの期待を判定役に足す必要がある",
-                    Random
-                        + " の行 `swap-codes-settles-in-one-sync` / `swap-folder-names-settles-in-one-sync`"
                 ),
                 NotGenerated.Accepted(
                     "server-extras",
@@ -85,12 +75,17 @@ internal static class SyncModelNotGenerated
                     "docs の「既知の割り切り」の最初の項目は、記録を通らずに入った行（端末にもサーバーにも同じ行がある行）へ書く前に、同期か洗い替えを 1 回流すよう求める。最初の形 Untracked の端末は最初の同期の前に書くので、サーバーにあるキーの行を作ると docs の使い方の外の書き込みになる。その書き込みの結果（更新は Collect の同期のたびに DuplicateOnServer、削除は送られずにサーバーの行が戻る）は同期のエンジンの決まった形の行 stateless-* が固定する。生成器は追跡しない行のキーを端末のキーの範囲の別の帯に置く",
                     Random
                 ),
-                NotGenerated.Pending(
-                    "imported-mirror-versions",
-                    "ミラー版つきの行を端末へ持ち込む形",
-                    "R3 の後の生成器の区切り",
-                    "再開点はテーブルごとに保存してローカルの行から導かない（docs の「どこに何を作るか」）ので、行の版の列は再開点に関わらない。版の列は、送信の段が、エンジンが最後に入れた他者の内容の版と比べて元の版を選ぶ入力になり、その振る舞いは docs の「取得の前に読んだ実体の保存」が書くので、作らない事実の理由は無い。生成器に、記録させずに版の列を書く手が無い",
-                    NotGenerated.Unguarded
+                NotGenerated.Accepted(
+                    "imported-stale-mirror-versions",
+                    "サーバーの今の版より古い版（バックアップの写しなど）を、記録させずに端末の行へ持ち込む形",
+                    "docs の「既知の割り切り」の最初の項目（記録を通らずに入った行へ書く前に、同期か洗い替えを 1 回流す）の外の使い方。再開点は表ごとに保存し（docs の「どこに何を作るか」）、古い版を持ち込んだ行はサーバーで変わらない限り後の同期で降り直さない（書き直すのは洗い替えだけ）ので、書く前に同期を流しても古い版のまま送られる。生成器は、端末とサーバーの両方にある行を、サーバーの今の内容と版で書き換える形（mirror-import＝MirrorServerRowOp）だけを作る。版の列が元の版を選ぶ入力になる古い読みの保存は、決まった形の行が持つ",
+                    "`table:SyncEngineFixed` の行 `stale-entity-saved-then-raw-sql-update-collect-reports-modified-on-server`"
+                ),
+                NotGenerated.Accepted(
+                    "mirror-import-events",
+                    "イベントの行のミラー版の持ち込み",
+                    "送信の段が行の版と最後に入れた他者の内容の版を比べる部品（SyncState.IsOlderVersion・WriteAppliedRowAsync）は表に依らず同じで、イベントの表の版の列はフォルダー・品目と同じ rowversion。日時のキーの表を写す手は、キーの文字列の作り方（Kind）を写しの文に持ち込むだけで、エンジンが新しく読むものが無い。生成器はフォルダーと品目の行だけを写す",
+                    Random
                 ),
                 NotGenerated.Accepted(
                     "copied-device-databases",
@@ -114,8 +109,16 @@ internal static class SyncModelNotGenerated
                 NotGenerated.Accepted(
                     "stale-entity-saves",
                     "同期が降ろす前に読んだ実体を、降ろした後に保存する書き込み（古い読みの保存）",
-                    "生成器は手のたびに端末の DB を読んでから書くので、手元に持ち越した古い実体で保存する手を作らない。古い読みの保存を送信の段が見分ける形・見分けない形は決まった形の行が持つ",
+                    "生成器は手のたびに端末の DB を読んでから書くので、手元に持ち越した古い実体で保存する手を作らない。古い読みの保存を送信の段が見分ける形・見分けない形は決まった形の行が持つ。決まった形の行は直結 × SQLite のサーバー役の世界だけで流す（ハーネスがそのサーバー役に縛られる）が、見分けは転送に依らない：送信の段は端末の DB だけで決め（行の状態の表の applied_version と、行の版を SyncState.IsOlderVersion＝先頭の 0 を落として長さとバイトで比べる）、どの転送の版も 8 バイトのビッグエンディアン（SQLite のサーバー役の採番・SQL Server の rowversion・HTTP は Base64 で往復）。選んだ元の版でサーバーが ModifiedOnServer を返すのは版で守る更新で、その道は全転送で流す決定的なシナリオの版の競合の行が持つ",
                     "`table:SyncEngineFixed` の行 `stale-entity-saved-after-download-collect-reports-modified-on-server` / `stale-entity-saved-after-own-upload-is-not-a-conflict`"
+                ),
+                NotGenerated.Accepted(
+                    "pending-discard",
+                    "未送信の一覧と捨てる口（GetPendingChangesAsync・DiscardPendingChangesAsync・DiscardAllPendingChangesAsync）を呼ぶ手",
+                    "乱数の操作の列は捨てる口を呼ばない（呼んだ行は次の実行でサーバーの行に戻るので、捨てた変更の期待を判定役に足す必要がある）。決まった形の行は直結 × SQLite のサーバー役の世界だけで流すが、口は転送に依らない：一覧と捨てる印（持ち越した ServerWins の決定と同じ sw_seq）は端末の状態の表だけを読み書きし、サーバーの差分ソースに触れない。捨てた行が次の実行でサーバーの行に戻る道は、持ち越した ServerWins の決定を果たす道と同じで、その道は全転送で流す決定的なシナリオが持つ（"
+                        + Random
+                        + " の行 `cycle-serverwins-restores-folder-pinned-to-new-item` / `fk-lww-serverwins-label-delete-refused-while-item-reparent-is-held` / `blob-thrown-serverwins-then-collect-overwrites-newer-server-blob`）",
+                    "`table:SyncEngineFixed` の行 `pending-discard-settles-collect-conflict-with-server-row` / `pending-discard-with-stale-row-is-not-discarded` / `pending-discard-is-replaced-by-refresh-without-force`"
                 ),
             ]
         );

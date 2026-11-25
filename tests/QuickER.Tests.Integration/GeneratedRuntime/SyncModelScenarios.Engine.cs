@@ -18,7 +18,7 @@ internal static partial class SyncModelScenarios
     private const string L = ModelTables.Labels;
 
     /// <summary>
-    /// 移したシナリオ（すべての転送で流す。元の SyncSqlServerRuntimeTests が守っていた本物の rowversion・
+    /// 移したシナリオ（すべての転送で流す。元の SyncSupportAdoSqlServerFixtureRuntimeTests が守っていた本物の rowversion・
     /// MIN_ACTIVE_ROWVERSION() の上限・外部キーエラーの分類・TOP のページングは、実 SQL Server の転送でも期待の手で表明する）
     /// </summary>
     private static SyncModelScenario Moved(

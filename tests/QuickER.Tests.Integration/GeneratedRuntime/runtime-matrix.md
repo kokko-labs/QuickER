@@ -425,21 +425,21 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 
 双方向同期支援（差分ダウンロード・トリガーの記録・削除伝搬・競合収集・適用中の印）
 
-- QuickER 版 SQL Server：担当＝`SyncConfigMatrixRuntimeTests`・`SyncModelSqlServerRuntimeTests`・`SyncSqlServerRuntimeTests`・`SyncSupportAdoSqlServerScenarioPart2RuntimeTests`
-- QuickER 版 SQLite：担当＝`SyncKeyTextRuntimeTests`・`SyncModelRuntimeTests`・`SyncModelRuntimeTestsPart2`・`SyncSupportAdoSqliteEngineRuntimeTests`・`SyncSupportAdoSqliteTriggerRuntimeTests`
+- QuickER 版 SQL Server：担当＝`SyncModelSqlServerRuntimeTests`・`SyncSupportAdoSqlServerFixtureRuntimeTests`・`SyncSupportAdoSqlServerScenarioPart2RuntimeTests`・`SyncSupportAdoSqlServerSmallChunkRuntimeTests`・`SyncSupportConfigMatrixRuntimeTests`
+- QuickER 版 SQLite：担当＝`SyncModelRuntimeTests`・`SyncSupportAdoSqliteEngineRuntimeTests`・`SyncSupportAdoSqliteKeyTextRuntimeTests`・`SyncSupportAdoSqliteScenarioPart2RuntimeTests`・`SyncSupportAdoSqliteTriggerRuntimeTests`
 - EF Core SQL Server：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core SQLite：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core PostgreSQL：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core MySQL：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core Oracle：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - インメモリ：非該当＝同期はサーバー DB とローカル DB の 2 つの実 DB の間の話で、インメモリにはミラーすべきサーバー版を採番する主体が居ない
-- リモート：担当＝`SyncBinaryTransferResponseRuntimeTests`（サーバー：リポジトリなし）・`SyncConfigMatrixRuntimeTests`（サーバー：QuickER 版 SQL Server）・`SyncEndpointRegistrationRuntimeTests`（サーバー：リポジトリなし）・`SyncHttpRuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTestsPart2`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTestsPart3`（サーバー：QuickER 版 SQLite）・`SyncModelHttpRuntimeTestsPart4`（サーバー：QuickER 版 SQLite）・`SyncSqlServerHttpRuntimeTests`（サーバー：QuickER 版 SQL Server）・`SyncSupportRemoteAdoSqlServerRuntimeTests`（サーバー：QuickER 版 SQL Server）
+- リモート：担当＝`SyncModelHttpRuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncSupportConfigMatrixRuntimeTests`（サーバー：QuickER 版 SQL Server）・`SyncSupportRemoteAdoSqlServerFixtureRuntimeTests`（サーバー：QuickER 版 SQL Server）・`SyncSupportRemoteAdoSqlServerRuntimeTests`（サーバー：QuickER 版 SQL Server）・`SyncSupportRemoteAdoSqliteHttpSourceRuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncSupportRemoteAdoSqliteScenarioPart2RuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncSupportRemoteAdoSqliteScenarioPart3RuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncSupportRemoteAdoSqliteScenarioPart4RuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncSupportRemoteAdoSqliteSmallChunkRuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncSupportRemoteBinaryTransferResponseRuntimeTests`（サーバー：リポジトリなし）・`SyncSupportRemoteEndpointRegistrationRuntimeTests`（サーバー：リポジトリなし）
 
 ### `SyncRefresh`
 
 洗い替え（全消し＋サーバー全行の流し込み・未送信変更の拒否と force・FK 順・アンカーの継続）
 
-- QuickER 版 SQL Server：担当＝`SyncModelSqlServerRuntimeTests`
+- QuickER 版 SQL Server：担当＝`SyncModelSqlServerRuntimeTests`・`SyncSupportAdoSqlServerSmallChunkRuntimeTests`
 - QuickER 版 SQLite：担当＝`SyncModelRuntimeTests`・`SyncSupportAdoSqliteEngineRuntimeTests`
 - EF Core SQL Server：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core SQLite：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
@@ -447,7 +447,7 @@ IncludeGraph の edge-skip（自己参照ナビを展開しない）
 - EF Core MySQL：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - EF Core Oracle：非該当＝同期支援はマルチターゲット前提で、EF Core とは生成時に排他
 - インメモリ：非該当＝洗い替えはサーバー DB の全行でローカル DB を作り直す操作で、インメモリには作り直す先の実 DB が無い
-- リモート：担当＝`SyncModelHttpRuntimeTests`（サーバー：QuickER 版 SQLite）
+- リモート：担当＝`SyncModelHttpRuntimeTests`（サーバー：QuickER 版 SQLite）・`SyncSupportRemoteAdoSqliteSmallChunkRuntimeTests`（サーバー：QuickER 版 SQLite）
 
 ### `DialectPortability`
 

@@ -721,6 +721,68 @@ internal sealed class SyncModelWorld : IAsyncDisposable
     }
 
     /// <summary>
+    /// 端末の既存の行を、記録させずに、サーバーの今の行の内容と版の列で書き換える（<see cref="MirrorServerRowOp"/>。blob は書かない）。
+    /// 端末の記録しない書き込みの口（<see cref="SyncModelDevice.WriteUntrackedAsync"/>・外部キーの検査つき）を通して流し、
+    /// 1 行を書き換えなければ投げる
+    /// </summary>
+    public async Task MirrorServerRowAsync(MirrorServerRowOp op, CancellationToken ct)
+    {
+        var device = Device(op.Device);
+        string sql;
+        object?[] values;
+
+        if (op.Table == ModelTables.Folders)
+        {
+            var row =
+                await Server.Folders.GetByIdAsync(op.Id, ct)
+                ?? throw new InvalidOperationException($"{op.Describe()}: no server row");
+            sql =
+                "UPDATE model_folders SET parent_id = $p0, name = $p1, pinned_item_id = $p2, row_ver = $p3 WHERE folder_id = $id";
+            values = [row.ParentId, row.Name, row.PinnedItemId, row.RowVer];
+        }
+        else if (op.Table == ModelTables.Items)
+        {
+            var row =
+                await Server.Items.GetByIdAsync(op.Id, ct)
+                ?? throw new InvalidOperationException($"{op.Describe()}: no server row");
+            sql =
+                "UPDATE model_items SET folder_id = $p0, label_code = $p1, code = $p2, title = $p3, row_ver = $p4 WHERE item_id = $id";
+            values = [row.FolderId, row.LabelCode, row.Code, row.Title, row.RowVer];
+        }
+        else
+        {
+            throw new ArgumentException($"Only folders and items are mirrored: {op.Describe()}");
+        }
+
+        await device.WriteUntrackedAsync(
+            async connection =>
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = sql;
+
+                for (var i = 0; i < values.Length; i++)
+                {
+                    var parameter = command.CreateParameter();
+                    parameter.ParameterName = $"$p{i.ToString(CultureInfo.InvariantCulture)}";
+                    parameter.Value = values[i] ?? DBNull.Value;
+                    command.Parameters.Add(parameter);
+                }
+
+                var id = command.CreateParameter();
+                id.ParameterName = "$id";
+                id.Value = op.Id;
+                command.Parameters.Add(id);
+
+                if (await command.ExecuteNonQueryAsync(ct) != 1)
+                {
+                    throw new InvalidOperationException($"{op.Describe()}: no device row");
+                }
+            },
+            ct
+        );
+    }
+
+    /// <summary>
     /// 追加の手を入れる（<see cref="ApplyUntrackedAsync"/> の本体）。口が渡した接続へ <see cref="SyncModelDevice.LocalRows"/> で
     /// 全列を書く
     /// </summary>

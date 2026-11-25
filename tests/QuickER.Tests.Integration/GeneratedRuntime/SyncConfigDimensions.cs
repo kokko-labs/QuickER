@@ -81,7 +81,7 @@ internal sealed record SyncConfigCase(
 /// 同期のモデル（<see cref="SyncModelRuntimeTests"/>）は DI を使わずに表とエンジンを手で組むので、生成された DI の登録の形
 /// （keyed／非 keyed・<c>AddGeneratedSyncSupport</c> か分けた登録・直結か HTTP か）と値オブジェクトのキーに届かない。
 /// この行列は、有効な組の全積の行ごとに「登録→解決→ローカルの新しい行を同期 1 回で上げる→サーバーの新しい行を同期 1 回で
-/// 降ろす→洗い替え」を流す（<see cref="SyncConfigMatrixRuntimeTests"/>）。書き込みの経路の水準のうち、保存済みの親をキーの
+/// 降ろす→洗い替え」を流す（<see cref="SyncSupportConfigMatrixRuntimeTests"/>）。書き込みの経路の水準のうち、保存済みの親をキーの
 /// 無い新しい子ごと消すグラフ保存は流れの後ろにその段を足し、構築時に除外した親のグラフ保存は同期する子の表で同じ流れを流す。
 /// </para>
 /// <para>
@@ -259,7 +259,7 @@ internal static class SyncConfigDimensions
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigFixtures.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigIntKeyFixture.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigVoKeyFixture.cs",
-                "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigMatrixRuntimeTests.cs",
+                "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportConfigMatrixRuntimeTests.cs",
             ],
             [
                 "src/QuickER.Runtime.Sync",

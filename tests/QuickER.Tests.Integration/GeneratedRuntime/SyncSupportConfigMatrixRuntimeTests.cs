@@ -49,7 +49,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
     RuntimeTarget.Remote,
     Server = RuntimeTarget.AdoSqlServer
 )]
-public sealed class SyncConfigMatrixRuntimeTests(SqlServerContainerFixture fixture)
+public sealed class SyncSupportConfigMatrixRuntimeTests(SqlServerContainerFixture fixture)
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 

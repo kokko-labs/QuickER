@@ -71,8 +71,9 @@ internal static class SyncModelSignatures
     public const int NightlySeedCount = 200;
 
     /// <summary>
-    /// 派生（HTTP・実 SQL Server）で流す乱数の種（環境変数 QUICKER_SYNC_MODEL_TRANSPORT_SEEDS・既定 10・夜間は
-    /// <see cref="NightlySeedCount"/>・0 から）
+    /// 派生（HTTP・実 SQL Server）で流す乱数の種の数（環境変数 QUICKER_SYNC_MODEL_TRANSPORT_SEEDS・既定 10・夜間は
+    /// <see cref="NightlySeedCount"/>・0 から）。種の番号は転送ごとに <see cref="HttpSeeds(SeedPlan)"/>・
+    /// <see cref="SqlServerSeeds(SeedPlan)"/>・<see cref="SqlServerFaultSeeds(SeedPlan)"/> が選ぶ
     /// </summary>
     public static SeedSettings Seeds { get; } =
         new(
@@ -125,31 +126,68 @@ internal static class SyncModelSignatures
             : (plan, widePlan with { Seeds = [] });
     }
 
+    /// <summary>HTTP の派生が流す種の間隔（<see cref="HttpSeeds(int, int)"/>）</summary>
+    public const int HttpSeedStride = 5;
+
+    /// <summary>HTTP の派生が流す種（単独の種はその種。ほかは <see cref="HttpSeeds(int, int)"/>）</summary>
+    /// <param name="plan">決め方</param>
+    public static IReadOnlyList<int> HttpSeeds(SeedPlan plan) =>
+        plan.IsSingle ? plan.Seeds : HttpSeeds(plan.Settings.FirstSeed, plan.Seeds.Count);
+
     /// <summary>
-    /// 実 SQL Server の派生が流す種（失敗の注入なしの組＝種を 4 で割った余り 0・1 から、決め方の数だけ開始番号から順に）
+    /// HTTP の派生が流す種（開始番号から <see cref="HttpSeedStride"/> 刻みに <paramref name="count"/> 個）
+    /// </summary>
+    /// <remarks>
+    /// 生成器はモード×ポリシーを種を 4 で割った商から 6 組へ順に、種の組（Extras・Faults）を 4 で割った余りから決める
+    /// （<see cref="SyncModelGenerator"/>）。続いた番号から取ると、普段の 10 種が Versioned の 3 組だけになる。5 は 4 とも 24 とも
+    /// 互いに素なので、5 刻みの 10 種は 6 組と 4 つの組を全部作る（<c>EngineFingerprintDriftTests.SyncModel_TransportSeedsAreRecorded</c> が
+    /// 生成器のコンストラクタで確かめる）
+    /// </remarks>
+    /// <param name="first">開始番号</param>
+    /// <param name="count">数</param>
+    public static IReadOnlyList<int> HttpSeeds(int first, int count) =>
+        [.. Enumerable.Range(0, count).Select(index => first + HttpSeedStride * index)];
+
+    /// <summary>
+    /// 実 SQL Server の派生が流す種（失敗の注入なしの組＝種を 4 で割った余り 0・1。単独の種はその余りのときだけ。ほかは
+    /// <see cref="SqlServerSeeds(int, int)"/>）
     /// </summary>
     /// <param name="plan">決め方</param>
     public static IReadOnlyList<int> SqlServerSeeds(SeedPlan plan) =>
         plan.IsSingle
             ? [.. plan.Seeds.Where(seed => seed % 4 is 0 or 1)]
-            : Enumerable
-                .Range(plan.Settings.FirstSeed, plan.Seeds.Count * 4)
-                .Where(seed => seed % 4 is 0 or 1)
-                .Take(plan.Seeds.Count)
-                .ToList();
+            : SqlServerSeeds(plan.Settings.FirstSeed, plan.Seeds.Count);
 
     /// <summary>
-    /// 実 SQL Server の派生が流す失敗の注入の組の種（種を 4 で割った余り 2・3 から、決め方の数だけ開始番号から順に）
+    /// 実 SQL Server の派生が流す失敗の注入なしの種（j 番目〔0 から〕が開始番号＋4j＋j を 2 で割った余り。開始番号は 4 の倍数）
+    /// </summary>
+    /// <remarks>
+    /// 商（モード×ポリシー）が 1 種ごとに進むので、普段の 10 種で 6 組を全部作り、余りが 0（足さない）と 1（Extras）を交互に取る
+    /// （続いた番号から余り 0・1 だけを取ると、商が 2 種ごとにしか進まず、普段の 10 種で 後勝ち × LocalWins を作らない）
+    /// </remarks>
+    /// <param name="first">開始番号</param>
+    /// <param name="count">数</param>
+    public static IReadOnlyList<int> SqlServerSeeds(int first, int count) =>
+        [.. Enumerable.Range(0, count).Select(index => first + 4 * index + index % 2)];
+
+    /// <summary>
+    /// 実 SQL Server の派生が流す失敗の注入の組の種（種を 4 で割った余り 2・3。単独の種はその余りのときだけ。ほかは
+    /// <see cref="SqlServerFaultSeeds(int, int)"/>）
     /// </summary>
     /// <param name="plan">決め方</param>
     public static IReadOnlyList<int> SqlServerFaultSeeds(SeedPlan plan) =>
         plan.IsSingle
             ? [.. plan.Seeds.Where(seed => seed % 4 is 2 or 3)]
-            : Enumerable
-                .Range(plan.Settings.FirstSeed, plan.Seeds.Count * 4)
-                .Where(seed => seed % 4 is 2 or 3)
-                .Take(plan.Seeds.Count)
-                .ToList();
+            : SqlServerFaultSeeds(plan.Settings.FirstSeed, plan.Seeds.Count);
+
+    /// <summary>
+    /// 実 SQL Server の派生が流す失敗の注入の組の種（j 番目が開始番号＋4j＋2＋j を 2 で割った余り。決め方は
+    /// <see cref="SqlServerSeeds(int, int)"/> と同じで、余りが 2〔Faults〕と 3〔両方〕を交互に取る）
+    /// </summary>
+    /// <param name="first">開始番号</param>
+    /// <param name="count">数</param>
+    public static IReadOnlyList<int> SqlServerFaultSeeds(int first, int count) =>
+        [.. Enumerable.Range(0, count).Select(index => first + 4 * index + 2 + index % 2)];
 
     /// <summary>種を並列に流し、既知の失敗（正規化）に当たらない失敗のある種を報告する</summary>
     /// <param name="ranges">
@@ -290,7 +328,7 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncM
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
     /// <summary>テストが流す世界の組み方（転送とサーバー役。端末は既定の新しいエンジンの端末。転送の軸の名乗りの照合も読む）</summary>
-    private static readonly SyncModelWorldOptions Http = new() { Http = true, Name = "http" };
+    internal static readonly SyncModelWorldOptions Http = new() { Http = true, Name = "http" };
 
     SyncModelWorldOptions ISyncModelTransportTests.WorldOptions => Http;
 
@@ -341,7 +379,10 @@ public sealed class SyncModelHttpRuntimeTests(ITestOutputHelper output) : ISyncM
         widePlan.WriteWarnings(output);
         var coverage = new CoverageCounter(SyncModelDimensions.Table);
         var report = await SyncModelSignatures.RunSeedsAsync(
-            [(plan, plan.Seeds), (widePlan, widePlan.Seeds)],
+            [
+                (plan, SyncModelSignatures.HttpSeeds(plan)),
+                (widePlan, SyncModelSignatures.HttpSeeds(widePlan)),
+            ],
             Http,
             SyncModelEngineTransports.Known,
             Math.Clamp(Environment.ProcessorCount, 1, 4),

@@ -14,7 +14,7 @@ namespace QuickER.Tests.GeneratedBackendParitySqlServerFixture;
 /// 精度を持つ列の表 <c>value_probes</c> を 1 つ足した派生図。<c>value_probes</c> は値の往復で書く列をすべて持つ：
 /// 小数秒の桁を持つ日時（<c>datetime2(2)</c>・<c>time(2)</c>・<c>datetimeoffset(2)</c>）と 7 桁の日時（<c>datetime2</c>・
 /// <c>datetimeoffset</c>）・<c>date</c>・<c>decimal(10,2)</c>・Unicode でない文字列・固定長の文字列・Unicode の文字列・有界の
-/// バイナリ・除外する無制限バイナリ。customers への NULL 許容の外部キーで、Include のある取得（QuickER 版は FOR JSON）でも読める。
+/// バイナリ・除外する無制限バイナリ・<c>datetime</c>（1/300 秒）・<c>smalldatetime</c>（分）・<c>money</c>・<c>smallmoney</c>。customers への NULL 許容の外部キーで、Include のある取得（QuickER 版は FOR JSON）でも読める。
 /// </para>
 /// <para>
 /// オプションは SQL Server 方言の QuickER 版 Repository と EF Core の併存・値オブジェクトなし（製品の既定。範囲の外の値も
@@ -64,6 +64,10 @@ public static class BackendParitySqlServerFixtureDefinition
     private static readonly Guid ProbeAtColId = new("b9500000-0000-0000-0000-00000000000d");
     private static readonly Guid ProbeAmountColId = new("b9500000-0000-0000-0000-00000000000e");
     private static readonly Guid ProbePayloadColId = new("b9500000-0000-0000-0000-00000000000f");
+    private static readonly Guid ProbeLegacyAtColId = new("b9500000-0000-0000-0000-000000000010");
+    private static readonly Guid ProbeSmallAtColId = new("b9500000-0000-0000-0000-000000000011");
+    private static readonly Guid ProbePriceColId = new("b9500000-0000-0000-0000-000000000012");
+    private static readonly Guid ProbeFeeColId = new("b9500000-0000-0000-0000-000000000013");
     private static readonly Guid RelCustomerProbes = new("b9500000-0000-0000-0000-000000000101");
 
     /// <summary>値の往復の ER 図を決定的に構築する（<see cref="BackendParityFixtureDefinition.Build"/>＋<c>value_probes</c>）</summary>
@@ -117,6 +121,10 @@ public static class BackendParitySqlServerFixtureDefinition
                     Nullable(ProbeAtColId, "at", "datetime2"),
                     Nullable(ProbeAmountColId, "amount", "decimal(10,2)"),
                     Nullable(ProbePayloadColId, "payload", "varbinary(max)"),
+                    Nullable(ProbeLegacyAtColId, "legacy_at", "datetime"),
+                    Nullable(ProbeSmallAtColId, "small_at", "smalldatetime"),
+                    Nullable(ProbePriceColId, "price", "money"),
+                    Nullable(ProbeFeeColId, "fee", "smallmoney"),
                 },
             }
         );

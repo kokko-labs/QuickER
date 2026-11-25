@@ -15,7 +15,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
 /// 同期の構成の行列のフィクスチャ（キーの型）ごとのアダプタ。生成物の型はフィクスチャごとに別の名前空間にあるので、
-/// 登録・書き込み・同期をここで包み、行列の本体（<see cref="SyncConfigMatrixRuntimeTests"/>）は生成物の型を名指ししない。
+/// 登録・書き込み・同期をここで包み、行列の本体（<see cref="SyncSupportConfigMatrixRuntimeTests"/>）は生成物の型を名指ししない。
 /// </summary>
 /// <remarks>
 /// どの表も主キーを int で受け渡す（値オブジェクトのキーのフィクスチャは int から値オブジェクトを作る）。同期する行は各フィクスチャの

@@ -21,14 +21,15 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// ここに置くのは、SyncFixture にしか無い表（NULL を許す一意制約の <c>sync_markers</c>）を使うもの。本物の <c>rowversion</c> との噛み合わせ（DB が採番する版・<c>MIN_ACTIVE_ROWVERSION()</c> による上限・版ガードの
 /// 競合・外部キーエラーの分類・版なしの表の TOP のページング）は、同期のモデルの決定的なシナリオのうち実 SQL Server の転送でも
 /// 流すもの（<see cref="SyncModelSqlServerRuntimeTests"/>）が期待の手で表明し、DI 登録糖衣 <c>AddGeneratedSyncSupport</c> の
-/// 組み上がりは同期の構成の行列（<see cref="SyncConfigMatrixRuntimeTests"/>）が見る。
+/// 組み上がりは同期の構成の行列（<see cref="SyncSupportConfigMatrixRuntimeTests"/>）が見る。
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
 [Collection(SqlServerContainerCollection.Name)]
 [Trait("RequiresDocker", "true")]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlServer)]
-public sealed class SyncSqlServerRuntimeTests(SqlServerContainerFixture fixture) : IAsyncLifetime
+public sealed class SyncSupportAdoSqlServerFixtureRuntimeTests(SqlServerContainerFixture fixture)
+    : IAsyncLifetime
 {
     private readonly SqlServerContainerFixture _fixture = fixture;
     private readonly SqliteTempDatabase _sqlite = SqliteTempDatabase.Create();

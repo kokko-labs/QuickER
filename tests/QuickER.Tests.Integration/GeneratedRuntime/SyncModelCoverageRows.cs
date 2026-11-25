@@ -15,13 +15,18 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <param name="Faults">失敗の仕掛けを含む組か</param>
 /// <param name="Setup">初期データ（サーバーの他者の書き込み。<see cref="SyncModelScenarios.Tail"/> を後ろに足す）</param>
 /// <param name="Steps">歩の列（1 歩＝生成器の 1 回の <see cref="SyncModelGenerator.Next"/> と同じ単位。作り直しは削除と挿入を 1 歩にする）</param>
+/// <param name="ExpectedTuples">
+/// 行が出すはずの組（因子 → 水準。どれか 1 歩の操作の割り当てがその組をすべて含む）。出さなくなったら
+/// <see cref="SyncModelCoverageRows.MissingTupleProblems"/> が行を名指しして赤にする
+/// </param>
 internal sealed record SyncModelCoverageInput(
     SyncMode Mode,
     SyncConflictPolicy Policy,
     bool Extras,
     bool Faults,
     IReadOnlyList<ModelWriteOp> Setup,
-    IReadOnlyList<IReadOnlyList<ModelOp>> Steps
+    IReadOnlyList<IReadOnlyList<ModelOp>> Steps,
+    IReadOnlyList<IReadOnlyDictionary<string, string>> ExpectedTuples
 )
 {
     /// <summary>世界の端末（既定は端末 1・2。端末 3 の組を埋める行は端末 1〜3）</summary>
@@ -52,7 +57,8 @@ internal sealed record SyncModelCoverageInput(
 /// 欠ける組（サーバーの他者の Extras の操作・グラフ保存の失敗する書き込み・表を除外したダウンロード）を実際に
 /// 流すための行で、操作を 1 歩ずつ次元表（<see cref="SyncModelDimensions"/>）で、同期の結果を結果の表
 /// （<see cref="SyncModelOutcomeDimensions"/>）で数える。行は期待の操作を持たない（次元表に無い操作の型は宣言の誤りになる）。
-/// 違反は既知の失敗の一覧で外さない＝どれも新しい失敗として赤にする（行が狙った組を出さなくなったら、網羅の照合が一覧に無い欠けで赤）。
+/// 違反は既知の失敗の一覧で外さない＝どれも新しい失敗として赤にする。行が狙った組（<see cref="SyncModelCoverageInput.ExpectedTuples"/>）を
+/// 出さなくなったら、<see cref="MissingTupleProblems"/> が行を名指しして赤にする（網羅の照合だけだと、一覧に無い欠けとして行を名指しせずに赤になる）。
 /// Id は <see cref="IdPrefix"/> で始める。
 /// </para>
 /// </remarks>
@@ -126,6 +132,49 @@ internal static class SyncModelCoverageRows
         return (run.Failures, run.Log);
     }
 
+    /// <summary>
+    /// 行が出すはずの組を出さなかった問題（行を名指しする）。歩ごとの割り当ては網羅の計数と同じ
+    /// <see cref="SyncModelDimensions.Assignments"/> で作るので、流さずに判定できる
+    /// </summary>
+    /// <param name="row">行</param>
+    public static IEnumerable<string> MissingTupleProblems(ScenarioRow<SyncModelCoverageInput> row)
+    {
+        var input = row.Input;
+        var assignments = input
+            .Steps.SelectMany(step =>
+                SyncModelDimensions.Assignments(
+                    input.Mode,
+                    input.Policy,
+                    input.Extras,
+                    input.Faults,
+                    input.Shape,
+                    step
+                )
+            )
+            .ToList();
+
+        if (input.ExpectedTuples.Count == 0)
+        {
+            yield return $"coverage row {row.Id}: declares no expected tuple";
+        }
+
+        foreach (var expected in input.ExpectedTuples)
+        {
+            if (
+                !assignments.Any(assignment =>
+                    expected.All(pair =>
+                        assignment.TryGetValue(pair.Key, out var level) && level == pair.Value
+                    )
+                )
+            )
+            {
+                yield return $"coverage row {row.Id}: expected a step with "
+                    + string.Join(", ", expected.Select(pair => $"{pair.Key}={pair.Value}"))
+                    + " (the row's steps no longer produce the tuple it was written to fill)";
+            }
+        }
+    }
+
     /// <summary>行の同期が宣言したモード・ポリシーと違えば断る（数えるモード・ポリシーは行の宣言で決める）</summary>
     private static ScenarioRow<SyncModelCoverageInput> Checked(
         ScenarioRow<SyncModelCoverageInput> row
@@ -160,7 +209,8 @@ internal static class SyncModelCoverageRows
                 [new DeleteItemOp(SV, Direct, 501), Item(SV, 501, 500, "cr1b")],
                 [Sync(D1, SyncMode.Versioned, SyncConflictPolicy.Collect)],
                 [Sync(D2, SyncMode.Versioned, SyncConflictPolicy.Collect)],
-            ]
+            ],
+            [ServerExtra(SyncModelDimensions.Reinsert)]
         );
         yield return Row(
             "server-failing-write",
@@ -173,7 +223,8 @@ internal static class SyncModelCoverageRows
             [
                 [Item(SV, 512, 510, "cf1") with { ExpectFailure = true }],
                 [Sync(D1, SyncMode.Versioned, SyncConflictPolicy.Collect)],
-            ]
+            ],
+            [ServerExtra(SyncModelDimensions.FailingWrite)]
         );
         yield return Row(
             "server-delete-stub",
@@ -186,7 +237,8 @@ internal static class SyncModelCoverageRows
             [
                 [new DeleteStubOp(SV, ModelTables.Labels, "cl1")],
                 [Sync(D1, SyncMode.Versioned, SyncConflictPolicy.Collect)],
-            ]
+            ],
+            [ServerExtra(SyncModelDimensions.DeleteStub)]
         );
         yield return Row(
             "server-delete-held",
@@ -201,7 +253,8 @@ internal static class SyncModelCoverageRows
                 [Sync(D1, SyncMode.Versioned, SyncConflictPolicy.Collect)],
                 [new DeleteHeldOp(SV, ModelTables.Labels, "ch1")],
                 [Sync(D1, SyncMode.Versioned, SyncConflictPolicy.Collect)],
-            ]
+            ],
+            [ServerExtra(SyncModelDimensions.DeleteHeld)]
         );
 
         // ---- 失敗する書き込み × グラフ保存（生成器は直接の書き込みだけで作る）。端末のグラフ保存の挿入が一意な code の重複で
@@ -217,6 +270,13 @@ internal static class SyncModelCoverageRows
             [
                 [Item(D1, 542, 540, "cg1", Graph) with { ExpectFailure = true }],
                 [Sync(D1, SyncMode.Versioned, SyncConflictPolicy.Collect)],
+            ],
+            [
+                Tuple(
+                    (SyncModelDimensions.Actor, nameof(ModelActor.Device1)),
+                    (SyncModelDimensions.OpFamily, SyncModelDimensions.FailingWrite),
+                    (SyncModelDimensions.Via, nameof(ModelWriteVia.Graph))
+                ),
             ]
         );
 
@@ -250,6 +310,16 @@ internal static class SyncModelCoverageRows
                         [ModelTables.Events]
                     ),
                 ],
+            ],
+            [
+                Tuple(
+                    (SyncModelDimensions.OpFamily, SyncModelDimensions.Download),
+                    (SyncModelDimensions.Excluded, ModelTables.Folders)
+                ),
+                Tuple(
+                    (SyncModelDimensions.OpFamily, SyncModelDimensions.Download),
+                    (SyncModelDimensions.Excluded, ModelTables.Events)
+                ),
             ]
         );
 
@@ -276,7 +346,154 @@ internal static class SyncModelCoverageRows
                 [Sync(D3, SyncMode.Versioned, SyncConflictPolicy.Collect)],
                 [Sync(D1, SyncMode.Versioned, SyncConflictPolicy.Collect)],
             ],
+            [
+                Tuple(
+                    (SyncModelDimensions.Actor, nameof(ModelActor.Device3)),
+                    (SyncModelDimensions.OpFamily, SyncModelGenerator.DeleteTakeReparentShape),
+                    (SyncModelDimensions.UniqueTable, ModelTables.Folders)
+                ),
+            ],
             SyncModelWorldShape.ThreeDevices
+        );
+
+        // ---- 一意な値の形のうち、release-take の形を閉じる 4 本目の乱数（SyncModelGenerator.UniqueCycleRate）が半分を入れ替え・
+        // 回転へ回すため、既定の種でたまたま欠ける組（サーバーの他者・端末 3 の書き手、端末の最初の形 Journaled との組） ----
+        yield return Row(
+            "server-release-take-chain-items",
+            "サーバーの他者が品目の code を 3 行の連鎖で付け替える（release-take-chain）",
+            SyncMode.Versioned,
+            SyncConflictPolicy.Collect,
+            extras: false,
+            faults: false,
+            [
+                Folder(SV, 600),
+                Item(SV, 601, 600, "rc1"),
+                Item(SV, 602, 600, "rc2"),
+                Item(SV, 603, 600, "rc3"),
+            ],
+            [
+                new ModelShapeStep(
+                    SyncModelGenerator.ReleaseTakeChainShape,
+                    ModelTables.Items,
+                    [
+                        new UpdateItemOp(SV, Direct, 601, 600, null, "rc1x", "t601b"),
+                        new UpdateItemOp(SV, Direct, 602, 600, null, "rc1", "t602b"),
+                        new UpdateItemOp(SV, Direct, 603, 600, null, "rc2", "t603b"),
+                    ]
+                ),
+                [Sync(D1, SyncMode.Versioned, SyncConflictPolicy.Collect)],
+            ],
+            [
+                Tuple(
+                    (SyncModelDimensions.Actor, nameof(ModelActor.Server)),
+                    (SyncModelDimensions.OpFamily, SyncModelGenerator.ReleaseTakeChainShape),
+                    (SyncModelDimensions.UniqueTable, ModelTables.Items)
+                ),
+            ]
+        );
+        yield return Row(
+            "server-exact-swap-folders",
+            "サーバーの他者が 2 つのフォルダーの名前を仮の名前を挟んで入れ替える（exact-swap）",
+            SyncMode.Versioned,
+            SyncConflictPolicy.Collect,
+            extras: false,
+            faults: false,
+            [Folder(SV, 610), Folder(SV, 611)],
+            [
+                new ModelShapeStep(
+                    SyncModelGenerator.ExactSwapShape,
+                    ModelTables.Folders,
+                    [
+                        new UpdateFolderOp(SV, Direct, 610, null, "f610tmp"),
+                        new UpdateFolderOp(SV, Direct, 611, null, "f610"),
+                        new UpdateFolderOp(SV, Direct, 610, null, "f611"),
+                    ]
+                ),
+                [Sync(D1, SyncMode.Versioned, SyncConflictPolicy.Collect)],
+            ],
+            [
+                Tuple(
+                    (SyncModelDimensions.Actor, nameof(ModelActor.Server)),
+                    (SyncModelDimensions.OpFamily, SyncModelGenerator.ExactSwapShape),
+                    (SyncModelDimensions.UniqueTable, ModelTables.Folders)
+                ),
+            ]
+        );
+        yield return Row(
+            "device3-release-take-chain-items",
+            "端末 3 が品目の code を 3 行の連鎖で付け替えて上げる（release-take-chain）",
+            SyncMode.Versioned,
+            SyncConflictPolicy.Collect,
+            extras: false,
+            faults: false,
+            [
+                Folder(SV, 620),
+                Item(SV, 621, 620, "rd1"),
+                Item(SV, 622, 620, "rd2"),
+                Item(SV, 623, 620, "rd3"),
+            ],
+            [
+                new ModelShapeStep(
+                    SyncModelGenerator.ReleaseTakeChainShape,
+                    ModelTables.Items,
+                    [
+                        new UpdateItemOp(D3, Direct, 621, 620, null, "rd1x", "t621b"),
+                        new UpdateItemOp(D3, Direct, 622, 620, null, "rd1", "t622b"),
+                        new UpdateItemOp(D3, Direct, 623, 620, null, "rd2", "t623b"),
+                    ]
+                ),
+                [Sync(D3, SyncMode.Versioned, SyncConflictPolicy.Collect)],
+                [Sync(D1, SyncMode.Versioned, SyncConflictPolicy.Collect)],
+            ],
+            [
+                Tuple(
+                    (SyncModelDimensions.Actor, nameof(ModelActor.Device3)),
+                    (SyncModelDimensions.OpFamily, SyncModelGenerator.ReleaseTakeChainShape),
+                    (SyncModelDimensions.UniqueTable, ModelTables.Items)
+                ),
+            ],
+            SyncModelWorldShape.ThreeDevices
+        );
+        yield return Row(
+            "journaled-device-rotation-folders",
+            "最初の同期の前に Repository 越しに行を書いた端末 1 が、3 つのフォルダーの名前を仮の名前を挟んで回して上げる（rotation）",
+            SyncMode.Versioned,
+            SyncConflictPolicy.Collect,
+            extras: false,
+            faults: false,
+            [],
+            [
+                new ModelShapeStep(
+                    SyncModelGenerator.RotationShape,
+                    ModelTables.Folders,
+                    [
+                        new UpdateFolderOp(D1, Direct, 1111, null, "jtmp1111"),
+                        new UpdateFolderOp(D1, Direct, 1112, null, "jf1111"),
+                        new UpdateFolderOp(D1, Direct, 1113, null, "jf1112"),
+                        new UpdateFolderOp(D1, Direct, 1111, null, "jf1113"),
+                    ]
+                ),
+                [Sync(D1, SyncMode.Versioned, SyncConflictPolicy.Collect)],
+                [Sync(D2, SyncMode.Versioned, SyncConflictPolicy.Collect)],
+            ],
+            [
+                Tuple(
+                    (SyncModelDimensions.Preload, nameof(ModelPreload.Journaled)),
+                    (SyncModelDimensions.OpFamily, SyncModelGenerator.RotationShape)
+                ),
+            ],
+            SyncModelWorldShape.ThreeDevices,
+            [
+                new SyncModelPreload(
+                    D1,
+                    ModelPreload.Journaled,
+                    [
+                        new AddFolderOp(D1, Direct, 1111, null, "jf1111"),
+                        new AddFolderOp(D1, Direct, 1112, null, "jf1112"),
+                        new AddFolderOp(D1, Direct, 1113, null, "jf1113"),
+                    ]
+                ),
+            ]
         );
 
         // ---- 端末の最初の形 × 除外（Preload=Untracked × Excluded=model_labels）。表を 1 つだけ除外する同期は乱数の列で 4 表に
@@ -299,6 +516,13 @@ internal static class SyncModelCoverageRows
                     ),
                 ],
             ],
+            [
+                Tuple(
+                    (SyncModelDimensions.Preload, nameof(ModelPreload.Untracked)),
+                    (SyncModelDimensions.OpFamily, SyncModelDimensions.Sync),
+                    (SyncModelDimensions.Excluded, ModelTables.Labels)
+                ),
+            ],
             SyncModelWorldShape.ThreeDevices,
             [
                 new SyncModelPreload(
@@ -319,6 +543,7 @@ internal static class SyncModelCoverageRows
         bool faults,
         IReadOnlyList<ModelWriteOp> setup,
         IReadOnlyList<IReadOnlyList<ModelOp>> steps,
+        IReadOnlyList<IReadOnlyDictionary<string, string>> expected,
         IReadOnlyList<ModelActor>? devices = null,
         IReadOnlyList<SyncModelPreload>? preloads = null
     ) =>
@@ -326,11 +551,25 @@ internal static class SyncModelCoverageRows
             IdPrefix + id,
             null,
             description,
-            new SyncModelCoverageInput(mode, policy, extras, faults, setup, steps)
+            new SyncModelCoverageInput(mode, policy, extras, faults, setup, steps, expected)
             {
                 Devices = devices ?? SyncModelWorldShape.TwoDevices,
                 Preloads = preloads ?? [],
             }
+        );
+
+    /// <summary>期待の組（因子 → 水準）</summary>
+    private static IReadOnlyDictionary<string, string> Tuple(
+        params (string Factor, string Level)[] pairs
+    ) => pairs.ToDictionary(pair => pair.Factor, pair => pair.Level, StringComparer.Ordinal);
+
+    /// <summary>サーバーの他者の Extras の操作の行が埋める組（Server × 操作 × 経路なし × 一意な値の表なし）</summary>
+    private static IReadOnlyDictionary<string, string> ServerExtra(string family) =>
+        Tuple(
+            (SyncModelDimensions.Actor, nameof(ModelActor.Server)),
+            (SyncModelDimensions.OpFamily, family),
+            (SyncModelDimensions.Via, SyncModelDimensions.NoVia),
+            (SyncModelDimensions.UniqueTable, SyncModelDimensions.NoUniqueTable)
         );
 
     private static ModelSyncOp Sync(

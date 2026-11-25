@@ -13,7 +13,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </summary>
 [Trait("Category", "Integration")]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlite)]
-public sealed class SyncKeyTextRuntimeTests
+public sealed class SyncSupportAdoSqliteKeyTextRuntimeTests
 {
     private const string Expected = "2026-07-03T08:00:00.0000009";
 

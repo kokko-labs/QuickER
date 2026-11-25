@@ -20,7 +20,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// （差分走査・アンカー導出・版ガード・競合分類）を通せるようにするためのもの。
 /// </para>
 /// <para>
-/// 実 SQL Server に対する検証は <c>SyncSqlServerRuntimeTests</c>（Docker）が別に担う。こちらは「エンジンの筋」を、
+/// 実 SQL Server に対する検証は <c>SyncSupportAdoSqlServerFixtureRuntimeTests</c>（Docker）が別に担う。こちらは「エンジンの筋」を、
 /// あちらは「実際の rowversion / MIN_ACTIVE_ROWVERSION との噛み合わせ」を見る。
 /// </para>
 /// <para>

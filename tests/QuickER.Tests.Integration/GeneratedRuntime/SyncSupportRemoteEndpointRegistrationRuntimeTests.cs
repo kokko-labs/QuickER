@@ -27,7 +27,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </remarks>
 [Trait("Category", "Integration")]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.Remote, ServerNone = true)]
-public sealed class SyncEndpointRegistrationRuntimeTests
+public sealed class SyncSupportRemoteEndpointRegistrationRuntimeTests
 {
     /// <summary>DI 登録だけを差し替えて WebApplication を組み立てる（起動はしない＝マップ時の挙動を見る）</summary>
     private static WebApplication BuildApp(Action<IServiceCollection> registerServices)
@@ -105,7 +105,7 @@ public sealed class SyncEndpointRegistrationRuntimeTests
     /// 表明でもある＝実体を作りに行く実装なら、ここで解決に失敗して落ちる。
     /// </para>
     /// <para>
-    /// 正しく登録したサーバーの実際の同期挙動は <see cref="SyncHttpRuntimeTests"/> 一式が回帰網として見る。
+    /// 正しく登録したサーバーの実際の同期挙動は <see cref="SyncSupportRemoteAdoSqliteHttpSourceRuntimeTests"/> 一式が回帰網として見る。
     /// ここが見るのは「検査が正常系を塞いでいないこと」。
     /// </para>
     /// </remarks>

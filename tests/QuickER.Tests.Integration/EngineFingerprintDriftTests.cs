@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text;
+using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
@@ -52,24 +53,59 @@ public sealed class EngineFingerprintDriftTests
         Verify("SyncModelWide", SyncModelRuntimeTests.WideSeeds, SyncModelSummary);
     }
 
-    [Fact(DisplayName = "[指紋] 同期のモデルの転送経路の種は、直結の種の部分集合")]
+    [Fact(
+        DisplayName = "[指紋] 同期のモデルの転送経路の種は、普段も夜間も直結の種の範囲に入り、モード×ポリシーと種の組をできるだけ多く作る"
+    )]
     public void SyncModel_TransportSeedsAreRecorded()
     {
-        AssertTransportSubset(SyncModelRuntimeTests.Seeds, SyncModelSignatures.Seeds);
-        AssertTransportSubset(SyncModelRuntimeTests.WideSeeds, SyncModelSignatures.WideSeeds);
+        AssertTransportSeeds(SyncModelRuntimeTests.Seeds, SyncModelSignatures.Seeds);
+        AssertTransportSeeds(SyncModelRuntimeTests.WideSeeds, SyncModelSignatures.WideSeeds);
     }
 
-    /// <summary>転送経路（HTTP・実 SQL Server）の種が、記録した直結の種の部分集合</summary>
-    private static void AssertTransportSubset(SeedSettings direct, SeedSettings transport)
+    /// <summary>
+    /// 転送経路（HTTP・実 SQL Server の失敗の注入なし・あり）の種を、普段と夜間の数のそれぞれで確かめる：直結の同じプロフィールの
+    /// 種の範囲に入る（普段の範囲は種の指紋の記録の範囲）・モード×ポリシーの組が min(6, 種の数) 種類・種の組（HTTP は 4 で割った余りの
+    /// 4 つ、実 SQL Server は失敗の注入の有無ごとの 2 つ）が取りうる数だけそろう。組は生成器のコンストラクタだけで読む（実行しない）
+    /// </summary>
+    private static void AssertTransportSeeds(SeedSettings direct, SeedSettings transport)
     {
-        var recorded = Enumerable.Range(direct.FirstSeed, direct.RegularCount).ToHashSet();
-        var http = Enumerable.Range(transport.FirstSeed, transport.RegularCount);
-        var sqlServer = Enumerable
-            .Range(transport.FirstSeed, transport.RegularCount * 4)
-            .Where(seed => seed % 4 is 0 or 1)
-            .Take(transport.RegularCount);
+        foreach (
+            var (directCount, count) in new[]
+            {
+                (direct.RegularCount, transport.RegularCount),
+                (direct.NightlyCount, transport.NightlyCount),
+            }
+        )
+        {
+            var range = Enumerable.Range(direct.FirstSeed, directCount).ToHashSet();
+            var lists = new (string Name, IReadOnlyList<int> Seeds, int Groups)[]
+            {
+                ("http", SyncModelSignatures.HttpSeeds(transport.FirstSeed, count), 4),
+                ("sqlserver", SyncModelSignatures.SqlServerSeeds(transport.FirstSeed, count), 2),
+                (
+                    "sqlserver-faults",
+                    SyncModelSignatures.SqlServerFaultSeeds(transport.FirstSeed, count),
+                    2
+                ),
+            };
 
-        Assert.Subset(recorded, http.Concat(sqlServer).ToHashSet());
+            foreach (var (name, seeds, groups) in lists)
+            {
+                var because = $"{name} の {count} 種（{string.Join(",", seeds.Take(12))}…）";
+                Assert.Subset(range, seeds.ToHashSet());
+                seeds
+                    .Select(seed => new SyncModelGenerator(seed))
+                    .Select(generator => (generator.Mode, generator.Policy))
+                    .Distinct()
+                    .Should()
+                    .HaveCount(Math.Min(6, seeds.Count), because + " のモード×ポリシー");
+                seeds
+                    .Select(seed => seed % 4)
+                    .Distinct()
+                    .Should()
+                    .HaveCount(Math.Min(groups, seeds.Count), because + " の種の組");
+            }
+        }
     }
 
     [Theory(DisplayName = "[指紋] 同期計画の総当たりの生成器は、方言ごとに記録と同じ入力を作る")]

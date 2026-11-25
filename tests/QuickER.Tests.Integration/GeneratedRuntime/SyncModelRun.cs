@@ -411,6 +411,10 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 _world.Faults.Arm(arm.Kind, arm.Device);
                 break;
 
+            case MirrorServerRowOp mirror:
+                await MirrorServerRowAsync(mirror);
+                break;
+
             case ArmInterruptOp interrupt:
                 if (
                     interrupt.Writes.Count == 0
@@ -633,6 +637,35 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             _log.Add($"  -> interrupt {interrupt.Point}: arm {kind}");
             _world.Faults.Arm(kind, interrupt.Device);
         }
+    }
+
+    /// <summary>
+    /// 端末の行をサーバーの今の行で記録させずに書き換え、記録しない書き込みとして台帳へ反映する（持ち分があるキーの内容だけを
+    /// 置き換える）。生成器は端末の DB で成功する形だけを作るので、失敗は書き込みの失敗と同じく名指しする
+    /// </summary>
+    private async Task MirrorServerRowAsync(MirrorServerRowOp op)
+    {
+        var before = await _world.ReadStateAsync(op.Device, _ct);
+        var foreignKeysBefore = await ReadForeignKeyViolationsAsync(op.Device);
+
+        try
+        {
+            await _world.MirrorServerRowAsync(op, _ct);
+        }
+        catch (Exception ex)
+        {
+            _failures.Add(
+                new(
+                    $"op/failed:{nameof(MirrorServerRowOp)}:{ErrorText(ex)}",
+                    $"{op.Describe()}: {ex.GetType().Name}: {ex.Message}"
+                )
+            );
+        }
+
+        var after = await _world.ReadStateAsync(op.Device, _ct);
+        NoteWrite(op.Device, before, after, tracked: false, op.Describe());
+        RecordChanges(op.Device, before, after);
+        await CheckNewForeignKeyViolationsAsync(op.Device, foreignKeysBefore, op.Describe());
     }
 
     /// <summary>書き込みを 1 つ流す（期待どおりに効いたら true）</summary>
