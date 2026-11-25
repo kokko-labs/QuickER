@@ -96,7 +96,7 @@ internal static class SyncModelScenarioParts
 /// <summary>直結の決定的なシナリオの 2 つ目の分（<see cref="SyncModelScenarioParts"/>）</summary>
 [Trait("Category", "Integration")]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.AdoSqlite)]
-public sealed class SyncModelRuntimeTestsPart2
+public sealed class SyncSupportAdoSqliteScenarioPart2RuntimeTests
 {
     /// <summary>このクラスが受け持つシナリオの名前</summary>
     public static TheoryData<string> ScenarioNames() =>
@@ -113,7 +113,7 @@ public sealed class SyncModelRuntimeTestsPart2
 /// <summary>HTTP の決定的なシナリオの 2 つ目の分（<see cref="SyncModelScenarioParts"/>）</summary>
 [Trait("Category", "Integration")]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
-public sealed class SyncModelHttpRuntimeTestsPart2
+public sealed class SyncSupportRemoteAdoSqliteScenarioPart2RuntimeTests
 {
     /// <summary>このクラスが受け持つシナリオの名前</summary>
     public static TheoryData<string> ScenarioNames() =>
@@ -130,7 +130,7 @@ public sealed class SyncModelHttpRuntimeTestsPart2
 /// <summary>HTTP の決定的なシナリオの 3 つ目の分（<see cref="SyncModelScenarioParts"/>）</summary>
 [Trait("Category", "Integration")]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
-public sealed class SyncModelHttpRuntimeTestsPart3
+public sealed class SyncSupportRemoteAdoSqliteScenarioPart3RuntimeTests
 {
     /// <summary>このクラスが受け持つシナリオの名前</summary>
     public static TheoryData<string> ScenarioNames() =>
@@ -147,7 +147,7 @@ public sealed class SyncModelHttpRuntimeTestsPart3
 /// <summary>HTTP の決定的なシナリオの 4 つ目の分（<see cref="SyncModelScenarioParts"/>）</summary>
 [Trait("Category", "Integration")]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
-public sealed class SyncModelHttpRuntimeTestsPart4
+public sealed class SyncSupportRemoteAdoSqliteScenarioPart4RuntimeTests
 {
     /// <summary>このクラスが受け持つシナリオの名前</summary>
     public static TheoryData<string> ScenarioNames() =>
@@ -164,7 +164,7 @@ public sealed class SyncModelHttpRuntimeTestsPart4
 /// <summary>実 SQL Server の決定的なシナリオの 2 つ目の分（<see cref="SyncModelScenarioParts"/>）</summary>
 /// <remarks>
 /// 本体の <see cref="SyncModelSqlServerRuntimeTests"/>（<see cref="SqlServerSecondContainerCollection"/>）と別のコンテナの
-/// コレクションに置き、2 つの分を並べて流す。端末は本体と同じく新しいエンジンの端末。名前は行列の名前の規則に従う（本体は既知の一覧に載っていて、双方向同期の作り直しでそろえる）。
+/// コレクションに置き、2 つの分を並べて流す。端末は本体と同じく新しいエンジンの端末。分けたクラスの名前は行列の名前の規則に従う（転送の本体はエンジンの名前を保ち、名前の規則の既知の一覧 <see cref="RuntimeTestNamingKnown"/> に載る）。
 /// </remarks>
 [Trait("Category", "Integration")]
 [Trait("RequiresDocker", "true")]

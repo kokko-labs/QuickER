@@ -445,6 +445,10 @@ public sealed class BackendParitySqlServerValueRuntimeTests(SqlServerContainerFi
             SqlServerValueColumn.Label => entity.Label,
             SqlServerValueColumn.Tag => entity.Tag,
             SqlServerValueColumn.Payload => entity.Payload,
+            SqlServerValueColumn.LegacyAt => entity.LegacyAt,
+            SqlServerValueColumn.SmallAt => entity.SmallAt,
+            SqlServerValueColumn.Price => entity.Price,
+            SqlServerValueColumn.Fee => entity.Fee,
             _ => throw new ArgumentOutOfRangeException(nameof(column), column, null),
         };
 
@@ -487,6 +491,18 @@ public sealed class BackendParitySqlServerValueRuntimeTests(SqlServerContainerFi
                 break;
             case SqlServerValueColumn.Payload:
                 entity.Payload = (byte[])cell.Value;
+                break;
+            case SqlServerValueColumn.LegacyAt:
+                entity.LegacyAt = (DateTime)cell.Value;
+                break;
+            case SqlServerValueColumn.SmallAt:
+                entity.SmallAt = (DateTime)cell.Value;
+                break;
+            case SqlServerValueColumn.Price:
+                entity.Price = (decimal)cell.Value;
+                break;
+            case SqlServerValueColumn.Fee:
+                entity.Fee = (decimal)cell.Value;
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(cell), cell.Column, null);

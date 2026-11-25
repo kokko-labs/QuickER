@@ -22,7 +22,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </remarks>
 [Trait("Category", "Integration")]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.Remote, ServerNone = true)]
-public sealed class SyncBinaryTransferResponseRuntimeTests
+public sealed class SyncSupportRemoteBinaryTransferResponseRuntimeTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 

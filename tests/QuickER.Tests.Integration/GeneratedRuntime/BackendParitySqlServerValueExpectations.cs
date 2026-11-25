@@ -20,6 +20,10 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <item>文字列は長さ（UTF-16 のコード単位）が列の長さ以下ならそのまま。超えた分が半角の空白（U+0020）だけなら列の長さへ切って保存し、
 /// それ以外は断る。nchar は読み戻すと空白で列の長さに詰まる。varchar は列のコードページ（既定の照合順序は 1252）で表せる文字を保ち、
 /// 表せない文字はコード単位ごとに元と違う 1 文字（'?' か近い文字）になる。</item>
+/// <item>datetime は 1/300 秒の最も近い単位へ、smalldatetime は分へ（秒が 29.998 以下は切り下げ・29.999 以上は切り上げ）丸め、
+/// Kind が Unspecified で戻る。丸めた値が型の範囲（datetime は 1753-01-01 から 9999-12-31 23:59:59.997・smalldatetime は
+/// 1900-01-01 から 2079-06-06 23:59）の外なら断る。money・smallmoney は小数 4 桁へ四捨五入し（ちょうど半分は 0 から遠い側）、
+/// 4 桁のスケールで戻る。丸めた値が型の範囲の外なら断る。</item>
 /// <item>バイナリはバイトを保つ（空は空）。varbinary(n) の超過は、超えた分が 0x00 だけなら n バイトへ切って保存し、それ以外は断る。</item>
 /// <item>断られた書き込みは何も残さない（BulkInsert は 1 行でも断られれば、どの行も残らない）。断ったときの例外の型と文は経路で違い、比べない。</item>
 /// </list>
@@ -48,8 +52,64 @@ public static class BackendParitySqlServerValueExpectations
             SqlServerValueColumn.Code => value is string text && Stored(text, 10) is null,
             SqlServerValueColumn.Label => value is string text && Stored(text, 20) is null,
             SqlServerValueColumn.Tag => value is byte[] bytes && Stored(bytes, 16) is null,
+            SqlServerValueColumn.LegacyAt => value is DateTime legacy
+                && RoundLegacy(legacy) is null,
+            SqlServerValueColumn.SmallAt => value is DateTime small && RoundSmall(small) is null,
+            SqlServerValueColumn.Price => value is decimal price
+                && RoundMoney(price, small: false) is null,
+            SqlServerValueColumn.Fee => value is decimal fee
+                && RoundMoney(fee, small: true) is null,
             _ => false,
         };
+
+    /// <summary>
+    /// datetime へ保存した値（範囲の外なら null）：1/300 秒の最も近い単位へ丸め、DateTime へ戻す。丸めと戻し方は、SQL Server の
+    /// datetime の .NET の表現（<see cref="System.Data.SqlTypes.SqlDateTime"/>）の規則で、範囲（1753-01-01 から
+    /// 9999-12-31 23:59:59.997）の外はその型が断る
+    /// </summary>
+    private static DateTime? RoundLegacy(DateTime value)
+    {
+        try
+        {
+            return DateTime.SpecifyKind(
+                new System.Data.SqlTypes.SqlDateTime(
+                    DateTime.SpecifyKind(value, DateTimeKind.Unspecified)
+                ).Value,
+                DateTimeKind.Unspecified
+            );
+        }
+        catch (Exception ex) when (ex is System.Data.SqlTypes.SqlTypeException or OverflowException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// smalldatetime へ保存した値（範囲の外なら null）：秒が 29.998 以下なら分を切り下げ、29.999 以上なら切り上げる（SQL Server の
+    /// smalldatetime の説明）。範囲は 1900-01-01 00:00 から 2079-06-06 23:59
+    /// </summary>
+    private static DateTime? RoundSmall(DateTime value)
+    {
+        var minute = new DateTime(
+            value.Ticks - value.Ticks % TimeSpan.TicksPerMinute,
+            DateTimeKind.Unspecified
+        );
+        var milliseconds = value.Ticks % TimeSpan.TicksPerMinute / TimeSpan.TicksPerMillisecond;
+        var rounded = milliseconds >= 29_999 ? minute.AddMinutes(1) : minute;
+
+        return rounded < SqlServerValueShapes.SmallMin || rounded > SqlServerValueShapes.SmallMax
+            ? null
+            : rounded;
+    }
+
+    /// <summary>money・smallmoney へ保存した値（範囲の外なら null）：小数 4 桁へ四捨五入し（ちょうど半分は 0 から遠い側）、4 桁のスケールで戻る</summary>
+    private static decimal? RoundMoney(decimal value, bool small)
+    {
+        var (min, max) = SqlServerValueShapes.MoneyRange(small);
+        var rounded = Math.Round(value, 4, MidpointRounding.AwayFromZero) + 0.0000m;
+
+        return rounded < min || rounded > max ? null : rounded;
+    }
 
     /// <summary>
     /// 読み戻した値が期待に合うか（合えば null、合わなければ食い違いの説明）。断られない値にだけ呼ぶ
@@ -102,6 +162,10 @@ public static class BackendParitySqlServerValueExpectations
             SqlServerValueColumn.Ansi => Stored((string)written, 20)!,
             SqlServerValueColumn.Tag => Stored((byte[])written, 16)!,
             SqlServerValueColumn.Payload => (byte[])written,
+            SqlServerValueColumn.LegacyAt => RoundLegacy((DateTime)written)!,
+            SqlServerValueColumn.SmallAt => RoundSmall((DateTime)written)!,
+            SqlServerValueColumn.Price => RoundMoney((decimal)written, small: false)!,
+            SqlServerValueColumn.Fee => RoundMoney((decimal)written, small: true)!,
             _ => throw new ArgumentOutOfRangeException(nameof(column), column, null),
         };
 

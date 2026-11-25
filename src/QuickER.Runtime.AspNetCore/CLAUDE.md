@@ -70,7 +70,7 @@ Save フック・楽観排他・無制限バイナリの共通規則は `src/Qui
   - GET は 200 かつ Content-Type のメディア型が `application/octet-stream`（パラメータを除き大文字小文字を無視）。PUT / DELETE は 204。それ以外の 2xx は `RemoteRepositoryException`（ステータスと Content-Type を名指し）で、GET は宛先へ何も書かない。
   - エンドポイントの手前の別物（セッション切れをサインインページへ転送する認証プロキシ・何にでも 200 を返す中継）の 2xx を成功と読むと、GET はその HTML を blob として書いて true、PUT / DELETE はサーバーに届いていない書き込みで true になる。JSON と同じ理由。
   - HTTP の同期の blob のコピー（`HttpSyncServerSource` の `ISyncBinaryColumns`）も同じヘルパーを通る。
-  - ガード：`BinaryColumnRemoteTransferResponseRuntimeTests`（転送するプロキシ・200 で答える中継 × GET / PUT / DELETE と JSON の対照）、`SyncBinaryTransferResponseRuntimeTests`。mutation 実証済み。
+  - ガード：`BinaryColumnRemoteTransferResponseRuntimeTests`（転送するプロキシ・200 で答える中継 × GET / PUT / DELETE と JSON の対照）、`SyncSupportRemoteBinaryTransferResponseRuntimeTests`。mutation 実証済み。
 
 ## 400 の分類
 

@@ -327,6 +327,12 @@ public sealed class SyncModelRuntimeTests : ISyncModelTransportTests
                 // 世界を行ごとに作るので並列に流す。決定的なシナリオは別の Theory で流れ、網羅の計数に入らない
                 if (!plan.IsSingle)
                 {
+                    // 行が出すはずの組を、流す前に行を名指しして確かめる（網羅の照合は行を名指ししない）
+                    SyncModelCoverageRows
+                        .Table.SelectMany(SyncModelCoverageRows.MissingTupleProblems)
+                        .Should()
+                        .BeEmpty();
+
                     await Parallel.ForEachAsync(
                         SyncModelCoverageRows.Table,
                         new ParallelOptions

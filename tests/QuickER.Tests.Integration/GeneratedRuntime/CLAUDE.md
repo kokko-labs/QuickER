@@ -166,7 +166,8 @@
 - 書く経路 5 つ（InsertAsync・UpdateAsync・SaveAsync の挿入と更新・BulkInsertAsync）で書き、GetById・Include の無い Query・最後に 1 回の customers からの Include（QuickER 版は FOR JSON）で読む。比べるのは、期待（`BackendParitySqlServerValueExpectations`＝docs の写し）・2 つの実装先どうし・読む経路どうし・断られた書き込みが何も残さないこと（BulkInsert は 1 行でも断られればどの行も無い・更新は元の値のまま）。例外の型と文は比べない（docs の一括追加の節）。除外 blob は生の SELECT で読む。
 - 次元表 `BackendParitySqlServerValueDimensions`：実装先 × 書く経路 × 列 × 値の形（列の型に無い形は `isValid`）。網羅しない組は、除外 blob の列と長い blob の形 × 更新の 2 経路の 4 組（除外列は UPDATE の値で書けない）だけ。
 - `FixedCases_MatchDocsOnBothBackends`（普段・種なし）が成り立つ組を 1 行ずつ流して全組を出し、網羅しない組を照合する。`RandomSeeds_MatchDocsOnBothBackends`（`NightlyEngine`・`QUICKER_PARITY_SQLSERVER_VALUE_SEEDS` 普段 8・夜間 200）は 1 行に 2〜4 列の値を混ぜ、BulkInsert は 2〜5 行、2 回に 1 回 1 つの値を断られる形（列と形の組から一様に）へ置き換える。網羅しない組の照合は夜間の既定の種の数でだけ行う（普段の 8 種は書く経路 × 断られる形の組が欠ける）。
-- 作らない形は `BackendParitySqlServerValueNotGenerated.cs`。乱数の本流（`BackendParityGenerator`）と別の種の式で引くので、本流の種の指紋は変わらない（記録 `BackendParitySqlServerValues`）。
+- 列は datetime2・time・datetimeoffset・date・decimal・varchar・nchar・nvarchar・varbinary・除外 blob と、datetime・smalldatetime・money・smallmoney（期待は 1/300 秒・分・小数 4 桁への丸めと型の範囲）。
+- 作らない形は `BackendParitySqlServerValueNotGenerated.cs`。Pending は 2 つで、どちらも区切り「SQL Server の datetime・smalldatetime の保存と WHERE を C# とそろえる」で直す：smalldatetime の秒が 29.999 以上 30.000 以下の値（QuickER 版は分を切り上げ、EF Core 版は切り下げる）と、datetime の 9999-12-31 23:59:59.997 を超えて丸めると範囲の外になる値（QuickER 版は断り、EF Core 版は 23:59:59.997 で保存する）。生成 DbContext が datetime・smalldatetime に `HasColumnType` を出さず、EF Core が datetime2 で送ってサーバーが変換するため。乱数の本流（`BackendParityGenerator`）と別の種の式で引くので、本流の種の指紋は変わらない（記録 `BackendParitySqlServerValues`）。
 - 時間：決まった形 4 秒前後・普段の 8 種 1〜2 秒・夜間の 200 種 13 秒前後。
 - mutation 実証済み（SqlBulkCopy へ渡す値の丸めを外す・切り捨てに戻す・範囲の端で止めない・空白と 0x00 の切りを外す・空白以外や 0x00 以外も切る・属性の Scale を出さない、の各回で赤）。
 
@@ -214,7 +215,7 @@
   - 鍵は `SyncModelDirectRuns.KeyOf` の 1 か所（世界の組み方の名乗り `SyncModelWorldOptions.Name` とシナリオの名前）。組み方は `SyncModelDirectRuns.Options` の 1 つだけで、シナリオが決めるもの（端末の数・判定役の包み・手の列）は名前で決まる。名前の一覧（`SyncModelScenarios.All`）に無い複製のシナリオは使い回さない。
   - 取り出した結果が頼まれたシナリオのものであることを、結果に持たせたシナリオの参照で確かめ、違えば `InvalidOperationException` で行を赤にする（鍵を誤ると、流していないシナリオの結果で行が緑になる）。
 - 直結・HTTP・実 SQL Server の Theory は `SyncModelScenarioParts` が行の番号の余りで 2 つ・4 つ・2 つのクラスへ分けて並列に流す。xUnit は同じクラスの行を並列に流さず、HTTP の行を 1 クラスに置くと直列が同期の Theory の時間を決めるため。
-  - 分けたクラス（`SyncModelRuntimeTestsPart2`・`SyncModelHttpRuntimeTestsPart2`〜`4`・`SyncSupportAdoSqlServerScenarioPart2RuntimeTests`）は転送の軸の目印（`ISyncModelTransportTests`・`MatrixAxisValue`）を持たない。軸の値ごとのクラスは本体の 1 つだけ。
+  - 分けたクラス（`SyncSupportAdoSqliteScenarioPart2RuntimeTests`・`SyncSupportRemoteAdoSqliteScenarioPart{2,3,4}RuntimeTests`・`SyncSupportAdoSqlServerScenarioPart2RuntimeTests`）は転送の軸の目印（`ISyncModelTransportTests`・`MatrixAxisValue`）を持たない。軸の値ごとのクラスは本体の 1 つだけ。
   - 実 SQL Server の 2 つの分は、SQL Server の別々のコンテナのコレクション（本体は `SqlServerSecondContainerCollection`・2 つ目は `SqlServerContainerCollection`）に置く。同じコレクションのテストは 1 本ずつ流れるので、同じコレクションに置くと分けた意味が無い（普段の SQL Server のテストの時間の半分以上をこの Theory が占める）。
   - HTTP × 実 SQL Server の決定的なシナリオは、普段の CI で流さず夜間だけ全部流す（普段は実 SQL Server の直結が失敗の注入の行も持つ）。行ごとの Theory でなく、夜間の目印（`NightlyEngine`）を持つ 1 つの Fact `SyncSupportRemoteAdoSqlServerRuntimeTests.Scenarios_MatchDirect_Nightly` が、種の決め方（`SeedSource.Resolve`）のプロファイルが夜間のときだけ全シナリオを並列度 2 で流し、失敗をまとめて報告する。普段のプロファイルで行を出さない Theory はスキップ（スキップ 0 の原則に当たる）になるため。
   - 分ける数とその数のクラスは別々の場所にあるので、`SyncModelRuntimeTests.ScenarioParts_CoverEveryScenarioOncePerTransport` が `SyncModelScenarioParts.Names` を呼ぶ MemberData を反射で集め、転送ごとの行の和が流すシナリオとちょうど一致し重ならないことと、コレクションを持つ分（実 SQL Server）の分けたクラスが別々のコレクションにあることを表明する。mutation 実証済み（実 SQL Server を分ける数を 3 にする・2 つの分を同じコレクションに置く、のそれぞれで赤）。
@@ -224,9 +225,9 @@
 
 ### 差分ソースの HTTP と実 SQL Server の固有のテスト
 
-- `SyncHttpRuntimeTests`：HTTP・CI 常時。SyncFixture の SQLite のサーバー役（`SyncFixtureTestServer`）を in-process Kestrel の向こうへ置き、差分ソースの面でアンカーの Base64 往復・続きの有無・上限・全キー・400 拒否を見る。`ServerDown_SurfacesAsHttpRequestException` はエンジンの端末で、エンジンも HTTP の例外を包まずに伝えることを見る。
-- `SyncSqlServerRuntimeTests`：NULL を許す一意制約の 2 件（`sync_markers` は SyncFixture にしか無い）。
-- `SyncSqlServerHttpRuntimeTests`：上限の値の HTTP の往復・版の書き戻しと 409 の競合の収集・NULL の一意な値。
+- `SyncSupportRemoteAdoSqliteHttpSourceRuntimeTests`：HTTP・CI 常時。SyncFixture の SQLite のサーバー役（`SyncFixtureTestServer`）を in-process Kestrel の向こうへ置き、差分ソースの面でアンカーの Base64 往復・続きの有無・上限・全キー・400 拒否を見る。`ServerDown_SurfacesAsHttpRequestException` はエンジンの端末で、エンジンも HTTP の例外を包まずに伝えることを見る。
+- `SyncSupportAdoSqlServerFixtureRuntimeTests`：NULL を許す一意制約の 2 件（`sync_markers` は SyncFixture にしか無い）。
+- `SyncSupportRemoteAdoSqlServerFixtureRuntimeTests`：上限の値の HTTP の往復・版の書き戻しと 409 の競合の収集・NULL の一意な値。
 - 端末は `SyncEngineFixtureDevices.cs` の `SyncFixtureEngineDevice`（SyncFixture の 4 表にトリガーを張り、`SqliteLocalRowStore` と `SyncTable` でエンジンを組む口）。サーバーの差分ソースは DI に登録した直結か HTTP の生成の差分ソース。未送信は端末の行の状態の表で読む。
 - 生 SQL の `INSERT … RETURNING` が別の接続の読み取りを待つことは `BusyTimeoutDefaultAdoSqliteRuntimeTests.RawSqlReturning_WaitsForReaderOnAnotherConnection` が見る。
 - 生成の DI の登録（`AddGeneratedSyncEngine`）の構築時の除外と登録時の断りは、トリガーの確認の表の DI の行（`table:SyncTriggerGuard` の行 `di-*`。下の「同期のトリガーのテスト」）が見る。
@@ -254,7 +255,7 @@
   - 初期データへそろったかの照合は None・Refresh の端末だけに掛ける。
   - 最初の同期をしない端末（Journaled・Untracked）から見ると、初期データはまだ受け取っていないほかの書き手の内容。その端末がそのキーをサーバーと同じ内容（品目は blob も）で持つまで、版の競合の根拠の判定と消失なしの表明は、初期データをそのキーの書き手に数える。
   - 追跡しない行に端末が初めて書いたら、その行の今の内容と blob をその端末の書き込みとして履歴へ積む（Repository 越しの更新・blob の書き込みは、サーバーへの挿入として全列を送る）。
-  - 作らない形は `SyncModelNotGenerated` に宣言する。Accepted はサーバーにあるキーの追跡しない行・別の端末の DB の写し・端末 4 台以上・小さい取得の行数の上限・古い読みの保存〔同期が降ろす前に読んだ実体を降ろした後に保存する書き込み。項目 stale-entity-saves。見分ける形と見分けない形は同期のエンジンの決まった形の行が持つ〕ほか。外で版を書いた行の持ち込み・表どうしの循環の列を書く手・同じバッチの一意な値の入れ替えは Pending（R3 の後の生成器の区切り）。
+  - 作らない形は `SyncModelNotGenerated` に宣言する。Accepted はサーバーにあるキーの追跡しない行・別の端末の DB の写し・端末 4 台以上・小さい取得の行数の上限・古い読みの保存〔同期が降ろす前に読んだ実体を降ろした後に保存する書き込み。項目 stale-entity-saves。見分ける形と見分けない形は同期のエンジンの決まった形の行が持つ〕・サーバーの今より古い版の持ち込み（imported-stale-mirror-versions）・イベントの行の持ち込み（mirror-import-events）ほか。Pending は無い。
 - 空振りの守り：広い世界の種が既定の種の数のとき、最初の形ごとに実際に効いたことを `CoverageGuard` で表明する（`SyncModelRun.PreloadEffects`＝洗い替えで作った端末がそろった・初期データのキーへの記録が DuplicateOnServer になった・最初の同期の前の記録が UniqueValueTakenOnServer で断られた・どの書き込みも触れなかった追跡しない行が静止化の後にどの端末にも無い）。
 - 3 台目があって初めて起きる順序は、決まった形の行 `three-devices-change-reaches-the-other-two-in-different-orders`（全転送・3 台の世界）が持つ：端末 1 が UploadAsync だけで上げ（まだ降ろさない）、端末 2 がその版を降ろしてから編集して上げ、端末 3 は端末 2 の版だけを降ろす。端末 1 は自分が上げたキーに来た端末 2 の版を自分のエコーとみなさずに降ろし、端末 3 は端末 2 の版を元にした編集を競合なしに上げる。
 
@@ -285,11 +286,16 @@
 - 同期の設定と一意な値の形：
   - 種ごとの Mode×Policy は乱数を引かず `seed/4 % 6` で 6 組へ配る。種の組と合わせて 24 種ごとに全積が出る。
   - 同期の操作ごとに PropagateDeletes を乱数で切る（`SyncModelGenerator.PropagateDeletesOffRate`＝0.25）。
-  - 書き込みの case 15（`TryUniqueShape`）が、一意な値の付け替えの形を 4 つ作る（`ModelShapeStep`）。品目の code・フォルダーの name・端末とサーバーの他者で作る。
+  - 書き込みの case 15（`TryUniqueShape`）が、一意な値の付け替えの形を 6 つ作る（`ModelShapeStep`）。品目の code・フォルダーの name・端末とサーバーの他者で作る。
     - release-take：値を空けて別の行が取る。半分は取る側を先に触る。
     - release-take-chain：3 行。
     - delete-take：消した行の値を取る。
     - delete-take-reparent：消した行の値を取って別の親へ付け替え、元の親を消す。
+    - exact-swap・rotation：release-take・release-take-chain を 4 本目の乱数で閉じた形（先頭の行が仮の値を経て最後の行の元の値を取る）。端末で回した循環も 1 回の同期で上がり（n15 の 2 行と同じ）、サーバーで回した循環は 1 回の適用で降りる（docs の「競合」の節）。
+- 4 本目の乱数（`SyncModelGenerator.ShapeSeed`）：本流がその歩の手を引き終えた後にだけ引き、本流の手を置き換える（本流の乱数の引き方は変えない。置き換えた手で書き手の DB が変わるので、後の手の対象・値は変わりうる）。
+  - 閉じた入れ替え・回転（`UniqueCycleRate`）：上の 2 つ。
+  - ピン留め（`PinRate`）：本流が選んだフォルダーの更新を `PinFolderOp` へ。ピン留めがあれば半分で null へ戻す（循環を外す手）。ピン留めされた品目は消す候補にしない（`SyncModelGenerator.IsDeletableItem`）ので、循環に入った品目は、外す手が来るまで書き手の DB で消されない。書き込みの約束（`CheckWriterContract`）は、ピン留めが書き手の DB にある品目を指すことと、ピン留めされた品目を消さないことも確かめる（`gen/writer-contract:*:pinned-item-missing|pinned:*`）。
+  - ミラー版の持ち込み（`MirrorRate`）：本流が選んだ端末のフォルダー・品目の更新を `MirrorServerRowOp` へ。端末とサーバーの両方にある行を、記録させずに（`SyncModelDevice.WriteUntrackedAsync`）サーバーの今の内容と版の列で書き換える（blob は書かない）。写す内容が端末の DB で成り立つ（参照先が端末にある・親が自分の子孫でない・一意な値をほかの行が持たない）ときだけ作る。台帳は記録しない書き込みとして扱う（持ち分があるキーの内容だけを置き換える）。
 - 2 本目の乱数（`SyncModelGenerator.SideSeed`）：本流が選んだ手のキー・一意な値・blob の大きさ・除外する表を、低い確率で置き換える（本流の乱数の引き方は変えない。置き換えた種は実行の結果が変わるので、後の手も変わる）。
   - 同じキー（`StolenKeyRate`）：フォルダー・品目・イベントの挿入で、ほかの書き手の範囲のキーのうち、ほかの書き手の DB にあって自分の DB に無いものを選ぶ（持ち主の採番はもう越えているので、持ち主の後の挿入は自分の DB で失敗しない）。サーバーで DuplicateOnServer になる。
     - 品目の挿入の既定の code は `SyncModelGenerator.FreshItemCode` が作る。盗んだキーは同じ書き手がもう一度選べる（自分で消した後にまた候補になる）ので、すでに出した code なら通し番号を足す。外すと、同じキーを盗み直した手が、削除して同じ code で入れ直した自分の行とぶつかり、書き手の DB で断られる。
@@ -308,22 +314,24 @@
   - 使う行は `dl-server-update-after-upload-is-still-downloaded`（取得の直前に書かれた版）と、割り込みの網の洗い替え × 持ち主 × 更新 × 取得の前の点の 4 行（下の「割り込みの点」）と、実行の途中にサーバーの他者が書く洗い替え・同期の行 3 本（`fk-parent-created-between-table-fetches-arrives-in-same-sync`・`blob-refresh-discard-leaves-no-blob-on-row-changed-after-ceiling`・`blob-refresh-discard-empties-blob-of-row-written-after-retry`）。ほかの行は、どのサーバー役でも同じ期待で書いてある（実 SQL Server の Theory が直結と同じ違反になることで確かめる）。
   - 実行の途中にサーバーの他者が書く行（`ArmInterruptOp` の書き手がサーバーの他者）を足すときは、書かれた版がその実行に入ることを期待に置くなら、この手で枝を分ける。分けない行は、実 SQL Server の転送でだけ赤になる。
 - DuplicateOnServer の決着の中身は決まった形の行が持つ：Collect＝`conflict-duplicate-key-on-server-is-reported`・LocalWins＝`lw-overwrites-duplicate-key-on-server`・ServerWins＝`sw-duplicate-key-on-server-reloads-server-row`（同期＝同じ実行のダウンロードが揃える）と `sw-duplicate-key-on-server-upload-only-reloads-server-row`（単独の UploadAsync＝ServerWins が自分で読み直す）・後勝ち＝`lww-duplicate-key-on-server-overwrites`。モデルは書き手が 2 人のキーの決着を表明しない（報告せずに上書きする壊し方は、乱数の種では結果の表の網羅だけが捕まえる）。
-- 表どうしの循環の列（`pinned_item_id`）は乱数の列が書かない（生成器は書き手の DB で成功する手だけを選ぶので、循環に入った行を消す前に循環を外す手を選ぶ規則が要る。作らない形の宣言は Pending＝R3 の後の生成器の区切り）。洗い替え以外の経路は決まった形の行が持つ：`cycle-pin-to-new-item-uploads-in-rounds`（新しい品目へのピン留めが最初の巡で断られ次の巡で通る）・`cycle-pinned-item-is-read-back-before-folder`（ダウンロードがピン留めの先の品目のまだ無いフォルダーを打ち切らずに入れる）・`cycle-serverwins-restores-folder-pinned-to-new-item`（単独の UploadAsync の ServerWins。端末に無い品目をピン留めするサーバーの行はその実行では戻さず、フォルダーは端末の内容のまま未送信で残り、次の ServerWins の同期で品目と一緒に戻る。枝はエンジンの宣言 `CarriesServerWinsDecision` で選ぶ＝`WhenEngineDeclaresOp`）。
+- 表どうしの循環の列（`pinned_item_id`）は乱数の列がピン留めの手で書く（上の 4 本目の乱数）。決まった形の行も経路ごとの期待を持つ：`cycle-pin-to-new-item-uploads-in-rounds`（新しい品目へのピン留めが最初の巡で断られ次の巡で通る）・`cycle-pinned-item-is-read-back-before-folder`（ダウンロードがピン留めの先の品目のまだ無いフォルダーを打ち切らずに入れる）・`cycle-serverwins-restores-folder-pinned-to-new-item`（単独の UploadAsync の ServerWins。端末に無い品目をピン留めするサーバーの行はその実行では戻さず、フォルダーは端末の内容のまま未送信で残り、次の ServerWins の同期で品目と一緒に戻る。枝はエンジンの宣言 `CarriesServerWinsDecision` で選ぶ＝`WhenEngineDeclaresOp`）。
 - 次元表 `SyncModelDimensions`：
-  - OpFamily に 4 つの形、因子 UniqueTable・PropagateDeletes・Excluded（2 表・3 表の水準 two・three を含む）・Batch・Blobs（後ろ 4 つは SyncOptions の Source）・FaultKind・KeyOrigin（own・stolen・not-insert）・Spelling（UniqueSpelling の値と none）・PayloadSize（small・large・none）。
+  - OpFamily に 6 つの一意な値の形と pin・mirror-import（mirror-import は書き込みの経路を持たない端末の手＝Via=None）、因子 UniqueTable・PropagateDeletes・Excluded（2 表・3 表の水準 two・three を含む）・Batch・Blobs（後ろ 4 つは SyncOptions の Source）・FaultKind・KeyOrigin（own・stolen・not-insert）・Spelling（UniqueSpelling の値と none）・PayloadSize（small・large・none）。
   - 世界の形の因子 Devices（2・3）・Preload（操作の書き手の最初の形＝`ModelPreload` の値。サーバーの他者は None）。2 台の世界の最初の形が None 以外の組・端末 3 が 2 台の世界にいる組・サーバーの他者が None 以外の組は、定義から起こり得ない組として外す。
   - 3 因子の組 (Policy, OpFamily, PropagateDeletes)・(Actor, OpFamily, UniqueTable)・(Preload, Mode, Policy)。
   - Blobs=False は受け入れの組（乱数は常に blob を運ぶ。docs の「運ぶかは端末ごとに一貫させる」）。
   - サーバーの他者（Actor=Server・Via=None）× 衝突し得る別表記は受け入れの組。
 - 実行の結果の表 `SyncModelOutcomeDimensions`（登録簿 SyncModel/Outcomes）：SyncConflictReason と SyncLocalRowChangeReason（値は `DiscardedByServerWins` だけ）の全値×Mode×Policy。実行の後の結果だけを数え、乱数を引かない。網羅しない組の一覧 `SyncModelOutcomeDimensions.EngineGaps` は空。
-- 網羅の行 `SyncModelCoverageRows`（Id は `coverage-`・8 行）：
+- 網羅の行 `SyncModelCoverageRows`（Id は `coverage-`・12 行）：
   - 乱数の種で作れない組を持つ。サーバーの他者の Extras の操作 4 つ（作り直し・失敗する書き込み・キーだけのスタブ・持っていた実体での削除）・グラフ保存の失敗する書き込み。
   - DuplicateOnServer は乱数の種が同じキーの挿入で作る（行を持たない）。
   - 既定の 60 種でたまたま欠ける組も持つ：フォルダー・イベントをそれぞれ除外したダウンロード（`coverage-download-excluding-folders-and-events`）。
   - 広い世界の既定の種でたまたま欠ける組も持つ：端末 3 のフォルダーの delete-take-reparent（`coverage-device3-delete-take-reparent-folders`・3 台の世界）と、追跡しない行を入れた端末のラベルを除外した同期（`coverage-untracked-device-sync-excluding-labels`・行の入力の `Preloads` で最初の形を宣言する）。
-  - 8 行の内訳：サーバーの他者の Extras の 4 行（`coverage-server-reinsert`・`coverage-server-failing-write`・`coverage-server-delete-stub`・`coverage-server-delete-held`）・`coverage-graph-failing-write`・上の 3 行。
+  - release-take の形の半分を閉じた入れ替え・回転へ回すので、既定の種でたまたま欠ける一意な値の形の組も持つ：サーバーの他者の品目の release-take-chain（`coverage-server-release-take-chain-items`）・サーバーの他者のフォルダーの exact-swap（`coverage-server-exact-swap-folders`）・端末 3 の品目の release-take-chain（`coverage-device3-release-take-chain-items`）・最初の形 Journaled の端末の rotation（`coverage-journaled-device-rotation-folders`）。
+  - 12 行の内訳：サーバーの他者の Extras の 4 行（`coverage-server-reinsert`・`coverage-server-failing-write`・`coverage-server-delete-stub`・`coverage-server-delete-held`）・`coverage-graph-failing-write`・上の 3 行と 4 行。
   - 直結の乱数のテスト `SyncSupportAdoSqliteEngineRuntimeTests.RandomSeeds_ConvergeWithoutLoss` が種の前に並列に流す（単独の種では流さない）。操作を 1 歩ずつ次元表で、同期の結果を結果の表で数える。
   - 行は生成器の代わりにモード・ポリシー・種の組を宣言する（例：`coverage-server-delete-stub`）（`SyncModelDimensions.Observe` の多重定義）。行の同期が宣言と違えば構築で断る。
+  - 行は出すはずの組（`SyncModelCoverageInput.ExpectedTuples`）を宣言し、出さなければ `SyncModelCoverageRows.MissingTupleProblems` が行を名指しして、種と行を流す前に赤にする（実装先どうしの一致の網羅の行と同じ形）。割り当ては Observe と共有の `SyncModelDimensions.Assignments` で、流さずに判定する。
   - 決定的なシナリオ（`SyncModelScenarios`）は別の Theory で流れて網羅の計数に入らないが、網羅の行は数える。行は期待の操作を持たず、次元表に無い操作の型は宣言の誤り。
   - 行の違反は既知の失敗の一覧で外さず、すべて新しい失敗として赤にする。
   - 残る網羅しない組は受け入れの組だけ（`SyncModelDimensions.EngineGaps`＝Blobs=False と、サーバーの他者 × ぶつかり得る別表記。結果の表の `SyncModelOutcomeDimensions.EngineGaps` は空）。
@@ -425,12 +433,13 @@
 - どれも端末はエンジンの端末（`SyncModelEngineDevice`）で、次を確かめる。
   - 決定的なシナリオが直結と同じ違反になること。例外は入口・違反の種類・推定した形へ正規化して比べる（`SyncModelSignatures`）。直結の側は `SyncModelDirectRuns` の結果。
   - 乱数の種が既知の失敗（`SyncModelEngineTransports.Known`・空で始める）にしか当たらないこと。種の数は `QUICKER_SYNC_MODEL_TRANSPORT_SEEDS`（既定 10・夜間 200＝`SyncModelSignatures.NightlySeedCount`）と、広い世界の種の `QUICKER_SYNC_MODEL_TRANSPORT_WIDE_SEEDS`（既定 4・夜間 40＝`SyncModelSignatures.NightlyWideSeedCount`）。夜間の数は、100＋20 で流した 3 夜（2026-11-24・25）の実測から倍にした（`tests/QuickER.Tests/TestSupport/CLAUDE.md`「夜間の深い実行」）。乱数の種の Fact はどれも夜間の目印を持つ（`NightlyEngineTrait.Selected`）。網羅は観測と要約だけで、網羅しない組は直結の乱数の種で照合する。実 SQL Server の 2 つのクラスは、どちらの範囲も種の組の余り 0・1 の種（失敗の注入なし）と余り 2・3 の種（失敗の注入の組）を別の Fact で流す（`SyncModelSignatures.SqlServerSeeds`・`SqlServerFaultSeeds`）。
+  - 種の番号は続いた番号から取らない（生成器はモード×ポリシーを種を 4 で割った商で 6 組へ順に配るので、続いた 10 種は 3〜5 組しか作らない）。HTTP は開始番号から 5 刻み（`SyncModelSignatures.HttpSeeds`）、実 SQL Server は j 番目が 4j＋(j を 2 で割った余り)（失敗の注入の組は＋2）。`EngineFingerprintDriftTests.SyncModel_TransportSeedsAreRecorded` が、普段と夜間の数のそれぞれで、転送の種が直結の同じプロフィールの種の範囲に入ることと、モード×ポリシーが min(6, 種の数) 組・種の組が取りうる数だけそろうことを、生成器のコンストラクタだけで確かめる。普段の広い世界の 4 種が作らない 2 組は作らない形の宣言（`transport-wide-seed-mode-policy`）。
 - SQL Server でだけ起きる既知の失敗は `SyncModelEngineTransports.SqlServerOnly`（空で始める）に置く（HTTP × 実 SQL Server も同じ一覧で比べる）。形は `SyncModelSqlServerRuntimeTests.SqlServerOnly_AreWellFormed` が見る。
 - 既知の失敗は `SyncModelKnownFailures` の厳格な一覧（載っているシナリオはその署名の組どおりに失敗しなければ赤・載っていない失敗も赤）で一時的に外し、直したら消す。直結の一覧は `SyncModelKnownFailures.EngineSet`（空。項目を足すときは、エンジンの端末で出た失敗から理由つきで足す）。一覧の形は `SyncModelRuntimeTests.KnownFailures_AreWellFormed` が見る。
 
 ### 同期の構成の行列
 
-- `SyncConfigMatrixRuntimeTests`（登録簿 SyncModel/Config・`SyncConfigDimensions`・Docker）は、組める組の全積 238 行を流す（6 因子の水準の全積 480 から、原理的に組めない組＝AddGeneratedSyncSupport × HTTP（HTTP/2 の水準を含む）・キーなしのローカル × キーなしの直結・キーを決めるフック × 直接の挿入を外した数。どちらのフィクスチャもリモートサービスを持つので HTTP の行も両方にある）。軸は次のとおり。
+- `SyncSupportConfigMatrixRuntimeTests`（登録簿 SyncModel/Config・`SyncConfigDimensions`・Docker）は、組める組の全積 238 行を流す（6 因子の水準の全積 480 から、原理的に組めない組＝AddGeneratedSyncSupport × HTTP（HTTP/2 の水準を含む）・キーなしのローカル × キーなしの直結・キーを決めるフック × 直接の挿入を外した数。どちらのフィクスチャもリモートサービスを持つので HTTP の行も両方にある）。軸は次のとおり。
   - 主キーの型：行列の軸 `SyncConfigFixtures`（IntKey＝SyncFixture・VoKey＝SyncVoFixture）。
   - ローカルの登録の形（因子 LocalKey）：キーつき・キーなし・キーなしの登録の後でローカルの接続ファクトリを同じ接続文字列のインスタンスの登録（シングルトン）で登録し直した形（`UnkeyedInstance`。同期の登録より前に登録し直す）。
   - サーバーの差分ソース：直結の keyed / 非 keyed・HTTP の baseAddress / HttpClient ファクトリ / HttpClient ファクトリで HTTPS のサーバーへ HTTP/2 で送る形（`HttpClientFactoryHttp2`）。
@@ -513,8 +522,9 @@
 
 - 端末：`SyncModelEngineDevice.OnSmallChunks(世界の作り方, 道の数え手)`。エンジンの端末と同じ部品で、塊へ入る閾値を 2 行・塊の大きさを 2 行にする（`SmallChunkThreshold`・`SmallChunkSize`）。塊の経路のトランザクションの間の隙間（`ChunkWriteGap`）は 0 にする（2 行の塊はトランザクションが多く、隙間を置くと照合が長くなる。隙間は結果を変えず、決まった形の行 `chunk-write-transactions-leave-gap-for-other-writers` が見る）。未送信の無い 3 行以上の取得（同期・受信だけ・洗い替え。洗い替えは `Force` で捨てる行を未送信に数えない）が塊の道を通り、未送信のある実行と小さい取得は 1 回で全部の道を通る。
   - 道の数え手 `SyncModelDownloadRoutes` は、エンジンの internal の口（`DownloadRouteObserved`・`CarriedRowsApplied`）につないで、道ごとの実行の数と、最後の段が持ち越した行の数を数える（スレッドをまたいで足す）。
-- 直結の Theory との照合（`SyncSupportAdoSqliteEngineRuntimeTests.SmallChunkScenarios_MatchDirect`）：直結の Theory が流す行（直結の転送を宣言した全部の行）を小さい塊の端末で流し（`SyncModelScenarioLedger.RunAsync`・既知の失敗の一覧 `SyncModelKnownFailures.EngineSet`。結果は `green`・`known`・`differs` の 3 つ）、`green`・`known` でない行を、塊の道で結果の違う行とする。直結の Theory は同じ行が 1 回で全部の道の端末で一覧どおり（空＝緑）であることを表明するので、塊の道の結果が 1 回で全部の道と同じなら違う行は無い。
-  - 違う行は、理由の宣言 `SyncModelSmallChunkScenarioDifferences` と 2 方向に照合する（宣言の無い違う行も、宣言があるのに直結の実行と同じ結果の行も赤）。理由には、塊の経路が違う答えを出す仕組み（削除の段が塊より前・キーを行より先に取る順・塊ごとの確定）を書く。今の宣言は 1 行（`chunk-delete-stage-parent-gone-after-next-sync`＝削除の段で残した親が次の同期まで端末に残る）。
+- 1 回で全部の道との照合（共通の本体 `SyncModelSmallChunkScenarioRuns.AssertMatchesDirectAsync`）：転送の Theory が流す行（`SyncModelScenario.RunsOn`）を、その転送の世界の小さい塊の端末で流し（`SyncModelScenarioLedger.RunAsync`・既知の失敗の一覧 `SyncModelKnownFailures.EngineSet`。結果は `green`・`known`・`differs` の 3 つ）、`green`・`known` でない行を、塊の道で結果の違う行とする。直結の Theory は同じ行が 1 回で全部の道の端末で一覧どおり（空＝緑）であることを、転送の Theory は直結と同じ違反になることを表明するので、塊の道の結果が 1 回で全部の道と同じなら違う行は無い。
+  - 転送は 3 つ：直結（`SyncSupportAdoSqliteEngineRuntimeTests.SmallChunkScenarios_MatchDirect`）・HTTP × SQLite のサーバー役（`SyncSupportRemoteAdoSqliteSmallChunkRuntimeTests`）・実 SQL Server（`SyncSupportAdoSqlServerSmallChunkRuntimeTests`・Docker・簡易 DSL の総当たりと同じ `SqlServerDslFuzzContainerCollection`＝種を使わず夜間に流れないので、普段の CI で空きのあるコレクションに置く。理由と実測はコレクションの remarks）。塊の経路は取得のページを流しながら塊を確定するので、取得の上限を実行の始めに固定するか（`ISyncModelServerRole.FixesFetchCeilingAtRunStart`）と、HTTP のページ分けと再開点の Base64 の往復に依る（転送に依らない古い読みの見分け・未送信を捨てる口は、作らない形の宣言 SyncModelNotGenerated の項目 stale-entity-saves・pending-discard に根拠を書いた）。HTTP × 実 SQL Server は流さない（実 SQL Server の上限の固定と HTTP のページ分けは、それぞれの転送が持つ）。
+  - 違う行は、理由の宣言 `SyncModelSmallChunkScenarioDifferences` と転送ごとに 2 方向に照合する（宣言の無い違う行も、宣言があるのに 1 回で全部の道の実行と同じ結果の行も赤）。どの転送でも違う行は `All`、1 つの転送でだけ違う行は `TransportOnly`。理由には、塊の経路が違う答えを出す仕組み（削除の段が塊より前・キーを行より先に取る順・塊ごとの確定・取得の上限の固定）を書く。今の宣言は `All` の 1 行（`chunk-delete-stage-parent-gone-after-next-sync`＝削除の段で残した親が次の同期まで端末に残る）。
   - 空振りの守り：塊の道を通った実行のある行が 0 行なら赤。印 `SyncModelScenario.CarriesAcrossChunks` のある行は、持ち越しが 1 行以上起きなければ赤。
 - 乱数の種（`SyncSupportAdoSqliteEngineRuntimeTests.SmallChunkRandomSeeds_ConvergeWithoutLoss`）：直結の組 `EngineSuite` と同じ本体に、組 `SmallChunkSuite`（端末の作り方・夜間の数・夜間だけの空振りの守りだけが違う）を渡す。生成器・次元表・作らない形の宣言・種の指紋の記録は直結の組と共有する（新しい生成器の部分を持たない）。
   - 普段の数は直結の組と同じ（60＋広い世界 48）。夜間の数は普段の 4 倍（240）で、広い世界の種は普段と同じ 48。

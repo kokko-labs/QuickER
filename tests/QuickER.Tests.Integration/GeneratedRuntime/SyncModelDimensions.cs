@@ -104,24 +104,28 @@ internal static class SyncModelDimensions
     private const string NoExclusion = "none";
 
     // 一意な値の形でない操作の、表の水準
-    private const string NoUniqueTable = "none";
+    internal const string NoUniqueTable = "none";
 
     // 操作の種類の水準
     private const string Write = "write";
     private const string UniqueReuse = "unique-reuse";
-    private const string Reinsert = "reinsert";
+    internal const string Reinsert = "reinsert";
     private const string Payload = "payload";
-    private const string FailingWrite = "failing-write";
-    private const string DeleteStub = "delete-stub";
-    private const string DeleteHeld = "delete-held";
-    private const string Sync = "sync";
+    internal const string FailingWrite = "failing-write";
+    internal const string DeleteStub = "delete-stub";
+    internal const string DeleteHeld = "delete-held";
+    internal const string Sync = "sync";
     private const string Upload = "upload";
-    private const string Download = "download";
+    internal const string Download = "download";
     private const string Fault = "fault";
     private const string ReleaseTake = SyncModelGenerator.ReleaseTakeShape;
     private const string ReleaseTakeChain = SyncModelGenerator.ReleaseTakeChainShape;
     private const string DeleteTake = SyncModelGenerator.DeleteTakeShape;
     private const string DeleteTakeReparent = SyncModelGenerator.DeleteTakeReparentShape;
+    internal const string ExactSwap = SyncModelGenerator.ExactSwapShape;
+    internal const string Rotation = SyncModelGenerator.RotationShape;
+    internal const string Pin = "pin";
+    internal const string MirrorImport = "mirror-import";
 
     /// <summary>一意な値の付け替えの形（<see cref="SyncModelGenerator"/> の TryUniqueShape）</summary>
     private static readonly string[] UniqueShapeFamilies =
@@ -130,13 +134,15 @@ internal static class SyncModelDimensions
         ReleaseTakeChain,
         DeleteTake,
         DeleteTakeReparent,
+        ExactSwap,
+        Rotation,
     ];
 
     /// <summary>同期の呼び出しの操作の種類</summary>
     private static readonly string[] SyncFamilies = [Sync, Upload, Download];
 
     // 経路の水準（書き込みの経路を持たない操作と、経路を使わないサーバーの他者の書き込み）
-    private const string NoVia = "None";
+    internal const string NoVia = "None";
 
     // 種の組の水準
     private const string Plain = "plain";
@@ -153,8 +159,18 @@ internal static class SyncModelDimensions
         FailingWrite,
     ];
 
-    /// <summary>書き込みの経路を持たない操作の種類（同期の呼び出しと失敗の仕掛け）</summary>
-    private static readonly string[] NonWriteFamilies = [Sync, Upload, Download, Fault];
+    /// <summary>
+    /// 書き込みの経路を持たない操作の種類（同期の呼び出し・失敗の仕掛けと、端末の記録しない写し。どれも端末のもので、サーバーの
+    /// 他者は持たない）
+    /// </summary>
+    private static readonly string[] NonWriteFamilies =
+    [
+        Sync,
+        Upload,
+        Download,
+        Fault,
+        MirrorImport,
+    ];
 
     /// <summary>次元表</summary>
     public static DimensionTable Table { get; } =
@@ -231,8 +247,12 @@ internal static class SyncModelDimensions
                         new Level(ReleaseTakeChain),
                         new Level(DeleteTake),
                         new Level(DeleteTakeReparent),
+                        new Level(ExactSwap),
+                        new Level(Rotation),
+                        new Level(Pin),
+                        new Level(MirrorImport),
                     ],
-                    "操作の種類（write＝行の追加・更新・削除 1 つ／unique-reuse＝一意な値を手放す削除と、同じ値の別のキーの挿入の組／reinsert＝同じキーで消して作り直す組／payload＝blob の書き込み／failing-write＝業務の書き込みが失敗する形／delete-stub・delete-held＝キーだけのスタブ・持っていた実体のグラフ保存での削除／sync・upload・download＝同期の呼び方／fault＝失敗の仕掛け／release-take＝更新で一意な値を空け、別の行がその値を更新で取る（4m-D3）／release-take-chain＝その 3 行の連鎖／delete-take＝行を消して値を空け、別の行がその値を更新で取る（4m-B3 の材料）／delete-take-reparent＝消す行の値を別の行が取って別の親へ付け替え、元の親を消す（4m-D4））"
+                    "操作の種類（exact-swap＝2 行の一意な値を仮の値を挟んで厳密に入れ替える／rotation＝3 行の一意な値を仮の値を挟んで回す（どちらも release-take の形を 4 本目の乱数で閉じる）／pin＝フォルダーのピン留め（表どうしの循環の列）を品目か null へ書く／mirror-import＝端末の行を、記録させずにサーバーの今の行の内容と版の列で書き換える／write＝行の追加・更新・削除 1 つ／unique-reuse＝一意な値を手放す削除と、同じ値の別のキーの挿入の組／reinsert＝同じキーで消して作り直す組／payload＝blob の書き込み／failing-write＝業務の書き込みが失敗する形／delete-stub・delete-held＝キーだけのスタブ・持っていた実体のグラフ保存での削除／sync・upload・download＝同期の呼び方／fault＝失敗の仕掛け／release-take＝更新で一意な値を空け、別の行がその値を更新で取る（4m-D3）／release-take-chain＝その 3 行の連鎖／delete-take＝行を消して値を空け、別の行がその値を更新で取る（4m-B3 の材料）／delete-take-reparent＝消す行の値を別の行が取って別の親へ付け替え、元の親を消す（4m-D4））"
                 ),
                 new Factor(
                     Via,
@@ -419,10 +439,12 @@ internal static class SyncModelDimensions
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelScenarios.Engine.Refresh.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelScenarios.Judge.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelServer.cs",
+                "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelSmallChunkScenarioRuns.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelTransportRuntimeTests.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelTransports.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelWorld.cs",
                 "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportAdoSqliteEngineRuntimeTests.cs",
+                "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportSmallChunkTransportRuntimeTests.cs",
             ],
             [
                 "src/QuickER.Runtime.Sync",
@@ -469,6 +491,31 @@ internal static class SyncModelDimensions
         IReadOnlyList<ModelOp> ops
     )
     {
+        foreach (var assignment in Assignments(mode, policy, extras, faults, shape, ops))
+        {
+            counter.Observe(assignment);
+        }
+    }
+
+    /// <summary>
+    /// 1 歩の操作ごとの割り当て（<see cref="Observe"/> が数える値。網羅の行の期待の組の検査
+    /// <see cref="SyncModelCoverageRows.MissingTupleProblems"/> も同じ値を読む）
+    /// </summary>
+    /// <param name="mode">同期のモード</param>
+    /// <param name="policy">競合ポリシー</param>
+    /// <param name="extras">Extras の操作を含む組か</param>
+    /// <param name="faults">失敗の仕掛けを含む組か</param>
+    /// <param name="shape">世界の形（端末の数と端末ごとの最初の形）</param>
+    /// <param name="ops">その歩の操作</param>
+    public static IEnumerable<IReadOnlyDictionary<string, string>> Assignments(
+        SyncMode mode,
+        SyncConflictPolicy policy,
+        bool extras,
+        bool faults,
+        SyncModelWorldShape shape,
+        IReadOnlyList<ModelOp> ops
+    )
+    {
         var families = Families(ops);
         var group = (extras, faults) switch
         {
@@ -480,56 +527,50 @@ internal static class SyncModelDimensions
 
         for (var i = 0; i < ops.Count; i++)
         {
-            counter.Observe(
-                new Dictionary<string, string>(StringComparer.Ordinal)
+            yield return new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [Mode] = mode.ToString(),
+                [Policy] = policy.ToString(),
+                [Group] = group,
+                [Devices] = DevicesLevel(shape.Devices.Count),
+                [Preload] = PreloadOf(shape, ops[i]),
+                [Actor] = ActorOf(ops[i]),
+                [OpFamily] = families[i],
+                [Via] = ViaOf(ops[i]),
+                [UniqueTable] = UniqueTableOf(ops, families[i]),
+                [PropagateDeletes] = ops[i] is ModelSyncOp sync
+                    ? sync.PropagateDeletes.ToString()
+                    : NotSync,
+                [Excluded] = ops[i] switch
                 {
-                    [Mode] = mode.ToString(),
-                    [Policy] = policy.ToString(),
-                    [Group] = group,
-                    [Devices] = DevicesLevel(shape.Devices.Count),
-                    [Preload] = PreloadOf(shape, ops[i]),
-                    [Actor] = ActorOf(ops[i]),
-                    [OpFamily] = families[i],
-                    [Via] = ViaOf(ops[i]),
-                    [UniqueTable] = UniqueTableOf(ops, families[i]),
-                    [PropagateDeletes] = ops[i] is ModelSyncOp sync
-                        ? sync.PropagateDeletes.ToString()
-                        : NotSync,
-                    [Excluded] = ops[i] switch
-                    {
-                        ModelSyncOp { Excluded.Count: 0 } => NoExclusion,
-                        ModelSyncOp { Excluded: [var table] } => table,
-                        ModelSyncOp { Excluded.Count: 2 } => TwoExcluded,
-                        ModelSyncOp { Excluded.Count: 3 } => ThreeExcluded,
-                        ModelSyncOp other => string.Join(",", other.Excluded),
-                        _ => NotSync,
-                    },
-                    [KeyOrigin] = ops[i] switch
-                    {
-                        ModelWriteOp { StolenKey: true } => StolenKey,
-                        ModelWriteOp write when IsAdd(write) => OwnKey,
-                        _ => NotInsert,
-                    },
-                    [Spelling] = ops[i] is ModelWriteOp { Spelling: { } spelling }
-                        ? spelling.ToString()
-                        : NoSpelling,
-                    [PayloadSize] = ops[i] switch
-                    {
-                        AddItemOp { PayloadHex: var hex } => SizeOf(hex),
-                        WritePayloadOp { PayloadHex: var hex } => SizeOf(hex),
-                        _ => NoPayload,
-                    },
-                    [Batch] = ops[i] is ModelSyncOp batched
-                        ? batched.BatchSize.ToString(
-                            System.Globalization.CultureInfo.InvariantCulture
-                        )
-                        : NotSync,
-                    [FaultKind] = ops[i] is ArmFaultOp armed ? armed.Kind.ToString() : NotFault,
-                    [Blobs] = ops[i] is ModelSyncOp carried
-                        ? carried.IncludeBlobs.ToString()
-                        : NotSync,
-                }
-            );
+                    ModelSyncOp { Excluded.Count: 0 } => NoExclusion,
+                    ModelSyncOp { Excluded: [var table] } => table,
+                    ModelSyncOp { Excluded.Count: 2 } => TwoExcluded,
+                    ModelSyncOp { Excluded.Count: 3 } => ThreeExcluded,
+                    ModelSyncOp other => string.Join(",", other.Excluded),
+                    _ => NotSync,
+                },
+                [KeyOrigin] = ops[i] switch
+                {
+                    ModelWriteOp { StolenKey: true } => StolenKey,
+                    ModelWriteOp write when IsAdd(write) => OwnKey,
+                    _ => NotInsert,
+                },
+                [Spelling] = ops[i] is ModelWriteOp { Spelling: { } spelling }
+                    ? spelling.ToString()
+                    : NoSpelling,
+                [PayloadSize] = ops[i] switch
+                {
+                    AddItemOp { PayloadHex: var hex } => SizeOf(hex),
+                    WritePayloadOp { PayloadHex: var hex } => SizeOf(hex),
+                    _ => NoPayload,
+                },
+                [Batch] = ops[i] is ModelSyncOp batched
+                    ? batched.BatchSize.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    : NotSync,
+                [FaultKind] = ops[i] is ArmFaultOp armed ? armed.Kind.ToString() : NotFault,
+                [Blobs] = ops[i] is ModelSyncOp carried ? carried.IncludeBlobs.ToString() : NotSync,
+            };
         }
     }
 
@@ -582,6 +623,8 @@ internal static class SyncModelDimensions
             ModelSyncOp { Kind: ModelSyncKind.Upload } => Upload,
             ModelSyncOp { Kind: ModelSyncKind.Download } => Download,
             ArmFaultOp => Fault,
+            MirrorServerRowOp => MirrorImport,
+            PinFolderOp { ExpectFailure: false } => Pin,
             DeleteStubOp => DeleteStub,
             DeleteHeldOp => DeleteHeld,
             ModelWriteOp { ExpectFailure: true } => FailingWrite,
@@ -605,6 +648,7 @@ internal static class SyncModelDimensions
             ModelWriteOp write => write.Actor.ToString(),
             ModelSyncOp sync => sync.Device.ToString(),
             ArmFaultOp fault => fault.Device.ToString(),
+            MirrorServerRowOp mirror => mirror.Device.ToString(),
             _ => $"(no actor: {op.GetType().Name})",
         };
 
@@ -615,6 +659,7 @@ internal static class SyncModelDimensions
             ModelWriteOp write => shape.PreloadOf(write.Actor).ToString(),
             ModelSyncOp sync => shape.PreloadOf(sync.Device).ToString(),
             ArmFaultOp fault => shape.PreloadOf(fault.Device).ToString(),
+            MirrorServerRowOp mirror => shape.PreloadOf(mirror.Device).ToString(),
             _ => $"(no actor: {op.GetType().Name})",
         };
 

@@ -181,7 +181,7 @@ public sealed class SqlServerContainerCollection : ICollectionFixture<SqlServerC
 /// 別々のコレクションに置く。普段に一番重い実 SQL Server の決定的なシナリオの Theory は 2 つのクラスに分け
 /// （<c>SyncModelScenarioParts</c>）、片方ずつを置く。このコレクションの中身：<c>SyncModelSqlServerRuntimeTests</c>・
 /// <c>SqlServerSyncPlanFuzzTests</c>・<c>SqlServerNameFuzzDdlRoundTripIntegrationTests</c>・
-/// <c>ConcurrencyVoRemoteAdoSqlServerRuntimeTests</c>・<c>SyncConfigMatrixRuntimeTests</c>。
+/// <c>ConcurrencyVoRemoteAdoSqlServerRuntimeTests</c>・<c>SyncSupportConfigMatrixRuntimeTests</c>。
 /// </para>
 /// <para>
 /// このコレクションのクラスはどれも、冒頭でスキーマを捨てる（<see cref="SqlServerContainerFixture.ResetSchemaAsync"/>）か自分の
@@ -197,17 +197,30 @@ public sealed class SqlServerSecondContainerCollection
 }
 
 /// <summary>
-/// 簡易 DSL の総当たり（SQL Server）だけのコレクション定義（<see cref="SqlServerContainerCollection"/> と別の SQL Server のコンテナを持つ）
+/// 簡易 DSL の総当たり（SQL Server）と、夜間に流れない小さい塊の決定的なシナリオ（実 SQL Server）のコレクション定義
+/// （<see cref="SqlServerContainerCollection"/> と別の SQL Server のコンテナを持つ）
 /// </summary>
 /// <remarks>
+/// <para>
 /// xunit は同じコレクションのテストを 1 本ずつ流すので、夜間の種の数で長い総当たりを <see cref="SqlServerContainerCollection"/> に置くと、
 /// ほかの SQL Server のテストの後ろに直列で並び、夜間のジョブの終わりの時刻を決める。別のコンテナで並べて流す（コンテナが 1 つ増える）。
 /// 総当たりは単位ごとにデータベースを作って捨てるので、コンテナの状態をほかのテストと共有する必要はない。
+/// </para>
+/// <para>
+/// 小さい塊の決定的なシナリオ（<c>SyncSupportAdoSqlServerSmallChunkRuntimeTests</c>・普段の CI で約 2 分）も置く。種を使わず夜間の目印を
+/// 持たないので夜間のジョブには流れず（夜間の 2 つのジョブはどちらも NightlyEngine=true で絞る）、効くのは普段の CI だけ。普段の
+/// ubuntu のジョブの終わりは 2 つの SQL Server のコレクションが決め（2026-11-25 の main の CI：テストの段 11.5 分のうち、このコレクションは
+/// 約 6 分で終わった）、このコレクションには空きがある。2 つの SQL Server のコレクションのどちらに置いても、ジョブの終わりを押す。
+/// 世界ごとにデータベースを作るので、総当たりと同じくコンテナの状態を共有しない。
+/// </para>
 /// </remarks>
 [CollectionDefinition(Name)]
 public sealed class SqlServerDslFuzzContainerCollection
     : ICollectionFixture<SqlServerContainerFixture>
 {
-    /// <summary>コレクション名（<c>NamedQueryDslConditionFuzzSqlServerRuntimeTests</c> の <c>[Collection]</c> で参照する）</summary>
+    /// <summary>
+    /// コレクション名（<c>NamedQueryDslConditionFuzzSqlServerRuntimeTests</c> と <c>SyncSupportAdoSqlServerSmallChunkRuntimeTests</c> の
+    /// <c>[Collection]</c> で参照する）
+    /// </summary>
     public const string Name = "SQL Server DSL Fuzz";
 }

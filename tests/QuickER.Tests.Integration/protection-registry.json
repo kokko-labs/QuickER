@@ -29,10 +29,12 @@
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelScenarios.Engine.Refresh.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelScenarios.Judge.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelServer.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelSmallChunkScenarioRuns.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelTransportRuntimeTests.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelTransports.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncModelWorld.cs",
-        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportAdoSqliteEngineRuntimeTests.cs"
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportAdoSqliteEngineRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportSmallChunkTransportRuntimeTests.cs"
       ],
       "covers": [
         "src/QuickER.Runtime.Sync",
@@ -61,7 +63,7 @@
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigFixtures.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigIntKeyFixture.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigVoKeyFixture.cs",
-        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncConfigMatrixRuntimeTests.cs"
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportConfigMatrixRuntimeTests.cs"
       ],
       "covers": [
         "src/QuickER.Runtime.Sync",

@@ -18,7 +18,7 @@ namespace QuickER.Tests.GeneratedSyncModelFixture;
 /// 文字列の主キー・表どうしの循環）を 1 つの図へ集める。表は FK の順（親→子。循環に属する表は宣言順で 1 つ先に出す）に次の 4 つ:
 /// </para>
 /// <list type="bullet">
-///   <item><c>model_folders</c>: <c>folder_id</c>（int・PK）／<c>parent_id</c>（int・NULL 許容・<b>自己参照</b>の FK）／<c>name</c>（nvarchar(40)・<b>UNIQUE</b>）／<c>pinned_item_id</c>（int・NULL 許容・<c>model_items</c> への FK＝<b>表どうしの循環</b>。乱数の生成器は書かない）／<c>row_ver</c>（rowversion・NULL 許容）</item>
+///   <item><c>model_folders</c>: <c>folder_id</c>（int・PK）／<c>parent_id</c>（int・NULL 許容・<b>自己参照</b>の FK）／<c>name</c>（nvarchar(40)・<b>UNIQUE</b>）／<c>pinned_item_id</c>（int・NULL 許容・<c>model_items</c> への FK＝<b>表どうしの循環</b>。乱数の生成器はフォルダーの更新の一部をピン留めの手へ置き換えて書く）／<c>row_ver</c>（rowversion・NULL 許容）</item>
 ///   <item><c>model_labels</c>: <c>label_code</c>（<b>varchar(20)</b>・PK）／<c>folder_id</c>（int・FK）／<c>caption</c>（nvarchar(40)）＝<b>rowversion なし</b>（後勝ち専用・キー順ページング）</item>
 ///   <item><c>model_items</c>: <c>item_id</c>（int・PK）／<c>folder_id</c>（int・FK）／<c>label_code</c>（varchar(20)・NULL 許容・版なしの表への FK）／<c>code</c>（nvarchar(20)・<b>UNIQUE</b>）／<c>title</c>（nvarchar(40)）／<c>payload</c>（varbinary(max)・<b>NOT NULL の除外列</b>）／<c>row_ver</c>（rowversion・NULL 許容）</item>
 ///   <item><c>model_events</c>: <c>event_at</c>（<b>datetime2</b>・PK）／<c>item_id</c>（int・FK）／<c>memo</c>（nvarchar(40)）／<c>row_ver</c>（rowversion・NULL 許容）</item>

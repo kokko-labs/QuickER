@@ -212,8 +212,9 @@ internal sealed record UpdateFolderOp(
 }
 
 /// <summary>
-/// フォルダーのピン留め（表どうしの循環の列 <c>pinned_item_id</c>）だけを変える。乱数の生成器は使わない（決定的なシナリオだけ）。
-/// 名前・親を変える <see cref="UpdateFolderOp"/> はこの列に触れない
+/// フォルダーのピン留め（表どうしの循環の列 <c>pinned_item_id</c>）だけを変える。乱数の生成器は、本流が選んだフォルダーの
+/// 更新の一部をこの手へ置き換える（<see cref="SyncModelGenerator.PinRate"/>）。名前・親を変える <see cref="UpdateFolderOp"/> は
+/// この列に触れない
 /// </summary>
 internal sealed record PinFolderOp(ModelActor Actor, ModelWriteVia Via, int Id, int? ItemId)
     : ModelWriteOp(Actor, Via)
@@ -224,6 +225,21 @@ internal sealed record PinFolderOp(ModelActor Actor, ModelWriteVia Via, int Id, 
 
     public override string Describe() =>
         $"{Who(Actor)} PinFolder id={Id} item={Show(ItemId)}{ViaText}";
+}
+
+/// <summary>
+/// 端末の既存の行（フォルダーか品目）を、記録させずに、サーバーの今の行の内容と版の列（row_ver）で書き換える（ミラー版つきの行の
+/// 持ち込み。blob は書かない）。生成器は、端末とサーバーの両方にある行で、写す内容の参照先が端末にあり、写す一意な値を端末の
+/// ほかの行が持たないときだけ作る（端末の DB で成功する）。書き込みの手（<see cref="ModelWriteOp"/>）でないので、台帳は記録しない
+/// 書き込みとして扱う（持ち分があるキーの内容だけを置き換える）
+/// </summary>
+/// <param name="Device">書き換える端末</param>
+/// <param name="Table">表（<see cref="ModelTables.Folders"/> か <see cref="ModelTables.Items"/>）</param>
+/// <param name="Id">キー</param>
+internal sealed record MirrorServerRowOp(ModelActor Device, string Table, int Id) : ModelOp
+{
+    public override string Describe() =>
+        $"{Who(Device)} MirrorServerRow table={Table} id={Id.ToString(CultureInfo.InvariantCulture)}";
 }
 
 internal sealed record DeleteFolderOp(ModelActor Actor, ModelWriteVia Via, int Id)

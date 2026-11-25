@@ -29,7 +29,7 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// </remarks>
 [Trait("Category", "Integration")]
 [RuntimeCell(RuntimeFeatures.SyncSupport, RuntimeTarget.Remote, Server = RuntimeTarget.AdoSqlite)]
-public sealed class SyncHttpRuntimeTests : IAsyncLifetime
+public sealed class SyncSupportRemoteAdoSqliteHttpSourceRuntimeTests : IAsyncLifetime
 {
     /// <summary>テスト全体で使うキャンセルトークン</summary>
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
@@ -163,7 +163,7 @@ public sealed class SyncHttpRuntimeTests : IAsyncLifetime
             .Should()
             .BeNull(
                 "サーバー役は SQLite で未コミット書き込みの概念を持たないため上限なし。"
-                    + "実 SQL Server の MIN_ACTIVE_ROWVERSION() は SyncSqlServerHttpRuntimeTests が見る"
+                    + "実 SQL Server の MIN_ACTIVE_ROWVERSION() は SyncSupportRemoteAdoSqlServerFixtureRuntimeTests が見る"
             );
     }
 
