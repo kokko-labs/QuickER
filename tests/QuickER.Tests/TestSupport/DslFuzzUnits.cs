@@ -241,6 +241,139 @@ public static class DslFuzzUnits
     }
 
     /// <summary>
+    /// SQL Server の datetime・smalldatetime の列の網羅の単位（種に依らない・値オブジェクトなし。名前は
+    /// <c>coverage-sqlserver-legacy-datetime</c>）：列が読み戻せない値（刻みの外・範囲の外）と比べる原子 1 つずつのクエリ <c>KL*</c>
+    /// （経路ごとの結果を読む）と、それを使う合成のクエリ <c>KX*</c>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 行の値はどれも列が読み戻せる値（datetime はミリ秒の 1 の位が 0・3・7 の値と型の両端、smalldatetime は分の値と型の両端）で、書いた値の
+    /// まま読み戻り、オラクルは C# の DateTime の比較のまま。比べる値（パラメータと IN のリストだけ）は、列の型へ丸めると行の値に重なるか
+    /// 行の値をまたぐものを選ぶ：datetime は刻みの外の値（行の .003 に丸まる .004・.007 に丸まる .005）、読み戻す値と 1/300 秒の刻みの間の値
+    /// （.003 と .0033333 の間の .0031・.0066667 と .007 の間の .0068）、最大値を超える値（23:59:59.998 は .997 に丸まり、.999 は翌日へ繰り上がる）、
+    /// 最小値より前の値。smalldatetime は秒のある値（29.998 秒までは切り下げ、29.999 秒からは切り上げ）・秒より細かい値・範囲の外の値。
+    /// 種の単位は datetime・smalldatetime の列を持たない（種の生成器の入力と指紋を変えないため）。
+    /// </para>
+    /// <para>
+    /// SQL Server の QuickER 版 Repository と EF Core 版の両方で流す（Integration の <c>NamedQueryDslConditionFuzzSqlServerRuntimeTests</c>）。
+    /// 4 つの池と原子の形は <see cref="DslFuzzGenerator"/> の列の型に入らない値の原子が作る。
+    /// </para>
+    /// </remarks>
+    public static DslFuzzUnit SqlServerLegacyDateTimeCoverage()
+    {
+        var day = new DateTime(2024, 2, 29, 12, 34, 56);
+        var minute = new DateTime(2024, 2, 29, 3, 4, 0);
+        IReadOnlyList<object> datetimeRows =
+        [
+            DslLegacyDateTimeType.Datetime.Min,
+            new DateTime(1999, 12, 31, 23, 59, 59, 997),
+            day,
+            day.AddMilliseconds(3),
+            day.AddMilliseconds(7),
+            day.AddMilliseconds(10),
+            DslLegacyDateTimeType.Datetime.Max,
+        ];
+        IReadOnlyList<object> smallRows =
+        [
+            DslLegacyDateTimeType.SmallDatetime.Min,
+            new DateTime(2000, 1, 1),
+            minute,
+            minute.AddMinutes(1),
+            DslLegacyDateTimeType.SmallDatetime.Max,
+        ];
+        DslColumn[] columns =
+        [
+            new("id", "bigint", DslClr.Int64, Nullable: false, PrimaryKey: true),
+            // 射影の非 NULL 指定の合成のクエリが射影する、NULL を許す文字列の列
+            new("s", "nvarchar(50)", DslClr.String, Nullable: true),
+            new("dl", "datetime", DslClr.DateTime, Nullable: true)
+            {
+                LegacyDateTime = DslLegacyDateTimeType.Datetime,
+                Values = datetimeRows,
+                OperandValues =
+                [
+                    .. datetimeRows,
+                    // 刻みの外（.003 と .007 に丸まる）
+                    day.AddMilliseconds(4),
+                    day.AddMilliseconds(5),
+                    // 読み戻す値と 1/300 秒の刻みの間（.003 と .0033333 の間・.0066667 と .007 の間）
+                    day.AddTicks(31_000),
+                    day.AddTicks(68_000),
+                    // 最大値の後（.998 は .997 に丸まり、.999 は 10000 年へ繰り上がる）
+                    new DateTime(9999, 12, 31, 23, 59, 59, 998),
+                    new DateTime(9999, 12, 31, 23, 59, 59, 999),
+                    // 最小値の前
+                    new DateTime(1752, 12, 31),
+                    new DateTime(1752, 12, 31, 23, 59, 59, 999),
+                ],
+            },
+            new("sd", "smalldatetime", DslClr.DateTime, Nullable: true)
+            {
+                LegacyDateTime = DslLegacyDateTimeType.SmallDatetime,
+                Values = smallRows,
+                OperandValues =
+                [
+                    .. smallRows,
+                    // 秒のある値（29.998 秒までは切り下げ、29.999 秒からは切り上げ）
+                    minute.AddSeconds(10),
+                    minute.AddSeconds(20),
+                    minute.AddSeconds(30),
+                    minute.AddSeconds(40),
+                    // 秒より細かい値
+                    minute.AddMilliseconds(29_998),
+                    minute.AddMilliseconds(29_999),
+                    minute.AddMilliseconds(500),
+                    // 範囲の外（最大値の後・最小値の前）
+                    new DateTime(2079, 6, 6, 23, 59, 20),
+                    new DateTime(2079, 6, 7),
+                    new DateTime(1899, 12, 31, 23, 59, 0),
+                    new DateTime(1899, 12, 31, 23, 59, 40),
+                ],
+            },
+        ];
+        var rows = new DslFuzzGenerator(CoverageSeed, valueObjects: false).Rows(columns, RowCount);
+        PutLegacyDateTimeRows(rows, columns[2]);
+        PutLegacyDateTimeRows(rows, columns[3]);
+        var atoms = new DslFuzzGenerator(
+            DslFuzzGenerator.OutOfTypeSeed(CoverageSeed),
+            valueObjects: false,
+            DslFuzzGenerator.OutOfTypeParameterPrefix
+        ).OutOfTypeAtomQueries(columns, "KL");
+        var queries = new DslFuzzGenerator(
+            DslFuzzGenerator.OutOfTypeSeed(CoverageSeed),
+            valueObjects: false,
+            DslFuzzGenerator.OutOfTypeParameterPrefix
+        ).OutOfTypeCoverageQueries(columns, decimalOrdered: true);
+
+        return new DslFuzzUnit(
+            $"{CoveragePrefix}{DialectNames.SqlServer}-legacy-datetime",
+            TableName,
+            columns,
+            rows,
+            [.. atoms, .. queries],
+            ValueObjects: false,
+            CoverageSeed
+        );
+    }
+
+    /// <summary>
+    /// datetime・smalldatetime の列の 2 行目から、列の値の池を 1 つずつ並べて入れる（比べる値が丸まって重なる行の値・型の両端を、
+    /// 乱数の行の選び方に依らずいつも持たせる。1 行目の NULL は保つ）
+    /// </summary>
+    private static void PutLegacyDateTimeRows(
+        List<IReadOnlyDictionary<string, object?>> rows,
+        DslColumn column
+    )
+    {
+        var values = DslFuzz.ValuePool(column);
+
+        for (var i = 0; i < values.Count; i++)
+        {
+            ((Dictionary<string, object?>)rows[1 + i])[column.Name] = values[i];
+        }
+    }
+
+    /// <summary>
     /// PostgreSQL の単位（値オブジェクトなし・あり・GuidKey の主キー。Integration の派生が実 DB の EF Core 版で流す）
     /// </summary>
     public static IEnumerable<DslFuzzUnit> PostgreSql(int seed)

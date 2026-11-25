@@ -138,6 +138,22 @@ public static class TranslatorParityPredicateRows
         var negativeHour = TimeSpan.FromHours(-1);
         var clocksWithOutOfDay = new List<TimeSpan?> { oneDay, new TimeSpan(0, 10, 0, 0, 120) };
         var onlyOutOfDayClocks = new List<TimeSpan?> { oneDay, negativeHour };
+        // probes の legacy_at（datetime）：id 1・2・3＝基準の値に .000・.003・.007（1/300 秒の 0・1・2 単位を読み戻した値）・
+        // id 5＝翌日の 0 時・ほかは NULL。SQL Server は互換レベル 130 以上で 1 単位を .0033333、
+        // 2 単位を .0066667 として datetime2 と比べるので、.003 と .0033333 の間・.0066667 と .007 の間の値（窓）を持つ
+        var legacyBase = TranslatorParityRuntimeTestsBase.LegacyAtBase;
+        var legacyReadBack = legacyBase.AddMilliseconds(3);
+        var legacyBetweenReadBacks = legacyBase.AddMilliseconds(4);
+        var legacyAfterReadBack = legacyBase.AddTicks(31_000);
+        var legacyBeforeReadBack = legacyBase.AddTicks(68_000);
+        var legacyPastMax = new DateTime(9999, 12, 31, 23, 59, 59, 999);
+        var legacyBeforeMin = new DateTime(1752, 12, 31);
+        var legacyMixed = new List<DateTime?>
+        {
+            legacyReadBack,
+            legacyBetweenReadBacks,
+            legacyBeforeReadBack,
+        };
         // probes の at_offset：id 1＝2024-01-01 05:00+09:00（12/31 20:00Z）・id 2＝2023-12-31 22:00-03:00（1/1 01:00Z）・
         // id 3＝2024-06-30 23:30Z・id 5＝2024-01-01 00:00+09:00（12/31 15:00Z）・ほかは NULL。局所の時刻の順と瞬間の順が逆の組を持つ
         var sameInstantAsFirstUtc = new DateTimeOffset(2023, 12, 31, 20, 0, 0, TimeSpan.Zero);
@@ -499,6 +515,47 @@ public static class TranslatorParityPredicateRows
                 "time-scaled-less-finer",
                 "time(2) の列と 1/100 秒より細かい TimeSpan の < は端数を落とさずに比べる",
                 x => x.Clock < finerClock
+            ),
+            // ---- datetime の列（1/300 秒を .000・.003・.007 で読み戻す）と、読み戻せない値・範囲の外の値 ----
+            Probe(
+                "legacy-equals-read-back",
+                "datetime の列と読み戻した値（.003）の == はその行に一致する",
+                x => x.LegacyAt == legacyReadBack
+            ),
+            Probe(
+                "legacy-equals-between-read-backs",
+                "datetime の列と読み戻せない値（.004）の == はどの行にも一致しない",
+                x => x.LegacyAt == legacyBetweenReadBacks
+            ),
+            Probe(
+                "legacy-less-between-read-back-and-step",
+                "datetime の列と、読み戻した値 .003 と 1/300 秒 .0033333 の間の値の < は読み戻した値で比べる",
+                x => x.LegacyAt < legacyAfterReadBack
+            ),
+            Probe(
+                "legacy-greater-between-step-and-read-back",
+                "datetime の列と、2/300 秒 .0066667 と読み戻した値 .007 の間の値の > は読み戻した値で比べる",
+                x => x.LegacyAt > legacyBeforeReadBack
+            ),
+            Probe(
+                "legacy-less-or-equal-between-step-and-read-back",
+                "datetime の列と、2/300 秒 .0066667 と読み戻した値 .007 の間の値の <= は読み戻した値で比べる",
+                x => x.LegacyAt <= legacyBeforeReadBack
+            ),
+            Probe(
+                "legacy-less-past-max",
+                "datetime の列と、範囲の最後の値を超え丸めると範囲の外になる値の < は範囲の最後の値の行を含む",
+                x => x.LegacyAt < legacyPastMax
+            ),
+            Probe(
+                "legacy-greater-before-min",
+                "datetime の列と、範囲の最初の値より前の値の > は NULL でない全行に一致する",
+                x => x.LegacyAt > legacyBeforeMin
+            ),
+            Probe(
+                "legacy-in-mixed",
+                "datetime の列の IN は、読み戻した値の要素だけに一致し、読み戻せない要素はどの行にも一致しない",
+                x => legacyMixed.Contains(x.LegacyAt)
             ),
             // ---- time の列と 0〜24 時間の外の TimeSpan（SQL Server の time の範囲の外。C# の答えは、等しくなく大小は決まる） ----
             Probe(

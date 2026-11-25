@@ -734,8 +734,11 @@ It fails with `NotSupportedException` instead of silently becoming `YEAR([col])`
 The date parts of a `DateTimeOffset` column are taken in the offset the value carries, as C# does (`2024-01-01 05:00 +09:00` is year 2024, hour 5).
 
 On SQL Server, the QuickER Repository and the EF Core Repository bind a compared value with the column's type only when the value fits that type.
-A value that does not fit is bound with its own type, so the comparison answers as C# does: a fraction or an integer out of range against an integer column (`x.Qty < 1.5`, `x.Tiny < 300`), any `float` or `double` value against an integer column, a `double` that a `real` column cannot hold exactly (`x.Ratio == 0.1` against a `float` property), a decimal with more digits than the column's precision and scale, a number outside the range or beyond the four fractional digits of a `money` or `smallmoney` column (`x.Price == 1.23456m`), a time of day against a `date` column, and a character outside ASCII against a non-Unicode column (`varchar`, `char`).
+A value that does not fit is bound with its own type, so the comparison answers as C# does: a fraction or an integer out of range against an integer column (`x.Qty < 1.5`, `x.Tiny < 300`), any `float` or `double` value against an integer column, a `double` that a `real` column cannot hold exactly (`x.Ratio == 0.1` against a `float` property), a decimal with more digits than the column's precision and scale, a number outside the range or beyond the four fractional digits of a `money` or `smallmoney` column (`x.Price == 1.23456m`), a time of day against a `date` column, a value that is not a whole minute or lies outside the range of a `smalldatetime` column, a value a `datetime` column cannot read back (see the next paragraph), and a character outside ASCII against a non-Unicode column (`varchar`, `char`).
 The server then converts the column for that comparison, so an index on the column may not be used for it.
+A `datetime` column holds steps of 1/300 of a second and reads them back as whole milliseconds ending in 0, 3, or 7 (`.000`, `.003`, `.007`), and C# compares those read-back values.
+A value a `datetime` column cannot read back (`.004`, a sub-millisecond value, or a value outside 1753-01-01 to 9999-12-31 23:59:59.997) is sent as `datetime2` after being moved to 1 ms after the last read-back value at or before it.
+From compatibility level 130, SQL Server compares a `datetime` column with a `datetime2` value using the exact steps (`.0033333`), so without the move a value such as `.0031`, between a read-back value and its step, would answer differently from C#; the moved value answers as C# does at any compatibility level.
 On the EF Core Repository this covers every parameter of a query (a named query, `Query()` with hand-written LINQ, the elements of an IN list, the pattern of `Contains`) and the condition of `ExecuteDeleteAsync` (see [EF Core mode](#ef-core-mode-generateefcorerepositories)).
 On PostgreSQL, the EF Core Repository does the same for a `DateTime` with a time of day compared with a `date` column, which it sends as a `timestamp`, and, in a query, for a `TimeSpan` outside the range of a `time` column, which it sends as an `interval`.
 
@@ -743,6 +746,8 @@ On PostgreSQL, the EF Core Repository does the same for a `DateTime` with a time
 > EF Core writes it into the SQL, and writes a string constant compared with a non-Unicode column as non-Unicode text, so a character outside ASCII turns into `?` and the comparison matches the rows that hold `?` (`Query().Where(x => x.Code == "日本")`).
 > Pass such a value in a variable, which EF Core sends as a parameter.
 > A string literal in a mini DSL condition is generated as a variable, so a named query answers as C# does.
+> In the same way, a `DateTime` constant compared with a `datetime` or `smalldatetime` column on SQL Server is written as a literal of the column's type, so a value the column cannot hold is rounded to the column's precision before the comparison (`x.At == new DateTime(2024, 1, 1, 10, 0, 40)` against a `smalldatetime` column matches 10:01); a value the column holds compares as C# does.
+> The mini DSL has no date literal, so a named query is not affected.
 
 > **Known limitation**: on the EF Core Repository on SQL Server, PostgreSQL, and Oracle, comparing an integer column with a decimal column (`Query().Where(x => x.Qty > x.Price)`) can fail with an arithmetic overflow.
 > EF Core casts the integer column to the type of the decimal column (`decimal(10,2)`, say), so one row whose integer has more integral digits than that type holds makes the whole query fail.
@@ -1307,6 +1312,8 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   EF Core gives a parameter the type of the column it is compared with, and SqlClient converts the value to that type before sending it: `1.234` against a `decimal(10,2)` column becomes `1.23`, a value beyond the precision throws `ArgumentException`, a `money` or `smallmoney` column rounds a value to four fractional digits and throws `OverflowException` for a value outside its range, and a character outside ASCII against a non-Unicode column becomes `?`.
   `SqlServerQueryParameterInterceptor` drops the precision and scale of such a decimal parameter, sends such a `money` or `smallmoney` value as a decimal, and sends such text as Unicode text; a value that fits keeps the column's type, so the SQL and the use of an index on the column stay as they were.
   It changes the commands of LINQ queries and of `ExecuteDelete` / `ExecuteUpdate` only: `SaveChanges` sends its values as before, so a value that does not fit is stored as the column converts it.
+  A value compared with a `datetime` or `smalldatetime` column that the column cannot hold is sent as `datetime2`, moved as described in [Queries](#queries-expression-tree--sql) for a `datetime` column, in LINQ queries and in the condition of `ExecuteDelete` only.
+  EF Core reports an `ExecuteDelete` command like an `ExecuteUpdate` one, so the interceptor tells them apart by the command text (a `DELETE` after any `TagWith` comment lines).
   `AddGeneratedEfCoreRepositories` adds it to the DbContext options after your configuration.
   When you build `DbContextOptions` yourself, add `SqlServerQueryParameterInterceptor.Instance` with `AddInterceptors`.
   Connections of other providers are left untouched.
@@ -1328,12 +1335,15 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - A `money` or `smallmoney` column on SQL Server, and a `money` column on PostgreSQL, is configured with `HasColumnType`.
   Without it, EF Core gives the `decimal` property its default type: SQL Server stores `1.2345` in a `money` column as `1.23` (`decimal(18,2)`), and PostgreSQL refuses a condition on the column (`operator does not exist: money = numeric`).
   With it, SQL Server stores the four fractional digits the column keeps, and PostgreSQL compares the column with a `money` value (see the known limitation on `money` under [Letter case, whitespace, and date parts](#letter-case-whitespace-and-date-parts)).
+- A `datetime` or `smalldatetime` column on SQL Server is configured with `HasColumnType`.
+  Without it, EF Core sends a `DateTime` as `datetime2` and the server converts it on its own terms: a `smalldatetime` column stores 29.999 seconds rounded down, and a `datetime` column stores a value that rounds beyond 9999-12-31 23:59:59.997 as that last value.
+  With it, SqlClient converts the value as it does for the QuickER Repository: a `smalldatetime` value is rounded up from 29.999 seconds, a `datetime` value is rounded to 1/300 of a second, and a value that rounds outside the type's range is refused.
 - A PostgreSQL column that EF Core's Npgsql provider cannot write correctly with its default mapping for the property type is configured with `HasColumnType`: `date`, `timestamp`, `time`, `time with time zone`, `json`, `jsonb` and `xml`, and arrays of them (`date[]` and the like).
   Without it, the provider sends a `DateTime` as `timestamp with time zone` and refuses a value of `DateTimeKind.Unspecified`, sends a `DateTimeOffset` the same way and refuses an offset other than UTC, and sends a string as `text`, which PostgreSQL refuses for a JSON or XML column.
   It sends a `TimeSpan` as an `interval`, and PostgreSQL stores a value outside the range of a `time` column without its days and without an error (`1.01:00:00` as `01:00:00`, `-01:00:00` as `23:00:00`).
   With the column type, PostgreSQL refuses such a value.
   A `DateTime` of `DateTimeKind.Utc` cannot be written to a `timestamp` column, and a `timestamptz` column takes a UTC offset only (both are Npgsql's rules).
-  No other column gets a column type apart from `money` (the previous item), so a diagram of types every dialect maps to the same C# type generates the same code whatever its dialect.
+  No other column gets a column type apart from `money` and, on SQL Server, `datetime` and `smalldatetime` (the previous items), so a diagram of types every dialect maps to the same C# type generates the same code whatever its dialect.
 - The MySQL mappings (`timestamp` as `DateTime`, `char(36)` as `Guid`, see [Database types and C# types](#database-types-and-c-types)) were checked with MySql.EntityFrameworkCore, whose driver is MySql.Data.
   Pomelo was not checked.
 - A single-column integer primary key, or another single-column key EF Core cannot generate a value for, is configured with `ValueGeneratedNever()`, so EF Core sends the key the application set, `0` included, as the QuickER Repository does.
@@ -1358,6 +1368,10 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   A context built from a connection string gets the connection string back (EF Core disposes the connection it created as soon as another connection is set, and creates a new one when the context is next used).
   A connection passed in the options (`UseSqlServer(connection)`) is given back owned as the options say, and a connection the factory attached at run time with `SetDbConnection` is given back as not owned, so the context never disposes it.
   A connection passed with `contextOwnsConnection: true` is disposed by EF Core when the second context switches connections, so do not pool or reuse such a context.
+
+> **Known limitation**: on SQL Server, the `WHERE` of an `ExecuteUpdate` you write on `QuickErDbContext` yourself sends a `datetime` or `smalldatetime` value the column cannot hold with the column's type, so it is rounded before the comparison.
+> `SqlServerQueryParameterInterceptor` leaves the parameters of an `UPDATE` command as they are, because it cannot tell its `SET` values from its `WHERE` values, and retyping a `SET` value would change what is stored.
+> The generated repositories do not expose `ExecuteUpdate`, so generated code is not affected.
 
 **Raw SQL**
 

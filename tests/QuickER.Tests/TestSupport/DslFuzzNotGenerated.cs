@@ -137,6 +137,13 @@ internal static class DslFuzzNotGenerated
                     "値オブジェクトの Create は精度・スケールの外の値を検証エラーにし（docs の値オブジェクトの節）、整数を包む値オブジェクトの列への decimal のパラメータは型の検査が断る。どちらも比べる前に断られるので、列の型に入らない値は値オブジェクトなしの単位でだけ作る",
                     "`table:ValueObjectScenarios`・`CodegenConfig/Cases`（行 `diag-query-type-check-rejects-*`）"
                 ),
+                NotGenerated.Pending(
+                    "legacy-datetime-value-objects",
+                    "SQL Server の datetime・smalldatetime の値オブジェクトの列と、列が読み戻せない値（刻みの外・範囲の外。null を含む値オブジェクトのリストを含む）",
+                    "きっかけ待ち（SQL Server の datetime・smalldatetime の値オブジェクトの単位）",
+                    "DateTime の値オブジェクトの Create は SQL Server の datetime・smalldatetime の範囲と刻みを検証しないので比べる前に断られず、束縛は値オブジェクトを外した生の値で値の型を選ぶ（値オブジェクトなしと同じ分岐）。網羅の単位 coverage-sqlserver-legacy-datetime は値オブジェクトを持たないので、値オブジェクトの列とその null を含むリストの形を作らない",
+                    "`Dsl/SqlServer`"
+                ),
                 NotGenerated.Accepted(
                     "oracle-empty-string-in-not-null-columns",
                     "Oracle の単位の NOT NULL の文字列の列に入れる空文字列",

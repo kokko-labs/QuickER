@@ -44,7 +44,11 @@
 - `money`・`smallmoney` は C# の `decimal`（精度なし）へ写し、EF Core に教える列の型（`CSharpTypeInfo.EfCoreColumnType`）に同じ名前を入れる（`src/QuickER.CodeGen.CSharp/CLAUDE.md`「EF Core に教える列の型」）。
   - 教えないと EF Core は既定の `decimal(18,2)` で書き、挿入・更新・一括挿入・グラフ保存が小数を 2 桁へ丸める（QuickER 版と ADO は列の 4 桁で書く）。
   - 精度 19,4・10,4 で写す案は採らない：プロパティの型の精度が変わり、値オブジェクトの検証・生成物が money の列でだけ変わる。
-- 固定は `DialectTypeTableTests` のマッパーの行（`efcol-smallmoney` と宣言のセルの `matrix-map-*`）・`SqlServerDialectTypeRealDbTests`（EF Core の手順の行 `matrix-map-sqlserver-money`・`map-sqlserver-sqldb-smallmoney`＝4 桁を書いて読み戻す）。
+- `datetime`・`smalldatetime` も C# の `DateTime` のまま、EF Core に教える列の型に同じ名前を入れる。
+  - 教えないと EF Core は `DateTime` を `datetime2` で送り、サーバーが変換して保存する。smalldatetime の 29.999 秒を切り下げ、datetime の範囲の外へ丸まる値（23:59:59.9984 など）を 23:59:59.997 で保存し、QuickER 版（SqlClient が `SqlDateTime` の規則で丸め、範囲の外を断る）と docs と食い違う。教えると EF Core は SqlDbType DateTime／SmallDateTime で送り、SaveChanges も ExecuteUpdate の SET も QuickER 版と同じ値になる（実 SQL Server 2022 で実測）。
+  - 教えた列と比べる WHERE の値は列の型で束縛されるので、列に入らない値は `SqlServerQueryParameterInterceptor` が datetime2 で束縛し直す（`src/QuickER.Runtime.EntityFrameworkCore/CLAUDE.md`「SQL Server のクエリのパラメータの型」）。
+  - `date`・`datetime2` は教えない（既定の対応で書ける）。
+- 固定は `DialectTypeTableTests` のマッパーの行（`efcol-smallmoney`・`efcol-datetime`・`efcol-smalldatetime`・`efcol-datetime2`・`efcol-date` と宣言のセルの `matrix-map-*`）・`SqlServerDialectTypeRealDbTests`（EF Core の手順の行 `matrix-map-sqlserver-money`・`map-sqlserver-sqldb-smallmoney`＝4 桁を書いて読み戻す）・`GeneratedRuntime/ParityValuesSqlServer`（datetime・smalldatetime の丸めの境目と範囲の外を EF Core 版の 5 つの書く経路で docs の写しと比べる。列の型を教えないと赤）。
 
 ### TryFormat の上限と書き出さない型
 

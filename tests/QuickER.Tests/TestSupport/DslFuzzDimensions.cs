@@ -148,10 +148,16 @@ public static class DslFuzzDimensions
     /// <summary>比べる値がどれも列の型に入る</summary>
     public const string FitFits = "fits";
 
-    /// <summary>小数の桁が列のスケールを超える値がある（整数の列はスケール 0）</summary>
+    /// <summary>
+    /// 小数の桁が列のスケールを超える値がある（整数の列はスケール 0。日時の列は小数秒の桁・SQL Server の datetime・smalldatetime の
+    /// 列は読み戻せる値の刻みの外）
+    /// </summary>
     public const string FitBeyondScale = "beyond-scale";
 
-    /// <summary>整数部が列の型の範囲を超える値がある（decimal の列は精度−スケールの桁・整数の列は型の範囲）</summary>
+    /// <summary>
+    /// 整数部が列の型の範囲を超える値がある（decimal の列は精度−スケールの桁・整数の列は型の範囲。TimeSpan・SQL Server の datetime・
+    /// smalldatetime の列は型の範囲）
+    /// </summary>
     public const string FitBeyondRange = "beyond-range";
 
     /// <summary>Unicode でない文字列の列に、ASCII の外の文字を含む値がある</summary>
@@ -420,6 +426,7 @@ public static class DslFuzzDimensions
                         && OrderedOps.Any(op => shape == $"compare-{op}-literal")
                 ),
                 .. TimeSpanBeyondRangeGaps(),
+                .. LegacyDateTimeGaps(),
                 CoverageGap.AcceptedMatching(
                     "sqlite:efcore",
                     "TS",
@@ -546,6 +553,89 @@ public static class DslFuzzDimensions
                         (ValueFit, FitBeyondRange)
                     )
                 )
+            ),
+        ];
+    }
+
+    /// <summary>
+    /// DateTime の列と、列の型に入らない値（<see cref="FitBeyondScale"/>・<see cref="FitBeyondRange"/>）の組を作らない範囲。作るのは
+    /// SQL Server の網羅の単位 <c>coverage-sqlserver-legacy-datetime</c>（datetime・smalldatetime の列。QuickER 版と EF Core 版）だけ
+    /// </summary>
+    private static IEnumerable<CoverageGapEntry> LegacyDateTimeGaps()
+    {
+        (string Scope, string Fit, string? FixedIn, string Reason)[] entries =
+        [
+            .. new[] { "sqlite:ado", "sqlite:efcore", "sqlite:inmemory" }.SelectMany(scope =>
+                new[] { FitBeyondScale, FitBeyondRange }.Select(fit =>
+                    (
+                        scope,
+                        fit,
+                        (string?)null,
+                        "SQLite は DateTime を TEXT で持ち（100 ナノ秒の端数まで書いたまま読み戻す）、インメモリは .NET の DateTime をそのまま持つので、DateTime の全範囲のどの値も列の型に入り、刻みの外・範囲の外の値が無い"
+                    )
+                )
+            ),
+            .. new[] { FitBeyondScale, FitBeyondRange }.Select(fit =>
+                (
+                    "mysql:inmemory",
+                    fit,
+                    (string?)null,
+                    "MySQL の構成はインメモリだけで、インメモリは .NET の DateTime をそのまま持つので、DateTime の全範囲のどの値も列の型に入り、刻みの外・範囲の外の値が無い"
+                )
+            ),
+            (
+                "postgresql:efcore",
+                FitBeyondScale,
+                null,
+                "PostgreSQL の timestamp の列はマイクロ秒まで持ち、ドライバはそれより細かい部分を落として送る（docs の日時の既知の割り切り）ので、総当たりの DateTime の値の池はマイクロ秒より粗い値だけにする"
+            ),
+            (
+                "postgresql:efcore",
+                FitBeyondRange,
+                null,
+                "PostgreSQL の timestamp の範囲（紀元前 4713 年〜294276 年）は DateTime の範囲（1 年〜9999 年）を含むので、DateTime の値に列の型の範囲の外は無い"
+            ),
+            (
+                "oracle:efcore",
+                FitBeyondRange,
+                null,
+                "Oracle の TIMESTAMP の範囲（紀元前 4712 年〜9999 年）は DateTime の範囲（1 年〜9999 年）を含むので、DateTime の値に列の型の範囲の外は無い"
+            ),
+            (
+                "oracle:efcore",
+                FitBeyondScale,
+                "きっかけ待ち（ほかの方言の日時の列の刻みと範囲の外の値）",
+                "Oracle の TIMESTAMP の列（小数秒 6 桁）とマイクロ秒より細かい DateTime の値を比べる形を作っていない（読み戻せない値の判定 DslColumn.LegacyDateTime を持つのは SQL Server の datetime・smalldatetime の列だけ）"
+            ),
+            .. new[] { FitBeyondScale, FitBeyondRange }.Select(fit =>
+                (
+                    "mysql:efcore",
+                    fit,
+                    (string?)"きっかけ待ち（ほかの方言の日時の列の刻みと範囲の外の値）",
+                    "MySQL の datetime の列（小数秒なし・1000 年〜9999 年）と、秒より細かい値・1000 年より前の値を比べる形を作っていない（読み戻せない値の判定 DslColumn.LegacyDateTime を持つのは SQL Server の datetime・smalldatetime の列だけ）"
+                )
+            ),
+        ];
+
+        return
+        [
+            .. entries.Select(entry =>
+                entry.FixedIn is { } fixedIn
+                    ? CoverageGap.Tuple(
+                        entry.Scope,
+                        "LD",
+                        fixedIn,
+                        entry.Reason,
+                        (Clr, nameof(DslClr.DateTime)),
+                        (ValueFit, entry.Fit)
+                    )
+                    : CoverageGap.AcceptedTuple(
+                        entry.Scope,
+                        "LD",
+                        entry.Reason,
+                        (Clr, nameof(DslClr.DateTime)),
+                        (ValueFit, entry.Fit)
+                    )
             ),
         ];
     }
@@ -840,6 +930,14 @@ public static class DslFuzzDimensions
             return value is DateTimeOffset offset && offset.Ticks % unit != 0
                 ? FitBeyondScale
                 : FitFits;
+        }
+
+        // SQL Server の datetime・smalldatetime の列は、読み戻せない値を範囲の外 → 刻みの外（スケールの外）の順に数える
+        if (column.LegacyDateTime is { } legacy)
+        {
+            return value is not DateTime moment || legacy.Fits(moment) ? FitFits
+                : !legacy.InRange(moment) ? FitBeyondRange
+                : FitBeyondScale;
         }
 
         if (column.Money is { } money)
@@ -1315,9 +1413,17 @@ public static class DslFuzzDimensions
             var timeSpanRange =
                 fit == FitBeyondRange && (clr is null || clr == nameof(DslClr.TimeSpan));
 
+            // DateTime の値オブジェクトも SQL Server の datetime・smalldatetime の範囲と刻み（DslColumn.LegacyDateTime）を検証しない
+            // ので、DateTime の列（か列の種類を問わない組）の範囲と刻みの外れ方も null を含むリストで起こり得る
+            var legacyDateTime = numeric && (clr is null || clr == nameof(DslClr.DateTime));
+
             if (
-                (stringMatch || (shape == "in-with-null" && !offsetScale && !timeSpanRange))
-                && numeric
+                (
+                    stringMatch
+                    || (
+                        shape == "in-with-null" && !offsetScale && !timeSpanRange && !legacyDateTime
+                    )
+                ) && numeric
             )
             {
                 return false;
@@ -1358,8 +1464,12 @@ public static class DslFuzzDimensions
             // DateTimeOffset の列は小数秒の桁（DslColumn.FractionalScale）を持ち、桁より細かい値はあるが範囲の外れ方は無い
             var fractionalScale = kind == DslClr.DateTimeOffset && fit == FitBeyondScale;
 
+            // DateTime の列は SQL Server の datetime・smalldatetime（DslColumn.LegacyDateTime）の範囲と刻みを持ち、範囲の外の値と
+            // 刻みの外の値の両方がある
+            var legacyDateTime = kind == DslClr.DateTime;
+
             if (
-                (numeric && !isNumber && !timeRange && !fractionalScale)
+                (numeric && !isNumber && !timeRange && !fractionalScale && !legacyDateTime)
                 || (fit == FitBeyondCharset && !isText)
             )
             {

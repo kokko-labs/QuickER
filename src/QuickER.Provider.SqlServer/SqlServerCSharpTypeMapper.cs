@@ -15,7 +15,7 @@ namespace QuickER.Provider.SqlServer;
 /// <item><description>bit → bool、tinyint → byte、smallint → short、int → int、bigint → long</description></item>
 /// <item><description>real → float、float → double（SQL の float は倍精度のため）。ただし float(1)〜float(24) は real と同じ単精度なので float</description></item>
 /// <item><description>decimal / numeric / money / smallmoney → decimal。money・smallmoney は、生成 EF Core の DbContext が列の型を教える（<see cref="CSharpTypeInfo.EfCoreColumnType"/>。EF Core の既定の decimal(18,2) では小数 4 桁を書けないため）</description></item>
-/// <item><description>date / datetime / datetime2 / smalldatetime → DateTime、time → TimeSpan、datetimeoffset → DateTimeOffset</description></item>
+/// <item><description>date / datetime / datetime2 / smalldatetime → DateTime、time → TimeSpan、datetimeoffset → DateTimeOffset。datetime・smalldatetime は、生成 EF Core の DbContext が列の型を教える（EF Core の既定の datetime2 で送ると、サーバーの変換が SqlClient の丸めと範囲の判定と食い違うため）</description></item>
 /// <item><description>uniqueidentifier → Guid</description></item>
 /// <item><description>binary / varbinary / image / rowversion / timestamp → byte[]（参照型）。image・varbinary(max) は無制限バイナリ、binary(n)/varbinary(n)/rowversion/timestamp は有界</description></item>
 /// <item><description>char / varchar / nchar / nvarchar / text / ntext / xml → string（長さ指定があれば MaxLength として保持）</description></item>
@@ -88,7 +88,14 @@ public sealed partial class SqlServerCSharpTypeMapper : IColumnTypeMapper
             {
                 EfCoreColumnType = baseType,
             },
-            "date" or "datetime" or "smalldatetime" => Value("DateTime", sqlDbTypeName),
+            "date" => Value("DateTime", sqlDbTypeName),
+            // EF Core は列の型を知らない DateTime を datetime2 で送り、サーバーが datetime・smalldatetime へ変換して保存する（smalldatetime の
+            // 29.999 秒を切り下げ、datetime の範囲の外へ丸まる値を 23:59:59.997 で書く）。列の型を教えて、QuickER 版と同じく SqlClient に
+            // datetime・smalldatetime として変換させる
+            "datetime" or "smalldatetime" => Value("DateTime", sqlDbTypeName) with
+            {
+                EfCoreColumnType = baseType,
+            },
             // 小数秒の桁を持つ型は、桁（指定なしは 7）を [SqlColumnType] の Scale へ運ぶ（SqlBulkCopy へ渡す値をこの桁へ丸める）
             "datetime2" => Value("DateTime", sqlDbTypeName) with
             {

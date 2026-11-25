@@ -12,7 +12,8 @@ namespace QuickER.Tests.TestSupport;
 /// 〔<c>decimal(18,6)</c>・<c>int64</c>〕で型付けするもの・リテラル・列で型付けした IN のリスト）。NULL を許す byte・short・int の列と、
 /// 小数の値・<c>decimal(18,2)</c> の整数部に入らない値（decimal の型トークンで型付けしたパラメータ）。NULL を許す整数の列と、整数の型の
 /// 範囲の外の小数のリテラル。Unicode でない文字列の列（<see cref="DslColumn.NonUnicode"/>）と、ASCII の外の文字を含む値（比較・LIKE・
-/// 文字列一致のリテラルとパラメータ、IN のリスト、パラメータの使い回し）。比較の演算子は 6 つ全て。
+/// 文字列一致のリテラルとパラメータ、IN のリスト、パラメータの使い回し）。SQL Server の datetime・smalldatetime の列
+/// （<see cref="DslColumn.LegacyDateTime"/>）と、列が読み戻せない値（刻みの外・範囲の外。パラメータと IN のリスト）。比較の演算子は 6 つ全て。
 /// </para>
 /// <para>
 /// 値は、列の型へ丸めたり置き換えたりすると行の値に重なるものを選ぶ。小数は丸めると下がる値（<c>2.254</c> → <c>2.25</c>・
@@ -273,6 +274,7 @@ public sealed partial class DslFuzzGenerator
                 : column.NonUnicode ? NonAsciiAtoms(column, bothQuotes)
                 : column.TimeRange is { } range ? TimeSpanOutOfRange(column, range)
                 : column.Clr == DslClr.Single ? FloatBeyondPrecision(column, seedSubset)
+                : column.LegacyDateTime is { } legacy ? LegacyDateTimeOutOfType(column, legacy)
                 : [];
 
             foreach (var atom in atoms)
@@ -416,6 +418,88 @@ public sealed partial class DslFuzzGenerator
                 {
                     Column = column,
                 };
+            }
+        }
+    }
+
+    /// <summary>
+    /// SQL Server の datetime・smalldatetime の列（<see cref="DslColumn.LegacyDateTime"/>）と、列が読み戻せない値の原子：6 つの演算子 ×
+    /// 比べる値の池（<see cref="DslColumn.OperandValues"/>）を分けた 4 つの池 × 列で型付けと型トークン <c>datetime</c>、IN と NOT IN（刻みの外と
+    /// 行の値・刻みの細かい外と行の値・上の外と下の外と行の値 × 列で型付けと型トークン）
+    /// </summary>
+    /// <remarks>
+    /// 4 つの池：範囲の中で刻みの外の値のうち、粗い刻み（datetime はミリ秒・smalldatetime は秒）の上にある値と無い値、範囲の上の外の値、
+    /// 下の外の値。datetime の粗い刻みの無い値は、読み戻す値と 1/300 秒の刻みの間の値（.003 と .0033333 の間の .0031 など）で、
+    /// 窓の値の原子をいつも作るために池を分ける。比べる値の池に 4 つのどれかが無い列は作らない。DateTime の IN のリストは値型の要素で
+    /// null を持てない（値オブジェクトの単位では作らない）。
+    /// </remarks>
+    private IEnumerable<DslAtom> LegacyDateTimeOutOfType(
+        DslColumn column,
+        DslLegacyDateTimeType legacy
+    )
+    {
+        var coarse = legacy.WholeMinute ? TimeSpan.TicksPerSecond : TimeSpan.TicksPerMillisecond;
+        var operands = DslFuzz.OperandPool(column).OfType<DateTime>().ToList();
+        var offGrid = operands
+            .Where(value => legacy.InRange(value) && !legacy.Fits(value))
+            .ToList();
+        var coarseOffGrid = offGrid
+            .Where(value => value.Ticks % coarse == 0)
+            .Cast<object>()
+            .ToList();
+        var fineOffGrid = offGrid.Where(value => value.Ticks % coarse != 0).Cast<object>().ToList();
+        var above = operands.Where(value => value > legacy.Max).Cast<object>().ToList();
+        var below = operands.Where(value => value < legacy.Min).Cast<object>().ToList();
+        var inside = DslFuzz.ValuePool(column);
+
+        if (
+            coarseOffGrid.Count == 0
+            || fineOffGrid.Count == 0
+            || above.Count == 0
+            || below.Count == 0
+        )
+        {
+            yield break;
+        }
+
+        var token = DslFuzz.TypeToken(DslClr.DateTime);
+
+        foreach (var op in Enum.GetValues<DslOp>())
+        {
+            foreach (var pool in new[] { coarseOffGrid, fineOffGrid, above, below })
+            {
+                yield return OutOfTypeCompare(column, op, pool, typeToken: null);
+                yield return OutOfTypeCompare(column, op, pool, token);
+            }
+        }
+
+        foreach (var negated in new[] { false, true })
+        {
+            foreach (var byColumn in new[] { true, false })
+            {
+                foreach (
+                    var values in new[]
+                    {
+                        new[] { Pick(coarseOffGrid), Pick(inside) },
+                        [Pick(fineOffGrid), Pick(inside)],
+                        [Pick(above), Pick(below), Pick(inside)],
+                    }
+                )
+                {
+                    yield return new DslIn(
+                        negated,
+                        new DslParam(
+                            parameterPrefix + _parameterIndex++,
+                            values,
+                            IsList: true,
+                            ByColumn: byColumn,
+                            column
+                        )
+                    )
+                    {
+                        Column = column,
+                    };
+                }
             }
         }
     }

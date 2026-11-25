@@ -31,7 +31,8 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// <para>
 /// 答えが C# と同じになることは、簡易 DSL の総当たり（<c>Dsl/SqlServer</c>）と式の翻訳の一致の表（<c>table:TranslatorParityPredicates</c>）が
 /// 実 SQL Server で確かめる。この表が持つのは答えに出ない側＝入る値は列の型のまま（SQL と索引の使われ方を変えない）と、
-/// SaveChanges を変えないこと。
+/// SaveChanges を変えないこと。datetime・smalldatetime の値は、EF Core が出どころを同じに渡す ExecuteDelete と ExecuteUpdate を、
+/// EF Core が実際に作ったコマンドの本文（TagWith のコメントの行つきも）で見分けて、ExecuteDelete の条件だけを直し、UPDATE の値を変えないこと。
 /// </para>
 /// </remarks>
 public class SqlServerQueryParameterInterceptorTests
@@ -113,6 +114,92 @@ public class SqlServerQueryParameterInterceptorTests
                 },
                 ["1.234 Decimal 4 3 0"]
             ),
+            // ---- datetime の列：読み戻す値は列の型のまま、読み戻せない値は読み戻す値の間へ置き直して datetime2 ----
+            ["datetime-read-back-keeps-column-type"] = new(
+                Where<DateTime?>(LegacyBase.AddMilliseconds(3), v => x => x.Legacy == v.Value),
+                [$"{Stamp(LegacyBase.AddMilliseconds(3))} DateTime 0 0 0"]
+            ),
+            ["datetime-between-read-back-and-step-is-moved"] = new(
+                Where<DateTime?>(LegacyBase.AddTicks(31_000), v => x => x.Legacy < v.Value),
+                [$"{Stamp(LegacyBase.AddMilliseconds(4))} DateTime2 0 7 0"]
+            ),
+            ["datetime-between-step-and-read-back-is-moved"] = new(
+                Where<DateTime?>(LegacyBase.AddTicks(68_000), v => x => x.Legacy > v.Value),
+                [$"{Stamp(LegacyBase.AddMilliseconds(4))} DateTime2 0 7 0"]
+            ),
+            ["datetime-past-max-is-moved"] = new(
+                Where<DateTime?>(
+                    new DateTime(9999, 12, 31, 23, 59, 59, 999),
+                    v => x => x.Legacy < v.Value
+                ),
+                [$"{Stamp(new DateTime(9999, 12, 31, 23, 59, 59, 998))} DateTime2 0 7 0"]
+            ),
+            ["datetime-before-min-is-bound-by-value"] = new(
+                Where<DateTime?>(new DateTime(1752, 12, 31), v => x => x.Legacy > v.Value),
+                [$"{Stamp(new DateTime(1752, 12, 31))} DateTime2 0 7 0"]
+            ),
+            ["datetime-in-list-judges-each-element"] = new(
+                Where(
+                    new List<DateTime?>
+                    {
+                        LegacyBase.AddMilliseconds(7),
+                        LegacyBase.AddTicks(68_000),
+                    },
+                    v => x => v.Value.Contains(x.Legacy)
+                ),
+                [
+                    $"{Stamp(LegacyBase.AddMilliseconds(7))} DateTime 0 0 0",
+                    $"{Stamp(LegacyBase.AddMilliseconds(4))} DateTime2 0 7 0",
+                ]
+            ),
+            // ---- smalldatetime の列：分ちょうどの値は列の型のまま、ほかは値のまま datetime2（読み戻す値は書いた値と同じなので置き直さない） ----
+            ["smalldatetime-whole-minute-keeps-column-type"] = new(
+                Where<DateTime?>(SmallBase, v => x => x.Small == v.Value),
+                [$"{Stamp(SmallBase)} DateTime 0 0 0"]
+            ),
+            ["smalldatetime-seconds-is-bound-by-value"] = new(
+                Where<DateTime?>(SmallBase.AddSeconds(10), v => x => x.Small == v.Value),
+                [$"{Stamp(SmallBase.AddSeconds(10))} DateTime2 0 7 0"]
+            ),
+            ["smalldatetime-past-max-is-bound-by-value"] = new(
+                Where<DateTime?>(new DateTime(2079, 6, 7), v => x => x.Small < v.Value),
+                [$"{Stamp(new DateTime(2079, 6, 7))} DateTime2 0 7 0"]
+            ),
+            // ---- ExecuteDelete の条件も同じ（EF Core は出どころを ExecuteUpdate と同じに渡すので、本文の DELETE で見分ける） ----
+            ["execute-delete-datetime-condition-is-moved"] = new(
+                (c, ct) =>
+                {
+                    var v = new Box<DateTime?>(LegacyBase.AddTicks(31_000));
+                    return c.Rows.Where(x => x.Legacy < v.Value).ExecuteDeleteAsync(ct);
+                },
+                [$"{Stamp(LegacyBase.AddMilliseconds(4))} DateTime2 0 7 0"]
+            ),
+            ["execute-delete-tagged-smalldatetime-condition-is-bound-by-value"] = new(
+                (c, ct) =>
+                {
+                    var v = new Box<DateTime?>(SmallBase.AddSeconds(10));
+                    return c
+                        .Rows.TagWith("first tag" + (char)10 + "second tag")
+                        .Where(x => x.Small == v.Value)
+                        .ExecuteDeleteAsync(ct);
+                },
+                [$"{Stamp(SmallBase.AddSeconds(10))} DateTime2 0 7 0"]
+            ),
+            // ---- ExecuteUpdate の UPDATE は SET と WHERE を見分けられないので、datetime・smalldatetime の値を変えない ----
+            ["execute-update-datetime-values-are-left-alone"] = new(
+                (c, ct) =>
+                {
+                    var set = new Box<DateTime?>(LegacyBase.AddTicks(31_000));
+                    var where = new Box<DateTime?>(SmallBase.AddSeconds(10));
+                    return c
+                        .Rows.Where(x => x.Small == where.Value)
+                        .ExecuteUpdateAsync(s => s.SetProperty(x => x.Legacy, set.Value), ct);
+                },
+                [
+                    $"{Stamp(LegacyBase.AddTicks(31_000))} DateTime 0 0 0",
+                    $"{Stamp(SmallBase.AddSeconds(10))} DateTime 0 0 0",
+                ]
+            ),
             // ---- SaveChanges のコマンドは変えない（列に入らない値は今までどおり列の型で送る） ----
             ["save-changes-is-left-alone"] = new(
                 async (c, ct) =>
@@ -138,6 +225,16 @@ public class SqlServerQueryParameterInterceptorTests
                 ["1 Int64 0 0 0", "1.234 Decimal 10 2 0", "日本 AnsiString 0 0 20", "0 Int32 0 0 0"]
             ),
         };
+
+    /// <summary>datetime の列 legacy と比べる値の基準（ミリ秒の 0・3・7 が読み戻す値。<see cref="Rows"/> の初期化より前に読まれるのでプロパティにする）</summary>
+    private static DateTime LegacyBase => new(2024, 1, 1, 10, 0, 0);
+
+    /// <summary>smalldatetime の列 small と比べる値の基準（分ちょうど）</summary>
+    private static DateTime SmallBase => new(2024, 1, 1, 10, 0, 0);
+
+    /// <summary>日時を tick まで書く（<see cref="Describe"/> と同じ書式）</summary>
+    private static string Stamp(DateTime value) =>
+        value.ToString("yyyy-MM-dd HH:mm:ss.fffffff", CultureInfo.InvariantCulture);
 
     /// <summary>値を閉包のフィールドから読む述語で、一覧を読む操作を作る</summary>
     private static Func<ProbeContext, CancellationToken, Task> Where<T>(
@@ -194,7 +291,9 @@ public class SqlServerQueryParameterInterceptorTests
     private static string Describe(DbParameter parameter) =>
         string.Join(
             ' ',
-            Convert.ToString(parameter.Value, CultureInfo.InvariantCulture),
+            parameter.Value is DateTime moment
+                ? Stamp(moment)
+                : Convert.ToString(parameter.Value, CultureInfo.InvariantCulture),
             parameter.DbType,
             parameter.Precision.ToString(CultureInfo.InvariantCulture),
             parameter.Scale.ToString(CultureInfo.InvariantCulture),
@@ -213,6 +312,10 @@ public class SqlServerQueryParameterInterceptorTests
         public string? Code { get; set; }
 
         public string? Fixed { get; set; }
+
+        public DateTime? Legacy { get; set; }
+
+        public DateTime? Small { get; set; }
     }
 
     /// <summary>生成の Fluent と同じ構成の DbContext</summary>
@@ -238,6 +341,8 @@ public class SqlServerQueryParameterInterceptorTests
                     .HasColumnName("fixed")
                     .HasMaxLength(4)
                     .IsUnicode(false);
+                entity.Property(e => e.Legacy).HasColumnName("legacy").HasColumnType("datetime");
+                entity.Property(e => e.Small).HasColumnName("small").HasColumnType("smalldatetime");
             });
     }
 
