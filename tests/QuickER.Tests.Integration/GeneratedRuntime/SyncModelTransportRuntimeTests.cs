@@ -65,10 +65,10 @@ internal static class SyncModelSignatures
     public const string SeedVariable = "QUICKER_SYNC_MODEL_TRANSPORT_SEED";
 
     /// <summary>
-    /// 夜間の既定の種の数。新しいエンジンの端末は 1 種あたりの時間が今のエンジンの約 1.9 倍なので、夜間のジョブ（目安 50 分未満）に
-    /// 収まるよう半分にしている。実測で見直す
+    /// 夜間の既定の種の数。夜間のジョブ（目安 50 分未満）の 3 夜の実測（2026-11-24・25）で、100＋広い世界 20 の種の乱数の Fact が
+    /// 1 つ 0.4〜3.0 分・integration-nightly-rest のテストの段が 13.1〜21.1 分だったので、この数でも rest の段は遅いランナーで約 30 分に収まる
     /// </summary>
-    public const int NightlySeedCount = 100;
+    public const int NightlySeedCount = 200;
 
     /// <summary>
     /// 派生（HTTP・実 SQL Server）で流す乱数の種（環境変数 QUICKER_SYNC_MODEL_TRANSPORT_SEEDS・既定 10・夜間は
@@ -84,10 +84,9 @@ internal static class SyncModelSignatures
         );
 
     /// <summary>
-    /// 夜間の広い世界の種の既定の数。新しいエンジンの端末は 1 種あたりの時間が今のエンジンの約 1.9 倍なので、夜間のジョブ（目安 50 分
-    /// 未満）に収まるよう半分にしている。実測で見直す
+    /// 夜間の広い世界の種の既定の数（<see cref="NightlySeedCount"/> と同じ実測から決めた）
     /// </summary>
-    public const int NightlyWideSeedCount = 20;
+    public const int NightlyWideSeedCount = 40;
 
     /// <summary>
     /// 派生で流す広い世界の種（端末 3 台・環境変数 QUICKER_SYNC_MODEL_TRANSPORT_WIDE_SEEDS・既定 4・夜間は

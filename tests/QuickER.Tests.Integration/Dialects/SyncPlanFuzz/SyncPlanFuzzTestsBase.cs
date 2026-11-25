@@ -846,8 +846,11 @@ public sealed class OracleSyncPlanFuzzTests(OracleContainerFixture fixture) : Sy
     /// <summary>既定の種の数</summary>
     public const int DefaultSeeds = 60;
 
-    /// <summary>夜間の既定の種の数</summary>
-    public const int NightlySeeds = 120;
+    /// <summary>
+    /// 夜間の既定の種の数（夜間の 3 夜の実測（2026-11-24・25）で 120 種が 2.4〜4.2 分なので、この数でも
+    /// Oracle のコレクションの直列は integration-nightly-rest のいちばん長い直列より短い）
+    /// </summary>
+    public const int NightlySeeds = 300;
 
     /// <summary>種の決め方</summary>
     public static SeedSettings Seeds { get; } = SeedSettingsFor(DefaultSeeds, NightlySeeds);

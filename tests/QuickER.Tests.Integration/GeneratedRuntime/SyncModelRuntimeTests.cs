@@ -49,8 +49,8 @@ public sealed class SyncModelRuntimeTests : ISyncModelTransportTests
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
     /// <summary>
-    /// <see cref="Seeds"/> の夜間の既定の種の数。この数で流すテストは無い（新しいエンジンの端末の組は夜間の数を
-    /// <see cref="SyncSupportAdoSqliteEngineRuntimeTests.NightlySeedCount"/> へ替えて流す。種の指紋の記録はこの決め方で照合する）
+    /// <see cref="Seeds"/> の夜間の既定の種の数。直結の新しいエンジンの端末の組
+    /// （<see cref="SyncSupportAdoSqliteEngineRuntimeTests.EngineSuite"/>）がこの数で流す。種の指紋の記録もこの決め方で照合する
     /// </summary>
     public const int NightlySeedCount = 1200;
 
@@ -71,7 +71,7 @@ public sealed class SyncModelRuntimeTests : ISyncModelTransportTests
         );
 
     /// <summary>
-    /// <see cref="WideSeeds"/> の夜間の既定の数（<see cref="NightlySeedCount"/> と同じく、この数で流すテストは無い）
+    /// <see cref="WideSeeds"/> の夜間の既定の数（<see cref="NightlySeedCount"/> と同じく、直結の新しいエンジンの端末の組がこの数で流す）
     /// </summary>
     public const int NightlyWideSeedCount = 240;
 

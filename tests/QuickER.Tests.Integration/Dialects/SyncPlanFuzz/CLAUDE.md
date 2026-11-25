@@ -324,7 +324,7 @@
 ### 照合のまとめ方
 
 - 必須の形の表明と網羅しない組の照合は、普段の既定の種の数が 50 以上の方言で行う（門は `SyncPlanShapeSeeds.AssertsRequiredShapes` と `checksGaps`）。5 方言とも普段の数が 50 以上（SQLite 2000・MySQL 150・SQL Server 100・PostgreSQL 100・Oracle 60）で、`SyncPlanShapeSeedGuardTests.DialectsWithManyRegularSeeds_DeclareNoShapeSeeds` がどの方言も既定の数で表明することを固定する。
-  - PostgreSQL・Oracle の普段の数は、2026-11-14 の実 DB の測定（PostgreSQL 600 種 1 分・Oracle 300 種 3 分 40 秒。どちらも決定的な行を含む）から決めた。PostgreSQL は 1 種が約 50 ms なので 100、Oracle は 1 種が PostgreSQL の数倍なので門を少し超える 60 にとどめ、欠ける組を網羅の行で埋める。Oracle の夜間の 120 種は普段の 60 種以上のまま（同じ測定の 300 種で、夜間の範囲の外の種 221 が生成器の穴＝計算列が参照する列を広げる形を見つけ、生成器を直した）。
+  - PostgreSQL・Oracle の普段の数は、2026-11-14 の実 DB の測定（PostgreSQL 600 種 1 分・Oracle 300 種 3 分 40 秒。どちらも決定的な行を含む）から決めた。PostgreSQL は 1 種が約 50 ms なので 100、Oracle は 1 種が PostgreSQL の数倍なので門を少し超える 60 にとどめ、欠ける組を網羅の行で埋める。Oracle の夜間は 300 種（夜間の 3 夜＝2026-11-24・25 の実測で、120 種が 2.4〜4.2 分。300 種でも Oracle のコレクションの直列は integration-nightly-rest のいちばん長い直列より短い）。同じ測定の 300 種で、種 221 が生成器の穴＝計算列が参照する列を広げる形を見つけ、生成器を直した。
   - 形の種（派生の `ShapeSeeds`）は、普段の種の範囲の外で、普段の種に出ない実 DB の必須の形を出す種と、出すはずの形の組。今は Oracle の種 102（`drop-unique-member-alone`。同じ測定の 300 種で初めて出るのが種 102）だけ。PostgreSQL は必須の形が 43 種までに全部出るので持たない（2026-11-13 に普段の 15 種・4 種で置いた PostgreSQL の種 43・Oracle の種 6・32 は、普段の数を増やして範囲の中に入ったので外した）。
   - 単独の種でない実行は、流した種の範囲に無い形の種を乱数の種の後に流し（`SyncPlanShapeSeeds.ToRun`）、結果を普通の種と同じく既知の失敗の照合へ渡し、必須の形の表明の対象に足す。夜間は形の種が種の範囲に入るので重ねて流さない。単独の種の実行では流さず、照合もしない。
   - 形の種は種の指紋の記録の外にあるので、形の種が宣言した形を出さない（流れなかったものも含む）と、種の数に依らず `SyncPlanShapeSeeds.Problems` が種を名指しして赤にする。門と流し方は `SyncPlanShapeSeedGuardTests`（DB なし）が単独の種・既定・明示の数・夜間の指定ごとに固定する。mutation 実証済み（生成器が `fk-on-unique`・`symbol-name` を作らない・形の種をずらす）。

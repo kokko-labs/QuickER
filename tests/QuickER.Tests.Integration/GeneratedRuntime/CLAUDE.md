@@ -341,7 +341,7 @@
 - 既知の失敗の一覧は、直結の組（決定的なシナリオの直結の Theory と直結の乱数の種）が `SyncModelKnownFailures.EngineSet`（空）、ほかの転送の乱数の種が `SyncModelEngineTransports.Known`（空）。
 - 既知の失敗の一覧の乱数の項目のうち RegularSeeds / NightlySeeds の項目は、全部の種をまとめて照合して「起きない」も赤にする。種ごとの照合は「載っていない」しか見ないため。
 - 乱数の種の照合は、静止化で起きた例外を途中の同期の例外と同じに扱い、表明 2・3 の署名から表の名前を外して行う（`SyncModelRuntimeTests.Family`）。
-- 種の数は `QUICKER_SYNC_MODEL_SEEDS`（既定 60）と、広い世界の種の `QUICKER_SYNC_MODEL_WIDE_SEEDS`（既定 48）。夜間に数を増やすのは直結のエンジンの端末の組だけ（400＋広い世界 80。下の「エンジンの端末」）。広い世界の種は同じテストの中で既存の種の後に流し、種ごとの照合と再現の手順はその範囲の決め方で、既知の失敗の「起きない」の照合は既存の範囲の種だけで、網羅しない組の照合は 2 つの範囲がどちらも既定の種の数のときだけ行う。種の指紋は範囲ごとに別の記録（`SyncModel`・`SyncModelWide`）。時刻と乱数の出どころは種だけ。
+- 種の数は `QUICKER_SYNC_MODEL_SEEDS`（既定 60）と、広い世界の種の `QUICKER_SYNC_MODEL_WIDE_SEEDS`（既定 48）。夜間の数は、直結のエンジンの端末の組が 1200＋広い世界 240（下の「エンジンの端末」）、小さい塊の組が 240＋広い世界 48（下の「小さい塊の端末」）。広い世界の種は同じテストの中で既存の種の後に流し、種ごとの照合と再現の手順はその範囲の決め方で、既知の失敗の「起きない」の照合は既存の範囲の種だけで、網羅しない組の照合は 2 つの範囲がどちらも既定の種の数のときだけ行う。種の指紋は範囲ごとに別の記録（`SyncModel`・`SyncModelWide`）。時刻と乱数の出どころは種だけ。
 - 1 種だけ流すときは `QUICKER_SYNC_MODEL_SEED`（直結）か `QUICKER_SYNC_MODEL_TRANSPORT_SEED`（HTTP・実 SQL Server）を使う。
 - 広い世界の種（120000 以上）もこの変数で流せ、種の番号から世界の形が決まるので、番号の範囲が合う側の計画にだけ載せて 1 回だけ流す（`SyncModelSignatures.ResolvePlans`）。
 - 単独の種のとき、実 SQL Server は種を 4 で割った余りで失敗の注入なし（0・1）かあり（2・3）かが決まり、受け持つ側のテストだけが流す。
@@ -424,7 +424,7 @@
 - 実 SQL Server のサーバー役は、生成物の外側の包み（`SyncModelFaultingRepository`・`SyncModelFaultingSource`・`SyncModelFaultingBinaryColumns`）で、SQLite の代役と同じ点の失敗の注入と割り込みを起こす（版の採番とガードはしない）。版なしの表（ラベル）の書き手は代役と同じく包まない（書き込みの失敗をラベルの書き込みで使わない）。入口の割り込みと書き込みの失敗は `SyncModelFaults.BeforeServerWriteAsync` の 1 つを両方の包みが呼ぶ。
 - どれも端末はエンジンの端末（`SyncModelEngineDevice`）で、次を確かめる。
   - 決定的なシナリオが直結と同じ違反になること。例外は入口・違反の種類・推定した形へ正規化して比べる（`SyncModelSignatures`）。直結の側は `SyncModelDirectRuns` の結果。
-  - 乱数の種が既知の失敗（`SyncModelEngineTransports.Known`・空で始める）にしか当たらないこと。種の数は `QUICKER_SYNC_MODEL_TRANSPORT_SEEDS`（既定 10・夜間 100＝`SyncModelSignatures.NightlySeedCount`）と、広い世界の種の `QUICKER_SYNC_MODEL_TRANSPORT_WIDE_SEEDS`（既定 4・夜間 20＝`SyncModelSignatures.NightlyWideSeedCount`）。乱数の種の Fact はどれも夜間の目印を持つ（`NightlyEngineTrait.Selected`）。網羅は観測と要約だけで、網羅しない組は直結の乱数の種で照合する。実 SQL Server の 2 つのクラスは、どちらの範囲も種の組の余り 0・1 の種（失敗の注入なし）と余り 2・3 の種（失敗の注入の組）を別の Fact で流す（`SyncModelSignatures.SqlServerSeeds`・`SqlServerFaultSeeds`）。
+  - 乱数の種が既知の失敗（`SyncModelEngineTransports.Known`・空で始める）にしか当たらないこと。種の数は `QUICKER_SYNC_MODEL_TRANSPORT_SEEDS`（既定 10・夜間 200＝`SyncModelSignatures.NightlySeedCount`）と、広い世界の種の `QUICKER_SYNC_MODEL_TRANSPORT_WIDE_SEEDS`（既定 4・夜間 40＝`SyncModelSignatures.NightlyWideSeedCount`）。夜間の数は、100＋20 で流した 3 夜（2026-11-24・25）の実測から倍にした（`tests/QuickER.Tests/TestSupport/CLAUDE.md`「夜間の深い実行」）。乱数の種の Fact はどれも夜間の目印を持つ（`NightlyEngineTrait.Selected`）。網羅は観測と要約だけで、網羅しない組は直結の乱数の種で照合する。実 SQL Server の 2 つのクラスは、どちらの範囲も種の組の余り 0・1 の種（失敗の注入なし）と余り 2・3 の種（失敗の注入の組）を別の Fact で流す（`SyncModelSignatures.SqlServerSeeds`・`SqlServerFaultSeeds`）。
 - SQL Server でだけ起きる既知の失敗は `SyncModelEngineTransports.SqlServerOnly`（空で始める）に置く（HTTP × 実 SQL Server も同じ一覧で比べる）。形は `SyncModelSqlServerRuntimeTests.SqlServerOnly_AreWellFormed` が見る。
 - 既知の失敗は `SyncModelKnownFailures` の厳格な一覧（載っているシナリオはその署名の組どおりに失敗しなければ赤・載っていない失敗も赤）で一時的に外し、直したら消す。直結の一覧は `SyncModelKnownFailures.EngineSet`（空。項目を足すときは、エンジンの端末で出た失敗から理由つきで足す）。一覧の形は `SyncModelRuntimeTests.KnownFailures_AreWellFormed` が見る。
 
@@ -489,11 +489,12 @@
   - 乱数の種（`SyncSupportAdoSqliteEngineRuntimeTests.RandomSeeds_ConvergeWithoutLoss`）：本体 `SyncModelRuntimeTests.RunRandomSeedsAsync` に、組 `SyncModelRandomSuite`（世界の作り方・種の決め方・既知の失敗の一覧・網羅しない組・空振りの守りの並び）を渡して流す。
     - 直結の組は `EngineSuite`：既知の失敗の一覧は `SyncModelKnownFailures.EngineSet`（空）、網羅しない組は範囲 `SyncModelDimensions.EngineScope` の `SyncModelDimensions.EngineGaps` と `SyncModelOutcomeDimensions.EngineGaps`（空）、空振りの守りは `SyncModelRuntimeTests.GuardedRunChecks` と夜間だけの `carry-edit-lost`。
     - 種の指紋の記録は `SyncModelRuntimeTests.Seeds`・`WideSeeds` の決め方で照合する（指紋は生成器の設定と最初の形の中身から作り、端末に依らない）。
-    - 夜間の目印を持つ（`NightlyEngineTrait.Selected`）。種の決め方は組が持ち（`SyncModelRandomSuite.Seeds`・`WideSeeds`）、`SyncModelRuntimeTests.Seeds`・`WideSeeds` と環境変数・普段の数・開始番号が同じで、夜間の数だけ 3 分の 1（400＋広い世界 80＝`SyncSupportAdoSqliteEngineRuntimeTests.NightlySeedCount`・`NightlyWideSeedCount`）。種を並列に流してランナーの CPU を使い切るので、夜間の Integration のジョブ（50 分未満の目安）で同時に流れるほかのテストを遅らせない数にする（4 コアのランナーで 1,440 種が 14 分）。
+    - 夜間の目印を持つ（`NightlyEngineTrait.Selected`）。種の決め方は組が持ち（`SyncModelRandomSuite.Seeds`・`WideSeeds`）、直結の組は `SyncModelRuntimeTests.Seeds`・`WideSeeds` そのもの（夜間は 1200＋広い世界 240）。
+    - 種を全部のコアで並列に流すので、流れている間は同じジョブのほかのテストも遅れる。夜間の 3 夜（2026-11-24・25）は 400＋広い世界 80 の種で 1.1〜1.7 分で、今の数では約 3 倍（遅いランナーで約 5 分）に伸びる。伸びる分とほかのテストの遅れを足しても、integration-nightly-rest の段は目安の 50 分に余裕を残す（`tests/QuickER.Tests/TestSupport/CLAUDE.md`「夜間の深い実行」）。
 - 直結のほかの転送の乱数の種は、転送のクラス（`SyncModelTransportRuntimeTests.cs`）が本体 `SyncModelSignatures.RunSeedsAsync`（種の決め方・正規化）にエンジンの端末の世界の作り方を渡して流す（上の「HTTP・実 SQL Server の派生」）。
   - `SyncModelHttpRuntimeTests.RandomSeeds_OnlyKnownFailures`（HTTP・SQLite のサーバー役・コンテナなし）。
   - `SyncModelSqlServerRuntimeTests.RandomSeeds_OnlyKnownFailures`・`SyncModelSqlServerRuntimeTests.RandomFaultSeeds_OnlyKnownFailures`（実 SQL Server・Docker・`SqlServerSecondContainerCollection`。失敗の注入なしの組と注入の組）。`SyncSupportRemoteAdoSqlServerRuntimeTests` の同じ名前の 2 つ（HTTP × 実 SQL Server）。
-  - 既知の失敗の一覧は `SyncModelEngineTransports.Known`（空で始める）。夜間の数は 100＋広い世界 20。
+  - 既知の失敗の一覧は `SyncModelEngineTransports.Known`（空で始める）。夜間の数は 200＋広い世界 40。
 - 洗い替えの振る舞いは、端末の状態の表を読まない期待（実行の結果・例外の型・端末とサーバーの行・その後の同期が送るか）で書いた行が受け持つ。
   - `refresh-pending-refused-keeps-edit-that-next-sync-sends`（未送信があると断り、編集は残って次の同期で送られる）
   - `refresh-force-discards-pending-and-next-sync-sends-nothing`・`refresh-cycle-force-replaces-pending-and-next-sync-sends-nothing`（`Force` は未送信を捨て、次の同期は何も送らない。表どうしの循環のある図でも同じ）
@@ -516,9 +517,8 @@
   - 違う行は、理由の宣言 `SyncModelSmallChunkScenarioDifferences` と 2 方向に照合する（宣言の無い違う行も、宣言があるのに直結の実行と同じ結果の行も赤）。理由には、塊の経路が違う答えを出す仕組み（削除の段が塊より前・キーを行より先に取る順・塊ごとの確定）を書く。今の宣言は 1 行（`chunk-delete-stage-parent-gone-after-next-sync`＝削除の段で残した親が次の同期まで端末に残る）。
   - 空振りの守り：塊の道を通った実行のある行が 0 行なら赤。印 `SyncModelScenario.CarriesAcrossChunks` のある行は、持ち越しが 1 行以上起きなければ赤。
 - 乱数の種（`SyncSupportAdoSqliteEngineRuntimeTests.SmallChunkRandomSeeds_ConvergeWithoutLoss`）：直結の組 `EngineSuite` と同じ本体に、組 `SmallChunkSuite`（端末の作り方・夜間の数・夜間だけの空振りの守りだけが違う）を渡す。生成器・次元表・作らない形の宣言・種の指紋の記録は直結の組と共有する（新しい生成器の部分を持たない）。
-  - 普段の数は直結の組と同じ（60＋広い世界 48）。夜間の数も普段の数と同じにする（夜間に深くしない）。
-    - 理由：夜間の Integration のジョブは目安の 50 分を超えていて（上限 60 分）、この組の種は並列に流れてランナーを使い切るので、足すとジョブの上限に届きうる。塊の経路の形は、普段の CI で直結の Theory との照合が全行を流す。
-    - 上げる条件：夜間のジョブの実測が目安の内へ戻ったら、夜間の数を普段の 4 倍（240＋広い世界は普段と同じ 48）へ上げる。
+  - 普段の数は直結の組と同じ（60＋広い世界 48）。夜間の数は普段の 4 倍（240）で、広い世界の種は普段と同じ 48。
+    - 理由：この組の種も並列に流れてランナーを使い切る。夜間の Integration のジョブが目安の 50 分を超えていた間は普段の数のままにし、ジョブを 2 つに分けた後の 3 夜（2026-11-24・25）で integration-nightly-rest の段が目安の内（13.1〜21.1 分）に戻り、この組が 0.5 分だったので上げた（約 1.3 分の見込み）。塊の経路の形は、普段の CI で直結の Theory との照合が全行を流す。
   - 既定の種の数のとき、道 Single と Chunked がどちらも 1 回以上起きたことを `CoverageGuard` で表明する（Refused は乱数の種では起きず、決まった形の行 `chunk-download-route-cells` が持つ）。
   - 夜間だけの空振りの守り（`NightlyGuardedRunChecks`＝戻せなかった行の決定の後の編集の照合）は、この組は持たない。その照合が起きるのは未送信の行がある実行だけで、未送信のある実行は小さい塊の端末でも 1 回で全部の道を通る。守りは直結の組が持つ。
 - 塊をまたぐ形の決定的なシナリオ（`SyncModelScenarios.Engine.LargeDownload.cs`・全転送。小さい塊の端末で形の両端が別の塊に入るよう、詰め物の行と版の順を決めてある）：
