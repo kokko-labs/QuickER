@@ -11,12 +11,21 @@ namespace QuickER.Tests.CodeGen.CSharp.CodegenConfig.Judges;
 /// <summary>生成の診断 1 件を種類（resx のキー）と名指しした項目に分けたもの</summary>
 /// <param name="Severity">重要度</param>
 /// <param name="Key">resx のキー（どの書式にも当たらなければ null）</param>
-/// <param name="Items">書式の <c>{n}</c> に入った値（一覧は 1 行 1 項目に分け、前後の空白を除く）</param>
+/// <param name="Items">
+/// 書式の <c>{n}</c> に入った値を、文の中に現れる順に並べたもの（一覧は 1 行 1 項目に分け、前後の空白を除く。同じ番号が 2 回現れれば
+/// 2 回入る）。並びは UI カルチャの書式で変わる（英語と日本語で番号の並びが違う書式がある）ので、位置で項目を決めない
+/// </param>
+/// <param name="Arguments">
+/// 書式の <c>{n}</c> に入った値を番号 n の順に並べたもの（前後の空白を除き、行には分けない。同じ番号は最初に現れた値。長さは書式に
+/// 現れる最大の番号 + 1 で、書式に現れない番号は空文字列）。
+/// 位置で引数を決めるときはこちらを使う（UI カルチャに依らない）
+/// </param>
 /// <param name="Message">元の文</param>
 internal sealed record IdentifiedDiagnostic(
     GenerationDiagnosticSeverity Severity,
     string? Key,
     IReadOnlyList<string> Items,
+    IReadOnlyList<string> Arguments,
     string Message
 );
 
@@ -61,7 +70,7 @@ internal static class DiagnosticMatcher
 
     private static readonly ConcurrentDictionary<
         (string Culture, string Key),
-        (Regex Pattern, int LiteralLength)
+        (Regex Pattern, int LiteralLength, IReadOnlyList<int> Numbers)
     > Patterns = new();
 
     /// <summary>診断を種類と項目に分ける（いまの UI カルチャの書式で照合する）</summary>
@@ -76,7 +85,12 @@ internal static class DiagnosticMatcher
             _ => "CodeGen_Info_",
         };
         var message = diagnostic.Message.ReplaceLineEndings("\n");
-        (string Key, int LiteralLength, IReadOnlyList<string> Items)? best = null;
+        (
+            string Key,
+            int LiteralLength,
+            IReadOnlyList<string> Items,
+            IReadOnlyList<string> Arguments
+        )? best = null;
 
         foreach (
             var key in Keys.Where(key =>
@@ -85,7 +99,7 @@ internal static class DiagnosticMatcher
             )
         )
         {
-            var (pattern, literalLength) = Patterns.GetOrAdd(
+            var (pattern, literalLength, numbers) = Patterns.GetOrAdd(
                 (culture.Name, key),
                 entry =>
                     Build(Strings.ResourceManager.GetString(entry.Key, culture) ?? string.Empty)
@@ -111,7 +125,19 @@ internal static class DiagnosticMatcher
                 .Select(line => line.Trim())
                 .Where(line => line.Length > 0)
                 .ToList();
-            best = (key, literalLength, items);
+
+            // 番号 n の順の引数：捕まえる組は文の中に現れる順に g0, g1, … と名付けてあり、numbers[組] がその組の番号 n
+            var arguments = new string?[numbers.Count == 0 ? 0 : numbers.Max() + 1];
+
+            for (var index = numbers.Count - 1; index >= 0; index--)
+            {
+                // 後ろから入れ、同じ番号は最初に現れた値で上書きする
+                arguments[numbers[index]] = match
+                    .Groups[string.Create(CultureInfo.InvariantCulture, $"g{index}")]
+                    .Value.Trim();
+            }
+
+            best = (key, literalLength, items, arguments.Select(value => value ?? "").ToList());
         }
 
         return best is { } found
@@ -119,17 +145,23 @@ internal static class DiagnosticMatcher
                 diagnostic.Severity,
                 found.Key,
                 found.Items,
+                found.Arguments,
                 diagnostic.Message
             )
-            : new IdentifiedDiagnostic(diagnostic.Severity, null, [], diagnostic.Message);
+            : new IdentifiedDiagnostic(diagnostic.Severity, null, [], [], diagnostic.Message);
     }
 
-    /// <summary>書式を正規表現にする（<c>{n}</c> は捕まえる組、<c>{{</c> / <c>}}</c> は波括弧そのもの）</summary>
-    private static (Regex Pattern, int LiteralLength) Build(string format)
+    /// <summary>
+    /// 書式を正規表現にする（<c>{n}</c> は捕まえる組、<c>{{</c> / <c>}}</c> は波括弧そのもの）。捕まえる組ごとの番号 n も返す
+    /// </summary>
+    private static (Regex Pattern, int LiteralLength, IReadOnlyList<int> Numbers) Build(
+        string format
+    )
     {
         var builder = new StringBuilder("^");
         var literalLength = 0;
         var group = 0;
+        var numbers = new List<int>();
         format = format.ReplaceLineEndings("\n");
 
         for (var i = 0; i < format.Length; i++)
@@ -158,6 +190,9 @@ internal static class DiagnosticMatcher
 
                 if (end > i)
                 {
+                    // {n}・{n,幅}・{n:書式} の n
+                    var number = format[(i + 1)..end].Split(',', ':')[0];
+                    numbers.Add(int.Parse(number, NumberStyles.None, CultureInfo.InvariantCulture));
                     builder.Append(
                         string.Create(CultureInfo.InvariantCulture, $"(?<g{group}>.*?)")
                     );
@@ -174,7 +209,8 @@ internal static class DiagnosticMatcher
         builder.Append('$');
         return (
             new Regex(builder.ToString(), RegexOptions.Singleline | RegexOptions.CultureInvariant),
-            literalLength
+            literalLength,
+            numbers
         );
     }
 }

@@ -146,6 +146,7 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - ガード：`DialectTypeTableTests.MultiTargetDialects_MapEveryTypeNameToSameCSharpType`（部品は `tests/QuickER.Tests/Provider/DialectTypeMultiTarget.cs`）。
   - 名前の集合は手で書かず、`CodeGenerationOptions.SupportedRepositoryDialects` の各方言の型カタログの選択肢（`DataTypes`）と、方言の型の表のその方言の型マッパーの行・解析が通る行の入力から作る。
   - 判定は製品の入口 `DiagramCodeGenerator.Generate` を図の方言ごとに 1 回流し（名前ごとに 1 表）、診断の種類と名指す表・列を resx の書式で取り出す（`DiagnosticMatcher`。診断はコードを持たない）。型の食い違い以外の生成のエラーも赤にする。
+  - 診断の文は UI カルチャの言語で出て、書式の引数の並びは言語で違う（英語の型の食い違いは列が先）。表・列は番号 `{n}` の順の `Arguments` で引き（文の中の順の `Items` を位置で読まない）、守りは ja-JP と en-US の両方で流す（結果を覚えない）。日本語の開発機だけで流すと英語の CI でだけ赤になった（2026-11-25）。mutation 実証済み（`Items` を位置で読む・`{n}` の番号を無視して文の中の順にする、のどちらも en-US の行だけが赤）。
   - 受け入れた食い違いは理由つきの一覧（`DialectTypeMultiTarget.Accepted`）で、一覧にあるのに起きない組も赤にする（陳腐化）。
   - mutation 実証済み（別名を 1 つずつ外すとその名前を名指しして赤・一覧の名前を 1 つ外すと赤・名前の出どころから解析の行を外すと、その行だけから来る名前の宣言が陳腐化して赤）。
 

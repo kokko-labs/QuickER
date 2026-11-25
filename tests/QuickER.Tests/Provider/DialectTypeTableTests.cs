@@ -1,4 +1,6 @@
+using System.Globalization;
 using AwesomeAssertions;
+using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Dialects;
 using QuickER.Provider;
 using QuickER.Tests.TestSupport.Engines;
@@ -49,13 +51,54 @@ public sealed class DialectTypeTableTests(ITestOutputHelper output)
         report.AssertGaps(DialectTypeDimensions.Gaps, DialectTypeDimensions.Scope, output: output);
     }
 
-    [Fact(
+    /// <remarks>
+    /// 診断の文は UI カルチャの言語で出て、書式の引数の並びが言語で違う（英語の型の食い違いは列が先）。開発機（日本語）だけで
+    /// 流すと英語の CI でだけ赤になるので、どちらの言語でも流す
+    /// </remarks>
+    [Theory(
         DisplayName = "[方言の型] マルチターゲットの方言のマッパーは、どの方言の図の型の名前も同じ C# 型へ写す（受け入れた食い違いは理由つきの一覧のとおり）"
     )]
-    public void MultiTargetDialects_MapEveryTypeNameToSameCSharpType()
+    [InlineData("ja-JP")]
+    [InlineData("en-US")]
+    public void MultiTargetDialects_MapEveryTypeNameToSameCSharpType(string uiCulture)
     {
-        var result = DialectTypeMultiTarget.Run();
+        var previous = CultureInfo.CurrentUICulture;
+        DialectTypeMultiTarget.Result result;
+
+        try
+        {
+            CultureInfo.CurrentUICulture = new CultureInfo(uiCulture);
+            result = DialectTypeMultiTarget.Run();
+        }
+        finally
+        {
+            CultureInfo.CurrentUICulture = previous;
+        }
+
         var problems = new List<string>();
+
+        // 空振りの防止：その行の言語で流したこと。2 つの言語の型の食い違いの書式が違い（日本語のリソースが無いと日本語の行も
+        // 英語の書式になる）、食い違いの文がどれもその行の言語の書式の書き出し（最初の {n} の前）で始まる
+        var ownFormat = TypeMismatchFormat(uiCulture);
+        var otherFormat = TypeMismatchFormat(uiCulture == "ja-JP" ? "en-US" : "ja-JP");
+        var ownOpening = ownFormat[..ownFormat.IndexOf('{', StringComparison.Ordinal)];
+
+        if (ownFormat == otherFormat)
+        {
+            problems.Add(
+                $"ja-JP と en-US の型の食い違いの書式が同じ（言語のリソースが無く、{uiCulture} の行を流せていない）"
+            );
+        }
+
+        problems.AddRange(
+            result
+                .Mismatches.Where(item =>
+                    !item.Message.StartsWith(ownOpening, StringComparison.Ordinal)
+                )
+                .Select(item =>
+                    $"{item.DiagramDialect} の図の「{item.Name}」の文が {uiCulture} の書式の書き出し「{ownOpening}」で始まらない：{item.Message}"
+                )
+        );
 
         // 空振りの防止：マルチターゲットの方言が 2 つ以上あり、どの方言の図にも名前がある
         if (result.NamesByDialect.Count < 2)
@@ -101,6 +144,13 @@ public sealed class DialectTypeTableTests(ITestOutputHelper output)
 
         problems.Should().BeEmpty(string.Join("\n", problems));
     }
+
+    /// <summary>その UI カルチャで解決する型の食い違いの診断の書式（resx）</summary>
+    private static string TypeMismatchFormat(string uiCulture) =>
+        Strings.ResourceManager.GetString(
+            nameof(Strings.CodeGen_Error_TypeMismatch),
+            new CultureInfo(uiCulture)
+        ) ?? string.Empty;
 
     [Theory(
         DisplayName = "[方言の型] プロバイダは方言の名前・表示名・既定のポート・型の選択肢・部品を結線している"
