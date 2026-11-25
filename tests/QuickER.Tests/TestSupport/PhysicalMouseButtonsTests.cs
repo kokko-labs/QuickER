@@ -209,7 +209,8 @@ public sealed class PhysicalMouseButtonsTests
     /// スコープの固定の自己検査：キーの状態の表の左ボタンを押下にしてから、固定して Space の押下と解放を流すと、WPF の
     /// ボタンは Click しチェックボックスは切り替わる。固定を外すと Click も切り替えも起きない（押下が WPF に届く形を作れていて、
     /// 自己検査が効いていることの確かめ）。破棄で表のボタンを作る前の値へ戻し（成功・例外の 2 つの道）、ほかのキーに触らない。
-    /// 固定を外した対照は、途中の本物のクリックで表の押下が消えたら名指しして流し直す（<see cref="PhysicalMouseButtons.RunPressedTableControl"/>）
+    /// 固定ありの本体は途中で表が同期し直されて目印のキーが消えたら、固定を外した対照は途中の本物のクリックで表の押下が消えたら、
+    /// 名指しして流し直す（<see cref="PhysicalMouseButtons.RunWrittenTableCheck"/>）
     /// </summary>
     [Fact(
         DisplayName = "スコープは表のボタンを離れているに固定して Space で押せるようにし、破棄で元へ戻す"
@@ -217,7 +218,7 @@ public sealed class PhysicalMouseButtonsTests
     public void Isolation_PinsButtonsForSyntheticSpaceAndRestores()
     {
         const int Left = 0x01;
-        const int Marker = 0x87; // VK_F24：ボタンでないキー（触らないことを見る印）
+        const int Marker = PhysicalMouseButtons.TableCheck.MarkerVirtualKey;
 
         RunSta(() =>
         {
@@ -246,27 +247,71 @@ public sealed class PhysicalMouseButtonsTests
             {
                 window.Show();
                 DoEvents();
-                MouseButtonKeyState.SetForTests(Marker, true);
 
-                // 固定あり：押下が表にあっても、固定すれば Space で押せる
-                MouseButtonKeyState.SetForTests(Left, true);
+                // 固定あり：押下が表にあっても、固定すれば Space で押せる。破棄で表の左ボタンを作る前の値（押下）へ戻し、
+                // ボタンでないキー（目印）には触らない。途中で表が同期し直されて目印が消えたら、名指しして流し直す
+                // （RunWrittenTableCheck。毎回、目印と押下を書き直し、チェックを外す）
+                var pinned = PhysicalMouseButtons.RunWrittenTableCheck(
+                    PhysicalMouseButtons.TableCheck.MarkerKey,
+                    () =>
+                    {
+                        MouseButtonKeyState.SetForTests(Marker, true);
+                        MouseButtonKeyState.SetForTests(Left, true);
+                        checkBox.IsChecked = false;
+                        var clicksBefore = clicks;
 
-                using (var isolation = PhysicalMouseButtons.Isolate())
-                {
-                    PressSpace(isolation, button);
-                    PressSpace(isolation, checkBox);
-                }
+                        using (var isolation = PhysicalMouseButtons.Isolate())
+                        {
+                            PressSpace(isolation, button);
+                            PressSpace(isolation, checkBox);
+                        }
 
-                clicks.Should().Be(1, "固定すれば、ボタンは Space の解放で Click する");
-                checkBox
-                    .IsChecked.Should()
-                    .BeTrue("固定すれば、チェックボックスは Space で切り替わる");
-                MouseButtonKeyState.IsDown(Left).Should().BeTrue("破棄で作る前の値（押下）へ戻す");
-                MouseButtonKeyState.IsDown(Marker).Should().BeTrue("ボタンでないキーには触らない");
+                        var missed = new List<string>();
+
+                        if (clicks - clicksBefore != 1)
+                        {
+                            missed.Add(
+                                $"Click {clicks - clicksBefore} 回（固定すれば、ボタンは Space の解放で 1 回 Click する）"
+                            );
+                        }
+
+                        if (checkBox.IsChecked != true)
+                        {
+                            missed.Add(
+                                "チェックボックスが切り替わらない（固定すれば Space で切り替わる）"
+                            );
+                        }
+
+                        if (!MouseButtonKeyState.IsDown(Left))
+                        {
+                            missed.Add("破棄の後に表の左ボタンが作る前の値（押下）へ戻っていない");
+                        }
+
+                        var kept = MouseButtonKeyState.IsDown(Marker);
+                        return new(
+                            missed.Count == 0 && kept,
+                            kept,
+                            missed.Count == 0 ? null : string.Join("・", missed)
+                        );
+                    },
+                    PhysicalMouseButtons.TableCheckAttemptLimit,
+                    PhysicalMouseButtons.ReportTableCheckRetry
+                );
+
+                // 固定ありの本体を流した回数は、緑の回でもテストの出力へ書く（流し直したことを黙らせない）
+                TestContext.Current.TestOutputHelper?.WriteLine(
+                    $"固定ありの本体を {pinned.Attempts} 回流した（目印が消えて流し直した {pinned.Disturbed} 回）"
+                );
+                pinned
+                    .Problem.Should()
+                    .BeNull(
+                        "固定すれば Space で押せ、破棄で表を戻し、ボタンでないキーには触らない"
+                    );
 
                 // 固定なし（対照）：表の押下が WPF に届き、Click も切り替えも起きない。途中の本物のクリックで表の押下が
-                // 消えたら、名指しして流し直す（RunPressedTableControl。毎回、表に押下を書き直し、チェックを戻す）
-                var control = PhysicalMouseButtons.RunPressedTableControl(
+                // 消えたら、名指しして流し直す（RunWrittenTableCheck。毎回、表に押下を書き直し、チェックを戻す）
+                var control = PhysicalMouseButtons.RunWrittenTableCheck(
+                    PhysicalMouseButtons.TableCheck.PressedControl,
                     () =>
                     {
                         MouseButtonKeyState.SetForTests(Left, true);
@@ -285,8 +330,8 @@ public sealed class PhysicalMouseButtonsTests
                         Mouse.Capture(null);
                         return new(clicks == clicksBefore && checkBox.IsChecked == true, kept);
                     },
-                    PhysicalMouseButtons.ControlAttemptLimit,
-                    PhysicalMouseButtons.ReportControlRetry
+                    PhysicalMouseButtons.TableCheckAttemptLimit,
+                    PhysicalMouseButtons.ReportTableCheckRetry
                 );
 
                 // 対照を流した回数は、緑の回でもテストの出力へ書く（流し直したことを黙らせない）
@@ -321,17 +366,27 @@ public sealed class PhysicalMouseButtonsTests
     }
 
     /// <summary>
-    /// 固定の自己検査の対照の判定（窓なし）：対照 1 回の結果の並び（R＝押下が届いた・K＝届かず表が押下のまま・
-    /// L＝届かず表の押下が消えた）を差し替えて、合格か・流した回数・流し直しの報告・失敗の文を見る。乱れ（L）だけを
-    /// 流し直し、乱れなしの失敗（K）は 1 回で赤、上限まで乱れたら名指しの赤（上限を超えて流さない）
+    /// 表に書いた値を確かめる自己検査の流し直しの判定（窓なし）：1 回の結果の並び（R＝合格・K＝合格せず書いた値が表に残った・
+    /// L＝合格せず書いた値が表から消えた・D＝K に外れた表明を添えた）を確かめの種類ごとに差し替えて、合格か・流した回数・
+    /// 流し直しの報告・失敗の文を見る。乱れ（L）だけを流し直し、乱れなしの失敗（K・D）は 1 回で赤、上限まで乱れたら名指しの赤
+    /// （上限を超えて流さない）。押下は固定を外した対照の押下、目印は固定ありの本体のボタンでないキーの目印
     /// </summary>
-    [Theory(DisplayName = "固定の自己検査の対照は、表の押下が消えた回だけ名指しして流し直す")]
-    [InlineData("R", true, 1, 0, null)]
-    [InlineData("LR", true, 2, 1, null)]
-    [InlineData("K", false, 1, 0, "外からの乱れなし")]
-    [InlineData("LK", false, 2, 1, "外からの乱れなし")]
-    [InlineData("LLL", false, 3, 3, "回流したが")]
-    public void PressedTableControl_RetriesOnlyWhenThePressWasLost(
+    [Theory(
+        DisplayName = "表に書いた値を確かめる自己検査は、書いた値が消えた回だけ名指しして流し直す"
+    )]
+    [InlineData("押下", "R", true, 1, 0, null)]
+    [InlineData("押下", "LR", true, 2, 1, null)]
+    [InlineData("押下", "K", false, 1, 0, "外からの乱れなし")]
+    [InlineData("押下", "LK", false, 2, 1, "外からの乱れなし")]
+    [InlineData("押下", "LLL", false, 3, 3, "対照を 3 回流したが")]
+    [InlineData("目印", "R", true, 1, 0, null)]
+    [InlineData("目印", "LR", true, 2, 1, null)]
+    [InlineData("目印", "K", false, 1, 0, "目印のキーは表に残っていたのに")]
+    [InlineData("目印", "LK", false, 2, 1, "外からの乱れなし")]
+    [InlineData("目印", "LD", false, 2, 1, "外からの乱れなし）：Click 0 回")]
+    [InlineData("目印", "LLL", false, 3, 3, "固定ありの本体を 3 回流したが")]
+    public void WrittenTableCheck_RetriesOnlyWhenTheWrittenValueWasLost(
+        string kind,
         string results,
         bool passed,
         int attempts,
@@ -339,31 +394,40 @@ public sealed class PhysicalMouseButtonsTests
         string? problem
     )
     {
+        var (check, retryText) = kind switch
+        {
+            "押下" => (
+                PhysicalMouseButtons.TableCheck.PressedControl,
+                "キーの状態の表に書いた押下が消えた（外からの乱れ）"
+            ),
+            _ => (
+                PhysicalMouseButtons.TableCheck.MarkerKey,
+                "表に書いた目印のキーが消えた（外からの乱れ）"
+            ),
+        };
         var queue = new Queue<char>(results);
         var reported = new List<string>();
 
-        var run = PhysicalMouseButtons.RunPressedTableControl(
+        var run = PhysicalMouseButtons.RunWrittenTableCheck(
+            check,
             () =>
                 queue.Dequeue() switch
                 {
                     'R' => new(true, true),
                     'K' => new(false, true),
+                    'D' => new(false, true, "Click 0 回"),
                     _ => new(false, false),
                 },
-            PhysicalMouseButtons.ControlAttemptLimit,
+            PhysicalMouseButtons.TableCheckAttemptLimit,
             reported.Add
         );
 
-        run.PressReached.Should().Be(passed);
+        run.Passed.Should().Be(passed);
         run.Attempts.Should().Be(attempts);
         run.Disturbed.Should().Be(reports);
         queue.Should().BeEmpty("上限を超えて、また結果が決まった後に流さない");
         reported.Should().HaveCount(reports);
-        reported
-            .Should()
-            .AllSatisfy(text =>
-                text.Should().Contain("キーの状態の表に書いた押下が消えた（外からの乱れ）")
-            );
+        reported.Should().AllSatisfy(text => text.Should().Contain(retryText));
 
         if (problem is null)
         {

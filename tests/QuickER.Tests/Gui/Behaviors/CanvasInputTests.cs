@@ -382,7 +382,8 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
     /// （網羅の行 coverage-press-rowother-move-out-none-none の I4）。ハーネスが入力を流すたびに表のボタンを「離れている」に
     /// 固定し、破棄で元へ戻すことを、表を押下にしてから同じ行を流して確かめる（固定の自己検査）。固定を外すと赤になることで、
     /// 押下が WPF に届く形を作れていることも確かめる。戻すことは成功・違反・例外の 3 つの道で見て、ほかのキーには触らない。
-    /// 固定を外した対照は、途中の本物のクリックで表の押下が消えたら名指しして流し直す（<see cref="PhysicalMouseButtons.RunPressedTableControl"/>）
+    /// 固定ありの本体は途中で表が同期し直されて目印のキーが消えたら、固定を外した対照は途中の本物のクリックで表の押下が消えたら、
+    /// 名指しして流し直す（<see cref="PhysicalMouseButtons.RunWrittenTableCheck"/>）
     /// </summary>
     [Fact(
         DisplayName = "入力の列: 入力を流す間はキーの状態の表のマウスのボタンを離れているに固定し、破棄で元へ戻す"
@@ -390,7 +391,7 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
     public void MouseButtons_ArePinnedReleasedAndRestored()
     {
         const int Left = 0x01;
-        const int Marker = 0x87; // VK_F24：ボタンでないキー（触らないことを見る印）
+        const int Marker = PhysicalMouseButtons.TableCheck.MarkerVirtualKey;
         IReadOnlyList<CanvasStep> row =
         [
             CanvasStep.ClickFocus(CanvasTarget.Canvas),
@@ -398,15 +399,12 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
             CanvasStep.MoveTo(CanvasSpot.Blank),
             CanvasStep.LeftUp,
         ];
-        CanvasViolation? pinned = null;
         CanvasViolation? unpinned = null;
-        var restoredAfterSuccess = false;
         var restoredAfterViolation = false;
         var restoredAfterException = false;
-        var markerKept = false;
-        var waits = 0;
         Exception? thrown = null;
-        PhysicalMouseButtons.ControlRun control = default;
+        PhysicalMouseButtons.TableCheckRun pinned = default;
+        PhysicalMouseButtons.TableCheckRun control = default;
 
         using var _ = GuiFailureDiagnostics.SuppressSinksForTests();
 
@@ -418,30 +416,70 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
 
                 try
                 {
-                    MouseButtonKeyState.SetForTests(Marker, true);
-
-                    // 成功の道：押下を表に置いてから流しても、固定があれば違反にならない
-                    MouseButtonKeyState.SetForTests(Left, true);
-
-                    using (var harness = new CanvasInputHarness(vm, window))
-                    {
-                        // 種の始めと手ごとに、実際のボタンが離れるまで待つ（ここでは回数だけ数える）
-                        harness.WaitForPhysicalRelease = () =>
+                    // 成功の道：押下を表に置いてから流しても、固定があれば違反にならず、種の始めと手ごとに実際のボタンが
+                    // 離れるまで待ち、破棄で表の左ボタンを作る前の値（押下）へ戻し、ボタンでないキー（目印）には触らない。
+                    // 途中で表が同期し直されて目印が消えたら、名指しして流し直す（RunWrittenTableCheck。毎回、目印と押下を
+                    // 書き直し、待ちの回数を数え直す）
+                    pinned = PhysicalMouseButtons.RunWrittenTableCheck(
+                        PhysicalMouseButtons.TableCheck.MarkerKey,
+                        () =>
                         {
-                            waits++;
-                            return TimeSpan.Zero;
-                        };
-                        pinned = harness.Run(row);
-                    }
+                            MouseButtonKeyState.SetForTests(Marker, true);
+                            MouseButtonKeyState.SetForTests(Left, true);
+                            var waits = 0;
+                            CanvasViolation? violation;
 
-                    restoredAfterSuccess = MouseButtonKeyState.IsDown(Left);
-                    markerKept = MouseButtonKeyState.IsDown(Marker);
+                            using (var harness = new CanvasInputHarness(vm, window))
+                            {
+                                // ここでは待ちの回数だけ数える
+                                harness.WaitForPhysicalRelease = () =>
+                                {
+                                    waits++;
+                                    return TimeSpan.Zero;
+                                };
+                                violation = harness.Run(row);
+                            }
+
+                            var missed = new List<string>();
+
+                            if (violation is not null)
+                            {
+                                missed.Add(
+                                    $"固定しても違反になった（表のボタンを離れているに固定すれば、外からの押下は混ざらない）：{violation}"
+                                );
+                            }
+
+                            if (waits != row.Count + 1)
+                            {
+                                missed.Add(
+                                    $"実際のボタンが離れるまでの待ち {waits} 回（種の始めと手ごとに {row.Count + 1} 回。表は押されている間に書いても漏れる）"
+                                );
+                            }
+
+                            if (!MouseButtonKeyState.IsDown(Left))
+                            {
+                                missed.Add(
+                                    "成功の後に表の左ボタンがハーネスを作る前の値（押下）へ戻っていない"
+                                );
+                            }
+
+                            var kept = MouseButtonKeyState.IsDown(Marker);
+                            return new(
+                                missed.Count == 0 && kept,
+                                kept,
+                                missed.Count == 0 ? null : string.Join("・", missed)
+                            );
+                        },
+                        PhysicalMouseButtons.TableCheckAttemptLimit,
+                        PhysicalMouseButtons.ReportTableCheckRetry
+                    );
 
                     // 違反の道（対照）：固定を外すと、表の押下が DataGrid に届いてキャプチャが残る。実際のボタンが押されていた
                     // 形にして（読み取りを差し替える）、違反の文に外からの乱れとして名指しされることも見る。途中の本物の
-                    // クリックで表の押下が消えたら、名指しして流し直す（RunPressedTableControl）。対照のハーネスは本物の
+                    // クリックで表の押下が消えたら、名指しして流し直す（RunWrittenTableCheck）。対照のハーネスは本物の
                     // ボタンを待たない（乱れは表で見分ける。待つと乱れの名指しの文が変わる）。本体の側の待ちは変えない
-                    control = PhysicalMouseButtons.RunPressedTableControl(
+                    control = PhysicalMouseButtons.RunWrittenTableCheck(
+                        PhysicalMouseButtons.TableCheck.PressedControl,
                         () =>
                         {
                             MouseButtonKeyState.SetForTests(Left, true);
@@ -456,8 +494,8 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
                             Mouse.Capture(null);
                             return new(unpinned is not null, kept);
                         },
-                        PhysicalMouseButtons.ControlAttemptLimit,
-                        PhysicalMouseButtons.ReportControlRetry
+                        PhysicalMouseButtons.TableCheckAttemptLimit,
+                        PhysicalMouseButtons.ReportTableCheckRetry
                     );
 
                     restoredAfterViolation = MouseButtonKeyState.IsDown(Left);
@@ -483,14 +521,15 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
             }
         );
 
-        pinned.Should().BeNull("表のボタンを離れているに固定すれば、外からの押下は混ざらない");
-        waits
-            .Should()
-            .Be(
-                row.Count + 1,
-                "種の始めと手ごとに、実際のボタンが離れるまで待つ（表は押されている間に書いても漏れる）"
+        // 固定ありの本体と対照を流した回数は、緑の回でもテストの出力へ書く（流し直したことを黙らせない）
+        output.WriteLine(
+            $"固定ありの本体を {pinned.Attempts} 回流した（目印が消えて流し直した {pinned.Disturbed} 回）"
+        );
+        pinned
+            .Problem.Should()
+            .BeNull(
+                "固定すれば違反にならず、手ごとに待ち、破棄で表を戻し、ボタンでないキーには触らない"
             );
-        // 対照を流した回数は、緑の回でもテストの出力へ書く（流し直したことを黙らせない）
         output.WriteLine(
             $"固定を外した対照を {control.Attempts} 回流した（外からの乱れで流し直した {control.Disturbed} 回）"
         );
@@ -508,11 +547,9 @@ public sealed class CanvasInputTests(ITestOutputHelper output)
                 "手の列の間に実際のボタンが押されていたら、違反の文に名指しする（赤のまま）"
             );
         unpinned.StateReport.Should().Contain("外からの乱れ: 実際のマウスのボタンが押されていた手");
-        restoredAfterSuccess.Should().BeTrue("成功の後も、ハーネスを作る前の値（押下）へ戻す");
         restoredAfterViolation.Should().BeTrue("違反の後も戻す");
         thrown.Should().NotBeNull("例外の道を通った");
         restoredAfterException.Should().BeTrue("例外の後も戻す");
-        markerKept.Should().BeTrue("ボタンでないキーには触らない");
     }
 
     /// <summary>
