@@ -79,10 +79,11 @@ internal static class DialectTypeMultiTarget
         IReadOnlyList<string> OtherErrors
     );
 
-    /// <summary>製品の生成を図の方言ごとに 1 回流した結果（遅延して 1 回だけ作る）</summary>
-    public static Result Run() => Lazy.Value;
-
-    private static readonly Lazy<Result> Lazy = new(Compute);
+    /// <summary>
+    /// 製品の生成を図の方言ごとに 1 回流した結果（呼ぶたびに作る。診断の文はいまの UI カルチャの言語で出るので、結果を覚えると
+    /// 違う言語で流した行が前の言語の結果を読む）
+    /// </summary>
+    public static Result Run() => Compute();
 
     /// <summary>その方言の図に書ける型の名前（重複なし・序数の並び）</summary>
     public static IReadOnlyList<string> NamesOf(string dialect)
@@ -189,14 +190,15 @@ internal static class DialectTypeMultiTarget
             )
             {
                 // 診断はコードを持たないので、種類と名指す表・列を resx の書式で取り出す（文の断片では照合しない）。
-                // 型の食い違いの書式の項目は 表・列・方言・C# 型・方言・C# 型 の順
+                // 型の食い違いの書式の引数は {0} 表・{1} 列・{2} 方言・{3} C# 型・{4} 方言・{5} C# 型。文の中の並びは
+                // UI カルチャで変わる（英語は列が先）ので、番号の順の Arguments で引く
                 var identified = DiagnosticMatcher.Identify(diagnostic);
 
                 if (
                     identified.Key == nameof(Strings.CodeGen_Error_TypeMismatch)
-                    && identified.Items.Count == 6
-                    && tableNames.TryGetValue(identified.Items[0], out var name)
-                    && identified.Items[1] == "value"
+                    && identified.Arguments.Count == 6
+                    && tableNames.TryGetValue(identified.Arguments[0], out var name)
+                    && identified.Arguments[1] == "value"
                 )
                 {
                     mismatches.Add(new Mismatch(dialect, name, diagnostic.Message));
