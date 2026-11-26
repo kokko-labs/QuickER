@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Data.Sqlite;
+using QuickER.Model;
 using QuickER.Provider;
 
 namespace QuickER.Provider.Sqlite;
@@ -11,8 +12,12 @@ namespace QuickER.Provider.Sqlite;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 試すたびにメモリの DB へスキーマだけ（表・仮想表・索引・ビューの原文。行は写さない）を写し、作り直しと同じ形（新しい表 → DROP →
-/// RENAME・<c>legacy_alter_table</c> は ON＝同期の実行器と同じ）で、変わる表を同期後の列名の表に置き換える。前後で読めるかを実行器と同じ文
+/// 試すたびにメモリの DB へスキーマだけ（表・仮想表・索引・ビューの原文。行は写さない）を写し、変わる表を同期スクリプトと同じ形にする：
+/// 作り直す表（製品の再構築の合成と同じ判定＝呼び出し側が渡す）は作り直しと同じ形（新しい表 → DROP → RENAME・<c>legacy_alter_table</c> は
+/// ON・<c>foreign_keys</c> は OFF＝同期の実行器と同じ）で同期後の列名の表に置き換え、作り直さない表は <c>ALTER TABLE … ADD COLUMN</c>、
+/// 消す表は <c>DROP TABLE</c>。
+/// 計画が渡す列名（図の名前＝前後の空白を除いた名前・取込が捨てた大文字小文字だけ違う双子の列が無い）は、写しの DB の列へ
+/// <see cref="SchemaNames"/> の規則で照らし、DB の綴りで残す（双子の列も残る）。前後で読めるかを実行器と同じ文
 /// （<see cref="SqliteViews"/>）で、発火できるかを実行器と同じ部品（<see cref="SqliteTriggers"/>）で比べ、新しく読めなくなったビュー・
 /// 発火できなくなったトリガーを返す。SQL を解析しない（<c>SELECT *</c>・列の並びを書いたビュー・入れ子のビュー・大文字小文字の違い・
 /// トリガーの <c>NEW</c>／<c>OLD</c>・本文の問い合わせを SQLite がそのまま判定する）。利用者の DB には触れない。
@@ -23,8 +28,11 @@ namespace QuickER.Provider.Sqlite;
 /// 同じ同期が主キー・一意制約を変える形は写さない（実行器の同期の前後の比較が巻き戻して名指しする）。
 /// </para>
 /// <para>
-/// 写せない表（DB の外で登録した照合順序の列・同梱の SQLite に無い仮想表のモジュール）は飛ばすので、その上のビュー・トリガーは写しの中で
-/// 同期の前から読めず（発火できず）、数えない。アプリの関数を使うビュー・トリガーも同じ。どれも、実行器の同期の前後の比較が最後に拾う。
+/// 原文で写せない表（DB の外で登録した照合順序・関数を使う列の COLLATE・CHECK・生成列）は、名前だけの表で置いて索引だけを判定する
+/// （<see cref="SqliteReplay"/>）。その上のビュー・トリガーは、名前だけの表を置く前の写しで同期の前から読めず（発火できず）、数えない。
+/// 列を読めない表（同梱の SQLite に無い仮想表のモジュール）とアプリの関数を使うビュー・トリガーも同じ。どれも実行器の同期の前後の比較が
+/// 最後に拾う。例外：DB の外の関数の生成列を持つ表へ書くトリガーは、実行器の接続でも同期の前から書き込みの準備が断られて「前から壊れて
+/// いる」と数えるので、前後の比較も拾わない（src/QuickER.Provider.Sqlite/CLAUDE.md「計画の段のビュー・トリガー・索引の判定」）。
 /// </para>
 /// </remarks>
 internal sealed class SqliteLiveDependentCheck : ILiveDependentCheck
@@ -35,17 +43,20 @@ internal sealed class SqliteLiveDependentCheck : ILiveDependentCheck
     /// <summary>メモリの DB の接続文字列</summary>
     internal const string InMemory = "Data Source=:memory:";
 
-    private readonly IReadOnlyList<string> _tableSql;
+    private readonly IReadOnlyList<SqliteReplayTable> _tableSql;
     private readonly IReadOnlyList<SqliteIndexSql> _indexSql;
     private readonly IReadOnlyList<string> _viewSql;
     private readonly IReadOnlyList<SqliteTrigger> _triggers;
 
-    /// <param name="tableSql">表・仮想表の <c>CREATE</c> 文の原文（仮想表の付属表は含めない＝仮想表の作成で自動でできる）</param>
+    /// <param name="tableSql">
+    /// 写しの DB に置く表（表・仮想表の <c>CREATE</c> 文の原文と、原文で置けないときの名前だけの表の列。仮想表の付属表は含めない＝
+    /// 仮想表の作成で自動でできる）
+    /// </param>
     /// <param name="indexSql">索引の <c>CREATE INDEX</c> 文の原文と表（自動の索引は含めない）</param>
     /// <param name="viewSql">ビューの <c>CREATE VIEW</c> 文の原文</param>
     /// <param name="triggers">トリガー（ビューの INSTEAD OF のもの・取り込まない表のものも含む）</param>
     public SqliteLiveDependentCheck(
-        IReadOnlyList<string> tableSql,
+        IReadOnlyList<SqliteReplayTable> tableSql,
         IReadOnlyList<SqliteIndexSql> indexSql,
         IReadOnlyList<string> viewSql,
         IReadOnlyList<SqliteTrigger> triggers
@@ -59,10 +70,12 @@ internal sealed class SqliteLiveDependentCheck : ILiveDependentCheck
 
     /// <inheritdoc />
     public LiveDependentBreaks DependentsBrokenBy(
-        IReadOnlyDictionary<string, IReadOnlyList<string>?> tablesAfterSync
+        IReadOnlyDictionary<string, IReadOnlyList<string>?> tablesAfterSync,
+        IReadOnlySet<string> rebuiltTables
     )
     {
         ArgumentNullException.ThrowIfNull(tablesAfterSync);
+        ArgumentNullException.ThrowIfNull(rebuiltTables);
 
         if (
             tablesAfterSync.Count == 0
@@ -74,13 +87,26 @@ internal sealed class SqliteLiveDependentCheck : ILiveDependentCheck
 
         using var conn = SqliteFileConnections.Create(InMemory);
         conn.Open();
+        var unplaced = SqliteReplay.CreateOriginals(conn, _tableSql);
 
-        foreach (var sql in _tableSql)
+        foreach (var sql in _viewSql)
         {
             TryRun(conn, sql);
         }
 
-        // 同期の前に写しで作れた索引（DB の外の照合順序・アプリの関数・写せない表の索引は作れず、後で作れなくても数えない）
+        // 実行器と同じく外部キーの検査を切る（写しの子の表は、作り直しが暗黙に外す外部キーを持ったまま残るので、検査すると消した親を
+        // 参照する子へ書くトリガーを壊れたと数える）
+        Run(conn, "PRAGMA foreign_keys=OFF; PRAGMA legacy_alter_table=ON;");
+
+        // 同期の前のビュー・トリガーは、名前だけの表を置く前に測る（原文で置けない表の上のビュー・トリガーは同期の前から読めず
+        // 発火できないので数えない＝クラスの remarks の割り切り）
+        var viewsBefore = UnreadableViews(conn);
+        var triggersBefore = BrokenTriggers(conn, _triggers);
+
+        // 原文で置けない表は名前だけの表で置き、その表の索引も判定する（作り直しも列の属性を落とすので同じ答え）
+        SqliteReplay.CreateStandIns(conn, unplaced);
+
+        // 同期の前に写しで作れた索引（DB の外の照合順序・アプリの関数を使う索引は作れず、後で作れなくても数えない）
         var indexesBefore = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var index in _indexSql)
@@ -91,27 +117,44 @@ internal sealed class SqliteLiveDependentCheck : ILiveDependentCheck
             }
         }
 
-        foreach (var sql in _viewSql)
-        {
-            TryRun(conn, sql);
-        }
-
-        Run(conn, "PRAGMA legacy_alter_table=ON;");
-        var viewsBefore = UnreadableViews(conn);
-        var triggersBefore = BrokenTriggers(conn, _triggers);
-
         // 置き換えた表の索引を、作り直しと同じく原文で作り直す（消した表の索引は表と一緒に消えるので作り直さない）。同期の前に作れたのに
         // 作れない索引が、作り直しで断られる索引
         var indexes = new List<string>();
+        var droppedTables = new List<string>();
 
+        // 表名は計画の名前（図の名前）のまま引く：同期スクリプトも図の名前で表を引くので、前後に空白のある表名の表はそもそも同期に
+        // 届かない（それ以外の表は DB の名前と同じ）
         foreach (var (table, columns) in tablesAfterSync)
         {
-            TryRun(conn, ReplaceSql(conn, table, columns));
-
             if (columns is null)
             {
+                TryRun(conn, $"DROP TABLE {SqliteIdentifier.QuoteSimple(table)};");
+                droppedTables.Add(table);
                 continue;
             }
+
+            // DB の列のうち同期後の名前のどれかと同じ列（綴りは DB のまま。前後に空白のある列・取込が捨てた大文字小文字だけ違う双子の列も
+            // 残る）と、どの DB の列とも同じでない同期後の名前（足す列）
+            var existing = TableColumns(conn, table);
+            var kept = existing.Where(c => columns.Any(n => SchemaNames.AreSame(n, c))).ToList();
+            var added = columns.Where(n => !existing.Any(c => SchemaNames.AreSame(n, c))).ToList();
+
+            // 作り直さない表（製品の再構築の合成と同じ判定。列の削除はいつも作り直す）は、同期スクリプトと同じ列の追加の文で試す
+            if (!rebuiltTables.Contains(table))
+            {
+                // 列の属性・キー・索引はそのまま残る
+                foreach (var column in added)
+                {
+                    TryRun(
+                        conn,
+                        $"ALTER TABLE {SqliteIdentifier.QuoteSimple(table)} ADD COLUMN {SqliteIdentifier.QuoteSimple(column)};"
+                    );
+                }
+
+                continue;
+            }
+
+            TryRun(conn, ReplaceSql(conn, table, [.. kept, .. added]));
 
             foreach (var index in _indexSql.Where(i => SqliteIdentifier.NameEquals(i.Table, table)))
             {
@@ -122,9 +165,9 @@ internal sealed class SqliteLiveDependentCheck : ILiveDependentCheck
             }
         }
 
-        // 消した表のトリガーは表と一緒に消える（壊れたのではない）
+        // 消した表のトリガーは表と一緒に消える（壊れたのではない）。表は SQLite の規則（ASCII だけ大文字小文字を畳む）で照らす
         var remaining = _triggers
-            .Where(t => !(tablesAfterSync.TryGetValue(t.Table, out var columns) && columns is null))
+            .Where(t => !droppedTables.Any(d => SqliteIdentifier.NameEquals(t.Table, d)))
             .ToList();
 
         var views = UnreadableViews(conn)
@@ -143,20 +186,35 @@ internal sealed class SqliteLiveDependentCheck : ILiveDependentCheck
         );
     }
 
-    /// <summary>表を同期後の形に置き換える文（列名と、列がすべて残る主キー・一意制約・<c>null</c> は表の削除）</summary>
+    /// <summary>写しの DB の表の列名（仮想表の隠れた列を除く・cid の順）</summary>
+    private static List<string> TableColumns(SqliteConnection conn, string table)
+    {
+        var columns = new List<string>();
+        using var cmd = (SqliteCommand)
+            DbCommands.Create(
+                conn,
+                "SELECT name FROM pragma_table_xinfo($table) WHERE hidden <> 1 ORDER BY cid;",
+                DbCommands.DefaultTimeoutSeconds
+            );
+        cmd.Parameters.AddWithValue("$table", table);
+        using var reader = cmd.ExecuteReader();
+
+        while (reader.Read())
+        {
+            columns.Add(reader.GetString(0));
+        }
+
+        return columns;
+    }
+
+    /// <summary>表を作り直しの形に置き換える文（列名と、列がすべて残る主キー・一意制約。図に無い列の属性は落とす）</summary>
     private static string ReplaceSql(
         SqliteConnection conn,
         string table,
-        IReadOnlyList<string>? columns
+        IReadOnlyList<string> columns
     )
     {
         var quoted = SqliteIdentifier.QuoteSimple(table);
-
-        if (columns is null)
-        {
-            return $"DROP TABLE {quoted};";
-        }
-
         var probe = SqliteIdentifier.QuoteSimple(table + ProbeSuffix);
         var definition = string.Join(
             ", ",

@@ -134,9 +134,11 @@ public class SqliteSchemaImporter : ISchemaImporter
             .ConfigureAwait(false);
         var aux = await LoadAuxiliaryObjectsAsync(conn, tables, commandTimeoutSeconds, ct)
             .ConfigureAwait(false);
+        // 計画の段の判定の写しへ置く表（素のメモリの DB に原文で置けない表は、名前だけの表の列名も読む）
+        var replayTables = SqliteReplay.Prepare(conn, replayTableSql, commandTimeoutSeconds);
         var (liveDependentCheck, indexSql) = await LoadLiveDependentCheckAsync(
                 conn,
-                replayTableSql,
+                replayTables,
                 commandTimeoutSeconds,
                 ct
             )
@@ -145,9 +147,9 @@ public class SqliteSchemaImporter : ISchemaImporter
         // 作り直しを QuickER の接続では必ず止める物（DB の外で登録した照合順序・関数を使う索引・仮想の生成列）
         var rebuildBlockers = SqliteRebuildBlockers.Collect(
             conn,
-            replayTableSql,
+            replayTables,
             indexSql,
-            [.. tables.Values.Select(entry => (entry.Key, entry.Entity.TableName))],
+            [.. tables.Values.Select(entry => entry.Key)],
             commandTimeoutSeconds
         );
 
@@ -216,7 +218,7 @@ ORDER BY name;";
         Dictionary<string, bool> WithoutRowidByTable,
         List<SchemaImportWarning> Warnings,
         List<string> ExcludedNames,
-        List<string> ReplayTableSql
+        List<(string Name, string Sql)> ReplayTableSql
     )> LoadTablesAsync(SqliteConnection conn, int commandTimeoutSeconds, CancellationToken ct)
     {
         var tableTypes = await LoadTableTypesAsync(conn, commandTimeoutSeconds, ct)
@@ -232,7 +234,7 @@ ORDER BY name;";
 
         // ビュー・トリガーの判定（SqliteLiveDependentCheck）がメモリの DB へ写す表の原文。取り込まない表（仮想表・ドットを含む表・名前の衝突で
         // 捨てた表・双方向同期の補助の表）もビュー・トリガーが参照しうるので入れ、仮想表の付属表だけは入れない（仮想表の作成で自動でできる）
-        var replayTableSql = new List<string>();
+        var replayTableSql = new List<(string Name, string Sql)>();
         await using var cmd = DbCommands.Create(conn, TablesSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
@@ -253,7 +255,7 @@ ORDER BY name;";
                 )
             )
             {
-                replayTableSql.Add(reader.GetString(1));
+                replayTableSql.Add((name, reader.GetString(1)));
             }
 
             if (hasTableListEntry)
@@ -366,7 +368,7 @@ ORDER BY rowid;";
         List<SqliteIndexSql> Indexes
     )> LoadLiveDependentCheckAsync(
         SqliteConnection conn,
-        List<string> replayTableSql,
+        List<SqliteReplayTable> replayTables,
         int commandTimeoutSeconds,
         CancellationToken ct
     )
@@ -405,7 +407,7 @@ ORDER BY rowid;";
         return (
             viewSql.Count == 0 && triggers.Count == 0 && indexSql.Count == 0
                 ? null
-                : new SqliteLiveDependentCheck(replayTableSql, indexSql, viewSql, triggers),
+                : new SqliteLiveDependentCheck(replayTables, indexSql, viewSql, triggers),
             indexSql
         );
     }

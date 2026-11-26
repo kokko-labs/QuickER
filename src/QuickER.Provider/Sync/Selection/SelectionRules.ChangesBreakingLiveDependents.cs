@@ -50,7 +50,17 @@ internal static partial class SelectionRules
             return [];
         }
 
-        var whole = check.DependentsBrokenBy(ToTableChanges(changes));
+        // 作り直す表は、再構築の組み立てと同じ判定で決める（作り直す表だけ、判定器が作り直しの形で試す）。作り直しの展開を含む並びで
+        // 求める（作り直しの項目は展開した削除と追加で表を作り直す）。周の後に足す暗黙の項目（端が消える外部キーの削除）だけで
+        // 作り直す表は数えない（判定器はその表を作り直さない形で試し、照合順序に頼るトリガーは実行器の前後の比較が拾う）
+        var rebuilt = context.IsRebuildDialect
+            ? TableRebuilds.TableRebuildSynthesis.RebuiltTables(
+                state.ExpandedPostSync,
+                context.LiveSchema,
+                context.Capabilities
+            )
+            : EmptyTableSet;
+        var whole = check.DependentsBrokenBy(ToTableChanges(changes), rebuilt);
 
         if (whole.IsEmpty)
         {
@@ -64,7 +74,7 @@ internal static partial class SelectionRules
 
         foreach (var change in changes)
         {
-            var breaks = WithinWhole(check.DependentsBrokenBy(ToTableChanges([change])));
+            var breaks = WithinWhole(check.DependentsBrokenBy(ToTableChanges([change]), rebuilt));
 
             if (!breaks.IsEmpty)
             {
@@ -165,4 +175,9 @@ internal static partial class SelectionRules
             IEnumerable<(string Table, IReadOnlyList<string>? Columns)> tables
         ) => tables.ToDictionary(t => t.Table, t => t.Columns, SchemaNames.Comparer);
     }
+
+    /// <summary>作り直す表の無い集合（逐次 DDL の方言）</summary>
+    private static readonly IReadOnlySet<string> EmptyTableSet = new HashSet<string>(
+        SchemaNames.Comparer
+    );
 }

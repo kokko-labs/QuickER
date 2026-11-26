@@ -64,15 +64,12 @@ internal static class TableRebuildSynthesis
         // 削除を選んだ表は作り直さない（作り直してから消すのは無駄で、意味の無い喪失警告も出る）。
         // その表への作り直しの項目は、表ごと消えるので処理済みとして捨てる
         var droppedTables = postSync.Dropped.Tables;
-        var existingRebuildTables = selected
-            .Where(i =>
-                TableRebuildDialects.IsTriggerKind(i.Kind)
-                && !addedTables.Contains(SchemaNames.ToStoredForm(i.TableName))
-                && !droppedTables.Contains(SchemaNames.ToStoredForm(i.TableName))
-            )
-            .Select(i => SchemaNames.ToStoredForm(i.TableName))
-            .Where(liveByName.Contains)
-            .ToHashSet(SchemaNames.Comparer);
+        var existingRebuildTables = ExistingRebuildCandidates(
+            selected,
+            addedTables,
+            droppedTables,
+            liveByName
+        );
 
         // 処理済み（再構築へ畳んだ・表ごと消えるので捨てた）項目の集合（SchemaDiffItem は参照同一性で比較する）
         var folded = new HashSet<SchemaDiffItem>(ReferenceEqualityComparer.Instance);
@@ -113,6 +110,109 @@ internal static class TableRebuildSynthesis
         folded.UnionWith(existing.Folded);
 
         return new TableRebuildSynthesisResult(rebuilds, folded);
+    }
+
+    /// <summary>
+    /// 選んだ項目で作り直す既存の表（<see cref="Synthesize"/> が既存の表の再構築を作る表と同じ判定。表名は
+    /// <see cref="SchemaNames.ToStoredForm"/> した形・<see cref="SchemaNames.Comparer"/> で引く集合）
+    /// </summary>
+    /// <param name="postSync">項目の並びの同期後の事実（項目の並びと消える表を読む）</param>
+    /// <param name="liveSchema">DB の今の図</param>
+    /// <param name="capabilities">方言の宣言（識別子の上限を読む）</param>
+    /// <remarks>
+    /// 選んだ項目を外す規則（DB のビュー・トリガー・索引を壊す変更）が、作り直す表か（列の追加・表の削除だけで作り直さない表か）を
+    /// 判定器へ渡すために呼ぶ。作り直す理由になる項目が 1 つも解決できない表は作り直さない（<see cref="Synthesize"/> と同じ）。
+    /// 判定を写すと、実際のスクリプトは作り直すのに判定器が作り直さない形で試す（またはその逆の）食い違いが残る。
+    /// </remarks>
+    internal static IReadOnlySet<string> RebuiltTables(
+        PostSyncSchema postSync,
+        LiveSchema liveSchema,
+        SyncDialectCapabilities capabilities
+    )
+    {
+        var selected = postSync.Items;
+        var addedTables = selected
+            .Where(i => i.Kind == SchemaDiffKind.AddTable)
+            .Select(i => SchemaNames.ToStoredForm(i.TableName))
+            .ToHashSet(SchemaNames.Comparer);
+        var liveByName = liveSchema.Tables;
+        var rebuilt = new HashSet<string>(SchemaNames.Comparer);
+
+        foreach (
+            var table in ExistingRebuildCandidates(
+                selected,
+                addedTables,
+                postSync.Dropped.Tables,
+                liveByName
+            )
+        )
+        {
+            if (
+                liveByName.TryGet(table, out var live)
+                && ResolvedRebuildItems(selected, table, live, capabilities.IdentifierLengthLimit)
+                    is not null
+            )
+            {
+                rebuilt.Add(table);
+            }
+        }
+
+        return rebuilt;
+    }
+
+    /// <summary>
+    /// 既存の表の作り直しの候補（作り直す理由になる項目を選んだ live の表。新しい表と削除を選んだ表は除く）
+    /// </summary>
+    /// <remarks>
+    /// 新しい表を子とする外部キーの追加は表を作るだけの再構築へ畳むので除く。live に無い表（新しい表の追加は選ばずに、
+    /// その表への外部キーだけを選んだ形）は合成の土台が無いので、項目はセクションへ残してスキップのコメントに委ねる。
+    /// 削除を選んだ表は作り直さない（作り直してから消すのは無駄で、意味の無い喪失警告も出る）。
+    /// </remarks>
+    private static HashSet<string> ExistingRebuildCandidates(
+        IReadOnlyList<SchemaDiffItem> selected,
+        HashSet<string> addedTables,
+        IReadOnlySet<string> droppedTables,
+        NameLookup<Entity> liveByName
+    ) =>
+        selected
+            .Where(i =>
+                TableRebuildDialects.IsTriggerKind(i.Kind)
+                && !addedTables.Contains(SchemaNames.ToStoredForm(i.TableName))
+                && !droppedTables.Contains(SchemaNames.ToStoredForm(i.TableName))
+            )
+            .Select(i => SchemaNames.ToStoredForm(i.TableName))
+            .Where(liveByName.Contains)
+            .ToHashSet(SchemaNames.Comparer);
+
+    /// <summary>
+    /// 表 <paramref name="table"/> へ畳む項目のうち、合成で解決できるもの（作り直す理由になる項目が 1 つも解決できなければ
+    /// <c>null</c>＝その表は作り直さない）
+    /// </summary>
+    private static List<SchemaDiffItem>? ResolvedRebuildItems(
+        IReadOnlyList<SchemaDiffItem> selected,
+        string table,
+        Entity live,
+        IdentifierLengthLimit limit
+    )
+    {
+        // このテーブルに畳み込む項目（再構築トリガー種別＋列追加）を確定する
+        var candidates = selected
+            .Where(i =>
+                SchemaNames.AreSame(SchemaNames.ToStoredForm(i.TableName), table)
+                && (
+                    TableRebuildDialects.IsTriggerKind(i.Kind) || i.Kind == SchemaDiffKind.AddColumn
+                )
+            )
+            .ToList();
+
+        // 列の追加・削除・変更を先に当てた定義で、残りの項目が解決できるかを見る
+        var columnsOnly = live.Clone(preserveId: true);
+        TableRebuildDefinition.ApplyColumnChanges(columnsOnly, candidates);
+        var tableItems = candidates
+            .Where(i => IsResolvableInRebuild(i, live, columnsOnly, limit))
+            .ToList();
+
+        return tableItems.Any(i => TableRebuildDialects.IsTriggerKind(i.Kind)) ? tableItems : null;
     }
 
     /// <summary>選択済み AddTable を CreateOnly の再構築計画へ変換する（新規テーブルへの FK はインラインへ畳む）</summary>
@@ -210,25 +310,10 @@ internal static class TableRebuildSynthesis
                 continue;
             }
 
-            // このテーブルに畳み込む項目（再構築トリガー種別＋列追加）を確定する
-            var candidates = selected
-                .Where(i =>
-                    SchemaNames.AreSame(SchemaNames.ToStoredForm(i.TableName), table)
-                    && (
-                        TableRebuildDialects.IsTriggerKind(i.Kind)
-                        || i.Kind == SchemaDiffKind.AddColumn
-                    )
-                )
-                .ToList();
+            // 作り直す理由になる項目が 1 つも解決できなければ作り直さない（RebuiltTables と同じ判定）
+            var tableItems = ResolvedRebuildItems(selected, table, live, limit);
 
-            // 列の追加・削除・変更を先に当てた定義で、残りの項目が解決できるかを見る
-            var columnsOnly = live.Clone(preserveId: true);
-            TableRebuildDefinition.ApplyColumnChanges(columnsOnly, candidates);
-            var tableItems = candidates
-                .Where(i => IsResolvableInRebuild(i, live, columnsOnly, limit))
-                .ToList();
-
-            if (!tableItems.Any(i => TableRebuildDialects.IsTriggerKind(i.Kind)))
+            if (tableItems is null)
             {
                 continue;
             }

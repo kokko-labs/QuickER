@@ -64,10 +64,11 @@ internal static class SyncPlanFuzzNotGenerated
                 NotGenerated.Accepted(
                     "name-forms",
                     "SQLite のドットを含む表名・前後の空白・非 ASCII の名前・上限ちょうどの列名と制約名",
-                    "名前の形の網羅は名前の総当たり（DDL の往復）が受け持ち、利用者の付けた名前は縮めずに入口で断る（総当たりで作ると失敗が名前の入口の拒否だけになる）",
+                    "名前の形の網羅は名前の総当たり（DDL の往復）が受け持ち、利用者の付けた名前は縮めずに入口で断る（総当たりで作ると失敗が名前の入口の拒否だけになる）。"
+                        + "前後の空白・大文字小文字だけ違う双子の列と、SQLite の計画の段のビュー・トリガー・索引の判定との組は、軸の積の期待の行が受け持つ",
                     "`Name/DdlRoundTrip`・"
                         + Expectations
-                        + " の行 `plan-dotted-table-name-warns-only-where-declared`"
+                        + " の行 `plan-dotted-table-name-warns-only-where-declared` / `realdb-grid-name-form-*` / `realdb-grid-case-twin-table-trigger-*`"
                 ),
                 NotGenerated.Accepted(
                     "rename-table-keeping-unique-name",
@@ -85,8 +86,28 @@ internal static class SyncPlanFuzzNotGenerated
                 NotGenerated.Accepted(
                     "sqlite-external-collations-functions",
                     "SQLite の DB の外で登録した照合順序・関数を使う索引・生成列",
-                    "DB は QuickER の DDL と素の接続で作るので、アプリが登録した照合順序・関数を使う物を作れない（DB の事実）。作り直しの除外は決まった形の行が受け持つ",
-                    Expectations + " の行 `realdb-external-*`"
+                    "DB は QuickER の DDL と素の接続で作るので、アプリが登録した照合順序・関数を使う物を作れない（DB の事実）。作り直しの除外は決まった形の行が受け持ち、"
+                        + "写しの DB に原文で置けない表（列の COLLATE・CHECK・STORED の生成列）× 同じ表の索引・依存の物は軸の積の期待の行が受け持つ",
+                    Expectations + " の行 `realdb-external-*` / `realdb-grid-uncopyable-*`"
+                ),
+                NotGenerated.Pending(
+                    "sqlite-trigger-writing-generated-function-table",
+                    "DB の外の関数の生成列を持つ表へ書くトリガーと、そのトリガーが使う列の削除",
+                    "（未起動）",
+                    "計画の段は原文で写せない表の上のトリガーを判定せず、実行器の前後の比較も QuickER の接続でその表への書き込みの準備が同期の前から断られて「前から壊れている」と数えるので、"
+                        + "トリガーを壊したままコミットする（今の振る舞いを期待の行が固定する）。生成器は DB の外の関数を作れないので水準では埋まらない",
+                    Expectations
+                        + " の行 `realdb-grid-uncopyable-stored-generated-function-trigger-drop-read-column`"
+                ),
+                NotGenerated.Pending(
+                    "sqlite-rebuild-dropping-collation-relied-on-by-trigger",
+                    "照合順序つきのキーを的にする UPSERT のトリガー（的に COLLATE を書く）の表の、列の名前の集合を変えない作り直し（型の変更・列の追加と型の変更・"
+                        + "周の後に足す暗黙の外部キーの削除による作り直し）",
+                    "（未起動）",
+                    "作り直しは図に無い列の照合順序を落とすのでトリガーが壊れるが、計画の段の判定は列の名前の集合を変える項目だけを外し、暗黙の外部キーの削除だけで作り直す表は作り直すと数えないので、"
+                        + "作り直しは流れて実行器の前後の比較が巻き戻して名指しする。生成器は照合順序の列も UPSERT のトリガーも作らないので水準では埋まらない",
+                    Expectations
+                        + " の行 `realdb-grid-upsert-key-*-type-change-other-column-*` / `realdb-grid-vanishing-fk-rebuild-add-column-target-with-collate-rolls-back`"
                 ),
                 NotGenerated.Accepted(
                     "duplicate-unique-column-sets",
