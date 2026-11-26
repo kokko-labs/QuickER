@@ -110,14 +110,20 @@ internal static partial class SyncPlanExpectationRows
         {
             [QuickER.Dialects.DialectNames.SqlServer] =
                 RealSqlServerRowCount
-                + RealCrossDialectRowCount(QuickER.Dialects.DialectNames.SqlServer),
+                + RealCrossDialectRowCount(QuickER.Dialects.DialectNames.SqlServer)
+                + RealViewRowCount(QuickER.Dialects.DialectNames.SqlServer),
             [QuickER.Dialects.DialectNames.PostgreSql] =
                 RealPostgreSqlRowCount
-                + RealCrossDialectRowCount(QuickER.Dialects.DialectNames.PostgreSql),
+                + RealCrossDialectRowCount(QuickER.Dialects.DialectNames.PostgreSql)
+                + RealViewRowCount(QuickER.Dialects.DialectNames.PostgreSql),
             [QuickER.Dialects.DialectNames.MySql] =
-                RealMySqlRowCount + RealCrossDialectRowCount(QuickER.Dialects.DialectNames.MySql),
+                RealMySqlRowCount
+                + RealCrossDialectRowCount(QuickER.Dialects.DialectNames.MySql)
+                + RealViewRowCount(QuickER.Dialects.DialectNames.MySql),
             [QuickER.Dialects.DialectNames.Oracle] =
-                RealOracleRowCount + RealCrossDialectRowCount(QuickER.Dialects.DialectNames.Oracle),
+                RealOracleRowCount
+                + RealCrossDialectRowCount(QuickER.Dialects.DialectNames.Oracle)
+                + RealViewRowCount(QuickER.Dialects.DialectNames.Oracle),
             [QuickER.Dialects.DialectNames.Sqlite] =
                 RealSqliteRowCount + RealCrossDialectRowCount(QuickER.Dialects.DialectNames.Sqlite),
         };
@@ -389,6 +395,7 @@ internal static partial class SyncPlanExpectationRows
             .. RealPostgreSqlRows(),
             .. RealOracleRows(),
             .. RealCrossDialectRows(),
+            .. RealViewRows(),
         ];
 
     /// <summary>行を書き始める</summary>

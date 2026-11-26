@@ -625,7 +625,7 @@ SQLite rebuilds tables and uses its own order.
 - On SQL Server, PostgreSQL, MySQL, and Oracle, the sync does not check the views in the database (views are not part of the diagram), and the confirmation does not name them.
   What happens to a view that reads a column or table the sync drops depends on the database.
   PostgreSQL refuses the drop, and also a type change of a column the view reads, so the sync fails and rolls back.
-  SQL Server, MySQL, and Oracle run the drop, and the view fails the next time it is queried (SQL Server refuses the drop only for a view created `WITH SCHEMABINDING`).
+  SQL Server, MySQL, and Oracle run the drop, and the view fails the next time it is queried (SQL Server refuses the drop, and also a type change of a column the view reads, only for a view created `WITH SCHEMABINDING`).
   Before syncing such a change, change or drop the view in the database.
   On SQLite, a change that would leave a view unreadable is left out and named (see [SQLite diff sync](#sqlite-diff-sync-table-rebuilds))
 - The Oracle script and DDL can also be run by hand in SQL*Plus.
