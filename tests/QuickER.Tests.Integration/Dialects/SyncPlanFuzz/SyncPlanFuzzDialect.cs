@@ -1,6 +1,7 @@
 using System;
 using System.Data.Common;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.SqlClient;
@@ -9,12 +10,14 @@ using MySqlConnector;
 using Npgsql;
 using Oracle.ManagedDataAccess.Client;
 using QuickER.Dialects;
+using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Provider.MySql;
 using QuickER.Provider.Oracle;
 using QuickER.Provider.PostgreSql;
 using QuickER.Provider.Sqlite;
 using QuickER.Provider.SqlServer;
+using QuickER.Provider.Sync.Steps;
 
 namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 
@@ -50,7 +53,7 @@ internal enum FuzzTypeKind
 /// 図の DB への作成・データの投入・計算列の追加は、すべて方言の同期の実行器（<see cref="ISchemaSyncExecutor"/>）へ
 /// スクリプトとして渡す（方言ごとの文の区切り・トランザクションの扱いを総当たりの側で持たない）。
 /// </remarks>
-internal abstract class SyncPlanFuzzDialect
+internal abstract partial class SyncPlanFuzzDialect
 {
     /// <summary>
     /// 外部キーの両端の型の組（子の型・親の型）を DB が必ず断るか（静的な規則 R7・R8 が失敗を予言する組）
@@ -83,6 +86,14 @@ internal abstract class SyncPlanFuzzDialect
         string parentType
     )
     {
+        // MySQL の列ごとの文字集合の指定（形の行の latin1 の水準の DB 側の図だけが書く）は比べない：取込は列の型に文字集合を持ち帰らず、
+        // 同期は列の照合順序を読み直して保つ。生成器・形の行は文字集合の違う外部キーの組を作らない
+        if (dialect == DialectNames.MySql)
+        {
+            childType = MySqlCharacterSetClause().Replace(childType, string.Empty);
+            parentType = MySqlCharacterSetClause().Replace(parentType, string.Empty);
+        }
+
         if (capabilities.AreForeignKeyCompatibleTypes(childType, parentType))
         {
             return false;
@@ -121,6 +132,206 @@ internal abstract class SyncPlanFuzzDialect
                 is ForeignKeyTypeFamily.String
                     or ForeignKeyTypeFamily.FixedString
                     or ForeignKeyTypeFamily.VariableString;
+    }
+
+    /// <summary>
+    /// 外部キーを張ったままの列の型の変更を、外部キーを外し直す方言（<see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/>）の
+    /// DB が受けるか（静的な規則 R2 の外部キーの枝が予言しない変更）
+    /// </summary>
+    /// <param name="dialect">方言名（<see cref="DialectNames"/> の値）</param>
+    /// <param name="oldType">変える前の型</param>
+    /// <param name="newType">変えた後の型</param>
+    /// <remarks>
+    /// <para>出典は 2026-11-26 のコンテナでの実測（外部キーを張ったまま子の端・親の端の列を MODIFY。行の有無で結果は変わらない）。</para>
+    /// <list type="bullet">
+    ///   <item>MySQL：可変長の型（varchar・varbinary）を伸ばし、長さの頭のバイト数が変わらない変更だけを受ける（255 バイト以下どうしか
+    ///   256 バイト以上どうし。varchar は文字集合の最大のバイト数を掛ける＝コンテナの既定 utf8mb4 は 4 バイトなので 63 文字までが 1 バイトの頭）。
+    ///   varchar(20) → (30)・(63)、varchar(100) → (200)、varbinary(20) → (30) は受け、varchar(20) → (64)・(300)、縮小、char・binary の長さの
+    ///   変更、varchar と char の入れ替えは 1832 で断る（型の種類の変更・整数の幅は 3780）。</item>
+    ///   <item>SQL Server：外部キーを張ったままの列の型の変更をどれも断る（varchar(20) → (30) も Msg 5074）。NULL 許容だけの変更は受ける
+    ///   （R2 は型を変える文だけを見る）。</item>
+    /// </list>
+    /// </remarks>
+    public static bool AcceptsForeignKeyColumnChangeInPlace(
+        string dialect,
+        string oldType,
+        string newType,
+        SchemaColumnByteLength? oldColumn = null
+    )
+    {
+        if (dialect != DialectNames.MySql)
+        {
+            return false;
+        }
+
+        var before = MySqlStringTypePattern().Match(oldType);
+        var after = MySqlStringTypePattern().Match(newType);
+
+        if (
+            !before.Success
+            || !after.Success
+            || !before.Groups["base"].Value.StartsWith("var", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(
+                before.Groups["base"].Value,
+                after.Groups["base"].Value,
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+        {
+            return false;
+        }
+
+        // 列の文字集合：DB の列の事実（取込の事実の代わり）があればそれ、無ければ型の表記の指定、無ければコンテナの既定 utf8mb4。
+        // 変えた後の型が別の文字集合を書いていれば文字集合の変更（MySQL は外部キーを張ったまま断る）。書かなければ、同期は列の照合順序を
+        // 読み直して保つので文字集合も変わらない
+        var characterSet =
+            oldColumn?.CharacterSet
+            ?? NullIfEmpty(before.Groups["charset"].Value)
+            ?? MySqlDefaultCharacterSet;
+        var newCharacterSet = NullIfEmpty(after.Groups["charset"].Value);
+
+        if (
+            newCharacterSet is not null
+            && !string.Equals(newCharacterSet, characterSet, StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            return false;
+        }
+
+        var bytesPerUnit = BytesPerUnit(before.Groups["base"].Value, characterSet);
+        var oldBytes =
+            oldColumn?.OctetLength
+            ?? int.Parse(before.Groups["length"].Value, CultureInfo.InvariantCulture)
+                * bytesPerUnit;
+        var newBytes =
+            int.Parse(after.Groups["length"].Value, CultureInfo.InvariantCulture) * bytesPerUnit;
+
+        return newBytes > oldBytes && oldBytes <= 255 == newBytes <= 255;
+
+        static string? NullIfEmpty(string value) => value.Length == 0 ? null : value;
+    }
+
+    /// <summary>
+    /// MySQL の DB の文字列の列の最大バイト数と文字集合（取込が読む information_schema の事実の代わり。MySQL だけ・ほかの方言は空）
+    /// </summary>
+    /// <param name="dialect">方言名</param>
+    /// <param name="entities">DB 側の図の表（型の表記に <c>CHARACTER SET</c> を書いた列はその文字集合、書かない列はコンテナの既定 utf8mb4）</param>
+    public static IReadOnlyList<SchemaColumnByteLength> ColumnByteLengths(
+        string dialect,
+        IReadOnlyList<Entity> entities
+    )
+    {
+        if (dialect != DialectNames.MySql)
+        {
+            return [];
+        }
+
+        var facts = new List<SchemaColumnByteLength>();
+
+        foreach (var entity in entities)
+        {
+            foreach (var column in entity.Columns)
+            {
+                if (MySqlStringTypePattern().Match(column.DataType) is not { Success: true } type)
+                {
+                    continue;
+                }
+
+                var characterSet = type.Groups["charset"].Value is { Length: > 0 } declared
+                    ? declared
+                    : MySqlDefaultCharacterSet;
+                facts.Add(
+                    new SchemaColumnByteLength(
+                        entity.TableName,
+                        column.Name,
+                        characterSet,
+                        int.Parse(type.Groups["length"].Value, CultureInfo.InvariantCulture)
+                            * BytesPerUnit(type.Groups["base"].Value, characterSet)
+                    )
+                );
+            }
+        }
+
+        return facts;
+    }
+
+    /// <summary>コンテナの MySQL の既定の文字集合</summary>
+    private const string MySqlDefaultCharacterSet = "utf8mb4";
+
+    /// <summary>MySQL の長さの 1 単位のバイト数（binary 系は 1、文字列は文字集合の最大バイト数）</summary>
+    private static int BytesPerUnit(string baseType, string characterSet) =>
+        baseType.EndsWith("binary", StringComparison.OrdinalIgnoreCase)
+            ? 1
+            : characterSet.ToLowerInvariant() switch
+            {
+                "latin1" or "ascii" or "binary" => 1,
+                "utf8" or "utf8mb3" => 3,
+                _ => 4,
+            };
+
+    /// <summary>MySQL の型の表記の後ろの文字集合の指定</summary>
+    [GeneratedRegex(
+        @"\s+(?:CHARACTER\s+SET|CHARSET)\s+[A-Za-z0-9_]+\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex MySqlCharacterSetClause();
+
+    /// <summary>MySQL の長さを持つ文字列・バイト列の型の表記（基本の型・長さ・あれば文字集合）</summary>
+    [GeneratedRegex(
+        @"^\s*(?<base>varchar|varbinary|char|binary)\s*\(\s*(?<length>[0-9]+)\s*\)(?:\s+(?:CHARACTER\s+SET|CHARSET)\s+(?<charset>[A-Za-z0-9_]+))?\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    )]
+    private static partial Regex MySqlStringTypePattern();
+
+    /// <summary>
+    /// 参照アクション SET DEFAULT の外部キーを、子の列が NOT NULL で既定値を持たないとき DB が作らないか（静的な規則 R13）
+    /// </summary>
+    /// <param name="dialect">方言名（<see cref="DialectNames"/> の値）</param>
+    /// <remarks>
+    /// 出典は 2026-11-26 のコンテナでの実測。SQL Server は Msg 1760 で断る（ON DELETE・ON UPDATE のどちらも。NULL 許容で既定値の無い列を
+    /// NOT NULL にしてから付け直しても断り、列に DEFAULT 制約があれば受ける。外部キーを張ったままの NOT NULL 化は受ける）。
+    /// PostgreSQL・SQLite は作る（削除のときに断られるだけ）。MySQL・Oracle は SET DEFAULT を作らない（製品が実効値へ畳む）。
+    /// </remarks>
+    public static bool RefusesSetDefaultOnNotNullColumnWithoutDefault(string dialect) =>
+        dialect == DialectNames.SqlServer;
+
+    /// <summary>
+    /// 網の普段の種と決定的な行・網羅の行で、製品の計画器がこの方言の計画へ足す文の理由（<see cref="ImplicitStepReason"/>）。
+    /// 能力の組の網の空振りの検査が、宣言した理由を持つ計画が 1 つ以上あり、宣言に無い理由を持つ計画が無いことを表明し、5 方言の宣言の
+    /// 和が列挙の全値と一致することを DB なしの行が表明する
+    /// </summary>
+    /// <param name="dialect">方言名（<see cref="DialectNames"/> の値）</param>
+    /// <remarks>
+    /// テーブル再構築の方言（SQLite）は足す文を表の作り直しへ畳むので持たない。主キー・一意制約の外し直しは列の変更で鍵の制約を外し直す
+    /// 方言（<see cref="SyncDialectCapabilities.AlterColumnRequiresKeyConstraintRebuild"/>＝SQL Server）だけ、主キーが置き換える一意制約は
+    /// 主キーと同じ列集合の一意制約を持てない逐次 DDL の方言（Oracle）だけ。2026-11-26 の網の普段の 5,000 種で数えた。
+    /// </remarks>
+    public static IReadOnlySet<ImplicitStepReason> ImplicitStepReasonsPlannedFor(string dialect)
+    {
+        HashSet<ImplicitStepReason> common =
+        [
+            ImplicitStepReason.PrimaryKeyColumnNotNull,
+            ImplicitStepReason.VanishingForeignKey,
+            ImplicitStepReason.VanishingUniqueConstraint,
+            ImplicitStepReason.ForeignKeyRebuild,
+        ];
+
+        return dialect switch
+        {
+            DialectNames.Sqlite => new HashSet<ImplicitStepReason>(),
+            DialectNames.SqlServer =>
+            [
+                .. common,
+                ImplicitStepReason.PrimaryKeyRebuild,
+                ImplicitStepReason.UniqueConstraintRebuild,
+            ],
+            DialectNames.Oracle =>
+            [
+                .. common,
+                ImplicitStepReason.UniqueConstraintReplacedByPrimaryKey,
+            ],
+            _ => common,
+        };
     }
 
     /// <summary>外部キーの型の事実（<see cref="RefusesForeignKeyTypes"/>）で見分ける型の系統</summary>
@@ -252,7 +463,15 @@ internal abstract class SyncPlanFuzzDialect
     public virtual bool UniqueAllowsRepeatedNull => true;
 
     /// <summary>
-    /// 網の決定的な行（形の行）が、前寄せの組から一意制約の作り直しを取り下げる形を必ず出すか（MySQL は形の行 d4-mysql-265 の
+    /// 一意制約が、構成列の全部が NULL の行だけを検査の外に置き、一部が NULL の行は残りの列で比べるか（Oracle。2026-11-26 の実測：
+    /// uq(v) の下の (v, w) = (NULL, 5) の 2 行に (v, w) の一意制約を足すと ORA-02299、PostgreSQL・MySQL・SQLite は受ける）。
+    /// 真の方言では、NULL 許容の列の一意制約の上位集合の一意制約を、その列が NULL で残りが同じ行のある表に足す文を、既存の行で断られる
+    /// 文として宣言する
+    /// </summary>
+    public virtual bool UniqueComparesPartiallyNullKeys => false;
+
+    /// <summary>
+    /// 網の決定的な行（形の行）が、前寄せの組から一意制約の作り直しを取り下げる形を必ず出すか（MySQL は形の行の必ず含む行 ah2-two-readded-uniques の
     /// 一意制約の双子を両方作り直す形）。真の方言では、決定的な行を流した網の関係 N4 が取り下げのあるケースを 1 つ以上照らしたことを表明する
     /// </summary>
     public virtual bool ScenarioRowsWithdrawUniqueRebuild => false;
@@ -723,6 +942,9 @@ internal sealed class OracleSyncPlanFuzzDialect(OracleContainerFixture fixture)
     : SyncPlanFuzzDialect
 {
     public override string Name => DialectNames.Oracle;
+
+    /// <inheritdoc/>
+    public override bool UniqueComparesPartiallyNullKeys => true;
 
     public override bool AllowDuplicateForeignKeys => false;
 

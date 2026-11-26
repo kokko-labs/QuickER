@@ -9,7 +9,7 @@ internal static partial class RebuildDeclarations
 {
     /// <summary>
     /// 列を変える間、その列を構成列に持つ一意制約は外れていなければならない（列の変更でキーの制約の外し直しを要する方言＝
-    /// <see cref="QuickER.Dialects.SyncDialectCapabilities.AlterColumnRequiresKeyConstraintRebuild"/>）
+    /// <see cref="SyncDialectCapabilities.AlterColumnRequiresKeyConstraintRebuild"/>）
     /// </summary>
     /// <remarks>
     /// 構成列を名前へ解決できない一意制約は対象にしない（外す文を書けない）。型を変えない列の変更（NULL 許容だけ）も含む。
@@ -51,7 +51,7 @@ internal static partial class RebuildDeclarations
 
     /// <summary>
     /// 列を変える間、その列を構成列に持つ主キーは外れていなければならない（列の変更でキーの制約の外し直しを要する方言＝
-    /// <see cref="QuickER.Dialects.SyncDialectCapabilities.AlterColumnRequiresKeyConstraintRebuild"/>）
+    /// <see cref="SyncDialectCapabilities.AlterColumnRequiresKeyConstraintRebuild"/>）
     /// </summary>
     private static IEnumerable<LiveConstraint> RequirePrimaryKeysOffAlteredColumns(
         SchedulingInput input

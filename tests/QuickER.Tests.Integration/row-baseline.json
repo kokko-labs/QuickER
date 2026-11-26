@@ -471,7 +471,6 @@
       "realdb-fk-referential-action-change-default-selection-changes-nothing",
       "realdb-fk-referential-action-change-selected-rebuilds",
       "realdb-fk-reorder-referenced-composite-pk-rebuilds-in-new-order",
-      "realdb-fk-set-default-on-not-null-warns-with-default-commits",
       "realdb-fk-set-default-on-not-null-warns-without-default-fails",
       "realdb-fk-set-null-child-not-null-keeps-that-fk",
       "realdb-fk-set-null-child-type-and-not-null-fails-5074",

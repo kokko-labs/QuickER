@@ -14,6 +14,8 @@ namespace QuickER.Provider.Sync.Selection;
 /// <remarks>
 /// 主キーの名前は取り込まない（同期は実行時に逆引きする）ので数えない。端が消える外部キー・構成列が消える一意制約は、同期が追加より前の
 /// 段で暗黙に外すので残る側に数えない（<see cref="PostSyncDifferenceItems.InjectVanishingForeignKeyDrops"/>・<see cref="PostSyncDifferenceItems.InjectVanishingUniqueConstraintDrops"/>）。
+/// 選んだ主キーの変更が置き換える一意制約（主キーと同じ列集合の一意制約を持てない逐次 DDL の方言）も、同期が暗黙に外すので数えない
+/// （判定は <see cref="PostSyncDifferenceItems.IsReplacedByPrimaryKey"/> を暗黙の削除と共有する）。
 /// 名前は図全体から求めた実効名で、比べ方は <see cref="SchemaNames"/> の規則。
 /// </remarks>
 internal sealed class RemainingLiveConstraints
@@ -43,6 +45,9 @@ internal sealed class RemainingLiveConstraints
         var droppedForeignKeys = expanded.DroppedForeignKeys;
         var droppedObjects = expanded.Dropped;
         var liveNames = liveSchema.ForeignKeyNames(limit);
+        var replacesUniques = PostSyncDifferenceItems.ReplacesUniqueConstraintsWithPrimaryKey(
+            capabilities
+        );
 
         foreach (var fk in liveSchema.ForeignKeys)
         {
@@ -70,7 +75,9 @@ internal sealed class RemainingLiveConstraints
                 continue;
             }
 
-            remaining._foreignKeys.Add((child, parent, name, PairSet(fk.ColumnPairs)));
+            remaining._foreignKeys.Add(
+                (child, parent, name, PlanIdentity.ForeignKeyPairSet(fk.ColumnPairs))
+            );
         }
 
         foreach (var entity in liveSchema.Entities)
@@ -91,6 +98,10 @@ internal sealed class RemainingLiveConstraints
                         out var columns
                     )
                     && !droppedObjects.TouchesColumns(table, columns)
+                    && !(
+                        replacesUniques
+                        && PostSyncDifferenceItems.IsReplacedByPrimaryKey(expanded, table, columns)
+                    )
                     && !droppedUniques.Contains(
                         PlanIdentity.UniqueConstraintKey(table, constraint.Name, columns)
                     )
@@ -146,7 +157,7 @@ internal sealed class RemainingLiveConstraints
             return [];
         }
 
-        var pairSet = PairSet(pairs);
+        var pairSet = PlanIdentity.ForeignKeyPairSet(pairs);
         return _foreignKeys
             .Where(f =>
                 SchemaNames.AreSame(f.Child, child)
@@ -155,15 +166,4 @@ internal sealed class RemainingLiveConstraints
             )
             .Select(f => $"{f.Child}.{f.Name}");
     }
-
-    /// <summary>列の組の集合のキー（並びを見ない。名前は <see cref="SchemaNames.Key"/> で畳む）</summary>
-    private static string PairSet(IEnumerable<ForeignKeyColumnNamePair> pairs) =>
-        string.Concat(
-            pairs
-                .Select(p =>
-                    SignatureText.Part(SchemaNames.Key(p.ParentColumn))
-                    + SignatureText.Part(SchemaNames.Key(p.ChildColumn))
-                )
-                .Order(StringComparer.Ordinal)
-        );
 }

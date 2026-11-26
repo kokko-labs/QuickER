@@ -44,6 +44,8 @@ public static class TestDialectCapabilities
             ReferencedKeyRequiresSameColumnOrder = true,
             ForeignKeyAllowsStringLengthDifference = false,
             ForeignKeyAllowsIntegerWidthDifference = false,
+            ForeignKeyColumnWidening = ForeignKeyColumnWidening.Accepted,
+            UniqueConstraintComparesPartiallyNullKeys = false,
             ConstraintNameScope = ConstraintNameScope.None,
             AllowsDuplicateForeignKeyDefinitions = true,
             TransactionalDdl = true,

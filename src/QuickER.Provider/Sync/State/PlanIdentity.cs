@@ -117,4 +117,23 @@ internal static class PlanIdentity
                 parentTable,
                 limit
             );
+
+    /// <summary>
+    /// 外部キーの列の組の対応の集合のキー（並びを見ない。名前は <see cref="SchemaNames.Key"/> で畳み、部分は <see cref="SignatureText.Part"/>
+    /// で書いてつなぐ）
+    /// </summary>
+    /// <remarks>
+    /// 区切り文字だけでつなぐと、区切り文字（<c>&gt;</c>・<c>,</c>）を含む列名の組が別の組と同じキーになる。
+    /// 外部キーの追加の並び（<see cref="Scheduling.ForeignKeyAddOrder"/>）と、同期後も残る DB の制約の定義の重なり
+    /// （<see cref="Selection.RemainingLiveConstraints"/>）が共有する。
+    /// </remarks>
+    internal static string ForeignKeyPairSet(IEnumerable<ForeignKeyColumnNamePair> pairs) =>
+        string.Concat(
+            pairs
+                .Select(p =>
+                    SignatureText.Part(SchemaNames.Key(p.ParentColumn))
+                    + SignatureText.Part(SchemaNames.Key(p.ChildColumn))
+                )
+                .Order(System.StringComparer.Ordinal)
+        );
 }

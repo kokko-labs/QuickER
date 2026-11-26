@@ -340,7 +340,9 @@ internal static class SyncPlanFuzzRunner
             selected,
             plan,
             capabilities,
-            liveSchema.DataFailures
+            liveSchema.DataFailures,
+            before.ColumnDefaults,
+            before.ColumnByteLengths
         );
 
         // 静的な規則のうち DB に依らない規則（警告の正しさ W1・W2・前寄せ M1・新しい外部キーの追加と付け直しの並び）の違反は、実 DB の
@@ -412,6 +414,19 @@ internal static class SyncPlanFuzzRunner
             );
             outcome.Violations.AddRange(losses);
             outcome.Notes.AddRange(notes);
+
+            // 表明 1c: 暗黙コミットの方言で、失敗を予告する警告が型の食い違い（ForeignKeyColumnTypeMismatch）だけなら、選んだ列の
+            // 変更の列の型は同期の前のまま（警告の文言は「DB は変わりません」と約束する。計画は断られる文を先頭へ移して何も変えずに
+            // 失敗させる）。規則は TypeMismatchPromiseBroken
+            if (
+                !capabilities.TransactionalDdl
+                && !IsDeclaredDataFailure(result, liveSchema.DataFailures, statementwise: true)
+            )
+            {
+                outcome.Violations.AddRange(
+                    TypeMismatchPromiseBroken(before, failedState, selected, plan, capabilities)
+                );
+            }
 
             // 突き合わせ（D9）：静的な規則が「失敗の文より前に外し、後ろで付け直す制約」を予言したら、実 DB でも表明 1b の消失が
             // 出ているかを数える（測るだけ）
@@ -1074,6 +1089,73 @@ internal static class SyncPlanFuzzRunner
 
     /// <summary>既存の行で断られうる文の警告が名指しした制約の消失を受け入れた注</summary>
     public const string WarnedRowDependentChangeNote = "warned-row-dependent-change-exempt";
+
+    /// <summary>表明 1c の違反の頭</summary>
+    public const string TypeMismatchPromisePrefix =
+        "altered column changed although only a type mismatch warning predicted the failure:";
+
+    /// <summary>
+    /// 表明 1c：暗黙コミットの方言の失敗した実行で、失敗を予告する警告（<see cref="SyncPlanStaticRules.NonPredictingWarnings"/> 以外）が
+    /// どれも <see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/> なら、選んだ列の変更の列の型が同期の前のままか（変わった列を
+    /// 違反の文にする）
+    /// </summary>
+    /// <param name="before">同期の前に取り込んだ DB</param>
+    /// <param name="failedState">失敗の後に取り込み直した DB</param>
+    /// <param name="selected">選んだ項目（計画が外した項目は除いたもの）</param>
+    /// <param name="plan">計画</param>
+    /// <param name="capabilities">方言の能力（型は <see cref="SyncDialectCapabilities.AreSameType"/> で比べる）</param>
+    /// <remarks>
+    /// 型の食い違いの警告は「外部キーが張られたままでは DB が型を変えられない列の変更は失敗します（DB は変わりません）」と約束する。
+    /// 計画は残す外部キーに阻まれて必ず断られる文を先頭へ移して何も変えずに失敗させる（src/QuickER.Provider/CLAUDE.md「外部キーの暗黙の
+    /// 外し直し」）。前寄せが通る文を移すと、断られる文の前に別の列の変更が確定する（3 回目の効果測定の PE1：MySQL の子の端の
+    /// 可変長の文字列を伸ばす変更）。外した制約は名指しの警告があると表明 1b が受け入れるので、列の型で見る。呼び出し側は
+    /// ケースが宣言したデータの失敗を除く（その失敗は型の食い違いと関係なく断られる）。
+    /// </remarks>
+    internal static IEnumerable<string> TypeMismatchPromiseBroken(
+        SchemaImportResult before,
+        SchemaImportResult failedState,
+        IReadOnlyCollection<SchemaDiffItem> selected,
+        SyncPlan plan,
+        SyncDialectCapabilities capabilities
+    )
+    {
+        var predicting = plan
+            .Warnings.Where(w => !SyncPlanStaticRules.NonPredictingWarnings.Contains(w.Kind))
+            .ToList();
+
+        if (
+            predicting.Count == 0
+            || predicting.Any(w => w.Kind != SyncPlanWarningKind.ForeignKeyColumnTypeMismatch)
+        )
+        {
+            yield break;
+        }
+
+        foreach (
+            var item in selected.Where(i =>
+                i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName is not null
+            )
+        )
+        {
+            var beforeType = TypeOf(before, item.TableName, item.ColumnName!);
+            var afterType = TypeOf(failedState, item.TableName, item.ColumnName!);
+
+            if (
+                beforeType is not null
+                && afterType is not null
+                && !capabilities.AreSameType(beforeType, afterType)
+            )
+            {
+                yield return $"{TypeMismatchPromisePrefix} {item.TableName}.{item.ColumnName} {beforeType} -> {afterType}";
+            }
+        }
+
+        static string? TypeOf(SchemaImportResult state, string table, string column) =>
+            state
+                .Entities.FirstOrDefault(e => SchemaNames.AreSame(e.TableName, table))
+                ?.Columns.FirstOrDefault(c => SchemaNames.AreSame(c.Name, column))
+                ?.DataType;
+    }
 
     /// <summary>
     /// 表明 1b：失敗した実行の後で取り込み直した DB について、同期の前にあった制約（外部キー・一意制約・主キー）のうち、

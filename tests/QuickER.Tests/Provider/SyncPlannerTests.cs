@@ -226,6 +226,163 @@ public class SyncPlannerTests
             .Be(left.Equals(right, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// 外部キーを張ったままの列の型の変更を DB が受けるかの判定（宣言 <see cref="SyncDialectCapabilities.ForeignKeyColumnWidening"/> の 3 つの値と、
+    /// 列の最大バイト数の事実）
+    /// </summary>
+    /// <remarks>
+    /// 製品の計画が判定を通すのは、列の変更で外部キーを外し直す暗黙コミットの方言（MySQL＝<c>WithinLengthPrefix</c>）の前寄せだけで、Refused・
+    /// Accepted と事実の無い列の腕は実方言の計画からは届かない（SQL Server はトランザクションの方言なので前寄せしない）。腕ごとの答えをここで
+    /// 固定する。MySQL の腕の計画の側は、形の行の水準（<c>DivergentEndsStringLength*</c>・台帳の項目 pe1）が網と実 DB で見る。
+    /// </remarks>
+    [Theory(
+        DisplayName = "外部キーを張ったまま列を伸ばす変更: 宣言の 3 つの値と列の最大バイト数で判定する"
+    )]
+    // Refused：どの変更も受けない
+    [InlineData(ForeignKeyColumnWidening.Refused, "varchar(20)", "varchar(30)", 80L, false)]
+    // Accepted：同じ可変長の型で長さだけを伸ばす変更を、事実が無くても受ける
+    [InlineData(ForeignKeyColumnWidening.Accepted, "varchar(20)", "varchar(30)", null, true)]
+    [InlineData(
+        ForeignKeyColumnWidening.Accepted,
+        "VARCHAR2(20 CHAR)",
+        "varchar2(300 char)",
+        null,
+        true
+    )]
+    [InlineData(ForeignKeyColumnWidening.Accepted, "varbinary(16)", "varbinary(32)", null, true)]
+    [InlineData(ForeignKeyColumnWidening.Accepted, "varchar(30)", "varchar(20)", null, false)]
+    [InlineData(ForeignKeyColumnWidening.Accepted, "varchar(20)", "varchar(20)", null, false)]
+    [InlineData(ForeignKeyColumnWidening.Accepted, "char(20)", "char(30)", null, false)]
+    [InlineData(ForeignKeyColumnWidening.Accepted, "varchar(20)", "nvarchar(30)", null, false)]
+    [InlineData(ForeignKeyColumnWidening.Accepted, "varchar(20)", "char(30)", null, false)]
+    [InlineData(
+        ForeignKeyColumnWidening.Accepted,
+        "VARCHAR2(20 CHAR)",
+        "VARCHAR2(30 BYTE)",
+        null,
+        false
+    )]
+    [InlineData(ForeignKeyColumnWidening.Accepted, "int", "bigint", null, false)]
+    [InlineData(ForeignKeyColumnWidening.Accepted, "varchar(max)", "varchar(max)", null, false)]
+    // WithinLengthPrefix：1 単位のバイト数は「今の最大バイト数 ÷ 今の長さ」。長さの頭（255 バイト以下は 1 バイト・256 以上は 2 バイト）が同じなら受ける
+    [InlineData(
+        ForeignKeyColumnWidening.WithinLengthPrefix,
+        "varchar(20)",
+        "varchar(30)",
+        80L,
+        true
+    )]
+    [InlineData(
+        ForeignKeyColumnWidening.WithinLengthPrefix,
+        "varchar(20)",
+        "varchar(63)",
+        80L,
+        true
+    )]
+    [InlineData(
+        ForeignKeyColumnWidening.WithinLengthPrefix,
+        "varchar(20)",
+        "varchar(64)",
+        80L,
+        false
+    )]
+    [InlineData(
+        ForeignKeyColumnWidening.WithinLengthPrefix,
+        "varchar(64)",
+        "varchar(100)",
+        256L,
+        true
+    )]
+    [InlineData(
+        ForeignKeyColumnWidening.WithinLengthPrefix,
+        "varchar(40)",
+        "varchar(70)",
+        40L,
+        true
+    )]
+    [InlineData(
+        ForeignKeyColumnWidening.WithinLengthPrefix,
+        "varchar(40)",
+        "varchar(70)",
+        160L,
+        false
+    )]
+    [InlineData(
+        ForeignKeyColumnWidening.WithinLengthPrefix,
+        "varchar(200)",
+        "varchar(255)",
+        200L,
+        true
+    )]
+    [InlineData(
+        ForeignKeyColumnWidening.WithinLengthPrefix,
+        "varchar(200)",
+        "varchar(256)",
+        200L,
+        false
+    )]
+    [InlineData(
+        ForeignKeyColumnWidening.WithinLengthPrefix,
+        "varbinary(100)",
+        "varbinary(200)",
+        100L,
+        true
+    )]
+    // WithinLengthPrefix の保守側：事実の無い列・割り切れない事実・文字集合を変える変更・縮める変更は受けない
+    [InlineData(
+        ForeignKeyColumnWidening.WithinLengthPrefix,
+        "varchar(20)",
+        "varchar(30)",
+        null,
+        false
+    )]
+    [InlineData(
+        ForeignKeyColumnWidening.WithinLengthPrefix,
+        "varchar(20)",
+        "varchar(30)",
+        81L,
+        false
+    )]
+    [InlineData(
+        ForeignKeyColumnWidening.WithinLengthPrefix,
+        "varchar(20)",
+        "varchar(30) CHARACTER SET latin1",
+        80L,
+        false
+    )]
+    [InlineData(
+        ForeignKeyColumnWidening.WithinLengthPrefix,
+        "varchar(40) CHARACTER SET latin1",
+        "varchar(70) CHARACTER SET latin1",
+        40L,
+        true
+    )]
+    [InlineData(
+        ForeignKeyColumnWidening.WithinLengthPrefix,
+        "varchar(30)",
+        "varchar(20)",
+        120L,
+        false
+    )]
+    public void WidensForeignKeyColumnInPlace_FollowsDeclarationAndByteLength(
+        ForeignKeyColumnWidening widening,
+        string oldType,
+        string newType,
+        long? oldOctetLength,
+        bool expected
+    )
+    {
+        var capabilities = TestDialectCapabilities.Neutral with
+        {
+            ForeignKeyColumnWidening = widening,
+        };
+
+        capabilities
+            .WidensForeignKeyColumnInPlace(oldType, newType, oldOctetLength)
+            .Should()
+            .Be(expected);
+    }
+
     /// <summary>外部キーの両端に並べられる型の判定（幅だけの違いを許すのは整数型どうしで、Oracle は小数部の無い NUMBER）</summary>
     [Theory(DisplayName = "外部キーの両端の型: 幅の違いを許すのは整数型どうしだけ")]
     [InlineData("int", "bigint", true)]

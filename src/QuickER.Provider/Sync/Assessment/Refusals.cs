@@ -220,21 +220,27 @@ internal static class Refusals
 
             var column = ColumnId.Of(table, alter.Column.Name);
 
-            // 残す外部キーの列の型を変える文（外し直しの方言は外部キー単位で同期後の両端、ほかの方言はその列を含む組の相手の端の今の型）
+            // 残す外部キーの列の型を変える文（外し直しの方言は外部キー単位で同期後の両端、ほかの方言はその列を含む組の相手の端の今の型）。
+            // 外し直しの方言でも、外部キーを張ったまま DB が受ける変更（宣言 ForeignKeyColumnWidening・取込の列の最大バイト数）は断られない
             if (
                 typeDecidingColumns.TryGetValue(column, out var newType)
                 && (
                     capabilities.AlterColumnRequiresForeignKeyRebuild
-                        ? retained.Any(fk =>
-                            Touches(fk, column)
-                            && PlanFacts.HasPostSyncTypeMismatch(
-                                fk.Relationship,
-                                fk.Child,
-                                fk.Parent,
-                                typeDecidingColumns,
-                                capabilities
-                            )
+                        ? !capabilities.WidensForeignKeyColumnInPlace(
+                            liveColumn.DataType,
+                            newType,
+                            OctetLengthOf(table, liveColumn.Name)
                         )
+                            && retained.Any(fk =>
+                                Touches(fk, column)
+                                && PlanFacts.HasPostSyncTypeMismatch(
+                                    fk.Relationship,
+                                    fk.Child,
+                                    fk.Parent,
+                                    typeDecidingColumns,
+                                    capabilities
+                                )
+                            )
                         : retained.Any(fk =>
                             OtherEnds(fk, column)
                                 .Any(other =>
@@ -264,6 +270,15 @@ internal static class Refusals
                 ? new CertainRefusal([index], null, 0)
                 : null;
         }
+
+        // DB の今の列の最大バイト数（取込の事実。無ければ null）
+        long? OctetLengthOf(string table, string column) =>
+            facts
+                .Context?.ColumnByteLengths.FirstOrDefault(b =>
+                    SchemaNames.AreSame(SchemaNames.ToStoredForm(b.TableName), table)
+                    && SchemaNames.AreSame(b.ColumnName, column)
+                )
+                ?.OctetLength;
 
         // 外部キーの組の両端を変える列の変更の組（並びの順で最初のもの）
         CertainRefusal? PairChangeRefusal()
@@ -420,7 +435,8 @@ internal static class Refusals
                             liveTable,
                             table,
                             add.Columns,
-                            typeDecidingColumns
+                            typeDecidingColumns,
+                            excludeAllNullableUniques: false
                         )
                         ? $"PRIMARY KEY {table} ({string.Join(", ", add.Columns)})"
                         : null;
@@ -431,7 +447,8 @@ internal static class Refusals
                             liveTable,
                             table,
                             add.Columns,
-                            typeDecidingColumns
+                            typeDecidingColumns,
+                            capabilities.UniqueConstraintComparesPartiallyNullKeys
                         )
                         ? $"UNIQUE {table} ({string.Join(", ", add.Columns)})"
                         : null;

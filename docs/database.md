@@ -472,8 +472,10 @@ Only omitted defaults and aliases the database does not remember are aligned; ty
 Where the table shows an action is missing or not applied, the diff compares it as `NO ACTION`, and the DDL and the sync script create the foreign key without the clause and add a comment saying so.
 MySQL (InnoDB) accepts `SET DEFAULT` in `ON DELETE` and `ON UPDATE` but does not apply it: deleting the parent row fails, as with `NO ACTION`.
 SQL Server cannot create a `SET DEFAULT` foreign key when a NOT NULL referencing column has no DEFAULT constraint (error 1762).
-The diagram does not carry column defaults, so the DDL adds a comment before such a foreign key, and the sync names the foreign keys it adds or recreates in the confirmation dialog.
-It does not stop the sync, because the foreign key is created when the database column has a DEFAULT constraint.
+The diagram does not carry column defaults, so the DDL adds a comment before such a foreign key.
+The sync names such foreign keys in the confirmation dialog: those it adds or recreates, and those it drops and re-adds around another change (making the referencing column NOT NULL, for example).
+A referencing column that has a DEFAULT constraint in the database is not named, because the database accepts the foreign key.
+Naming does not stop the sync.
 A `SET NULL` foreign key on a NOT NULL referencing column cannot set the column to NULL.
 SQL Server and MySQL refuse to create it (errors 1761 and 1830), so the sync leaves out such foreign keys that you add or recreate, and does not drop and re-add one that the database already has.
 In MySQL, a column change that makes the referencing column of such a foreign key NOT NULL then fails before any foreign key is dropped.
@@ -615,10 +617,14 @@ SQLite rebuilds tables and uses its own order.
 - On SQL Server, PostgreSQL, and SQLite the script runs in a transaction and rolls back on failure.
   On MySQL / Oracle, DDL is implicitly committed by design, so a warning explains that a mid-script failure can leave changes partially applied.
   On these dialects a statement that the sync knows will be refused (a column change, a primary key drop, or a unique constraint drop that a foreign key kept by the sync blocks; when the sync drops every key that can support such a foreign key, those drops) runs first, so the database stays unchanged.
+  A column change that the database accepts with the foreign key in place (lengthening a variable-length column where the table below says so) is not counted as refused.
+  On MySQL this depends on the column's maximum length in bytes, which the sync reads on import.
+  A column without that fact, or a change of character set, counts as refused.
   The sync does not read the rows, so it cannot tell beforehand whether the rows refuse a statement: a new primary key or unique constraint on columns with duplicate values, `NOT NULL` on a column that holds NULL, a type shorter or narrower than the values, a `NOT NULL` column added to a table that has rows (where the table below says so), or a change to a column of a table with computed columns (where the table below says so).
   For such a statement, the confirmation names every constraint that the script drops before it and adds back after it, or drops for a later change (a foreign key or unique constraint whose column or table the sync removes, a unique constraint the new primary key replaces).
   If the rows refuse the statement, the named constraints stay dropped (partially applied).
   A new primary key or unique constraint is not counted when its columns include the columns of a primary key or unique constraint the database already has, so reordering the primary key is never named.
+  Where the table below says a wider unique constraint can be refused by rows that are NULL in the old key, a new unique constraint is still counted when the unique constraint it includes has only columns that allow NULL.
   Among the drops run together, the drops of a unique constraint that is re-created (a named constraint whose columns change) and of a primary key that is replaced run last, so a refused sync leaves that key in its old form.
   When two or more of those keys are re-created, one of them would be lost whatever the order, so one unique constraint re-creation is left out of the script and named in the confirmation; the unique constraint left in place keeps supporting the foreign key, and the other changes still run.
   Foreign key additions run in this order: foreign keys re-added as they were dropped, foreign keys re-created with a changed definition, new foreign keys, and those whose referenced columns are not proven to be a key, so a new foreign key that existing rows refuse does not stop the re-adds before it
@@ -663,11 +669,13 @@ Foreign keys that rely on the changed primary key (they refer to the same column
 | Referencing columns must follow the order of the referenced key | ✅ | — | ✅ | — | — |
 | String types differing only in length are allowed on the two ends | — (error 1753) | ✅ | ✅ | ✅ (same length unit) | ✅ |
 | Integer types differing only in width are allowed on the two ends | — (error 1778) | ✅ | — (error 3780) | ✅ (`NUMBER` without decimals) | ✅ |
+| A variable-length column can be lengthened with its foreign key in place | — (error 5074) | ✅ | ✅ (while the length prefix stays 1 byte up to 255 bytes, or 2 bytes from 256) | ✅ | ✅ |
 | A failed re-add can leave the foreign key dropped | — | — | ✅ | ✅ | — |
 | Changing the type kind of a column needs the column to be empty | — | — | — | ✅ (ORA-01439) | — |
 | Lowering the precision, scale or fractional seconds of a column needs the column to be empty | — | — | — | ✅ (ORA-01440, ORA-30082) | — |
 | Adding a `NOT NULL` column needs the table to be empty | ✅ | ✅ | — (filled with the type's implicit default) | ✅ (ORA-01758) | ✅ |
 | Changing a column that a computed column uses is refused | ✅ | ✅ (type changes) | — | ✅ (ORA-54031) | — (the table is rebuilt) |
+| A wider unique constraint can be refused by rows that are NULL in an existing unique constraint | — (NULLs count as equal) | — | — | ✅ (ORA-02299) | — |
 
 A primary key dropped and re-added by a key column change (see the table above) is named `PK_{table}`.
 On MySQL, a foreign key of the table whose primary key changes is also dropped and re-created when its columns lead the old primary key, because the primary key cannot be dropped while it is the only index supporting that foreign key.

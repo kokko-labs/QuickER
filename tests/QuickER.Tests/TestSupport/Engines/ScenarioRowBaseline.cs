@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace QuickER.Tests.TestSupport.Engines;
 
@@ -28,6 +29,12 @@ public enum RowTagKind
 
     /// <summary>文書の特性の固定（文書に定めが無い今の振る舞いを写す行。TestSupport/CLAUDE.md「次元表と網羅」の運用 4）</summary>
     DocumentedCharacteristic,
+
+    /// <summary>
+    /// 低の指摘の受け入れ（分岐の軸の台帳に載せない低の指摘を直した行。理由は「指摘の番号（記録）：軸を水準で交差させない理由」の形で書く。
+    /// 例「PB1（review-measure3 v4）：Oracle だけの暗黙の削除の数え方。軸は既存の名前の重なりの行が受ける」）
+    /// </summary>
+    ReviewFinding,
 }
 
 /// <summary>外す方言・実装先と理由</summary>
@@ -68,7 +75,7 @@ public sealed record RowTag(RowTagKind Kind, string Text)
     {
         if (Kind == RowTagKind.Unspecified || !Enum.IsDefined(Kind))
         {
-            yield return "札の種別が無い（理由には種別を付ける：改名・新機能の行・既存の水準の対照・文書の特性の固定）";
+            yield return "札の種別が無い（理由には種別を付ける：改名・新機能の行・既存の水準の対照・文書の特性の固定・低の指摘）";
         }
 
         if (string.IsNullOrWhiteSpace(Text))
@@ -81,6 +88,10 @@ public sealed record RowTag(RowTagKind Kind, string Text)
         )
         {
             yield return $"札の理由が具体的でない（{Text}）";
+        }
+        else if (Kind == RowTagKind.ReviewFinding && !ReviewFindingReason.IsMatch(Text.Trim()))
+        {
+            yield return $"低の指摘の札の理由が「指摘の番号（記録）：軸を水準で交差させない理由」の形でない（{Text}）";
         }
 
         foreach (var exclusion in Excluded)
@@ -95,6 +106,12 @@ public sealed record RowTag(RowTagKind Kind, string Text)
             }
         }
     }
+
+    /// <summary>低の指摘の札の理由の形（指摘の番号・全角の括弧の記録・全角のコロンの後ろに空でない理由）</summary>
+    private static readonly Regex ReviewFindingReason = new(
+        @"^[A-Z]+[0-9]+（[^（）]+）：\S.*$",
+        RegexOptions.CultureInvariant
+    );
 
     /// <inheritdoc/>
     public override string ToString() =>

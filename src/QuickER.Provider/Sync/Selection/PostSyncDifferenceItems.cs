@@ -3,6 +3,7 @@ using QuickER.Provider.Resources;
 using QuickER.Provider.Sync.Assessment;
 using QuickER.Provider.Sync.State;
 using QuickER.Provider.Sync.Steps;
+using QuickER.Provider.Sync.TableRebuilds;
 
 namespace QuickER.Provider.Sync.Selection;
 
@@ -357,7 +358,7 @@ internal static class PostSyncDifferenceItems
             {
                 if (
                     !UniqueConstraintNaming.TryResolveColumnNames(live, constraint, out var columns)
-                    || !PlanFacts.IsSameColumnSet(columns, newKey)
+                    || !IsReplacedByPrimaryKey(postSync, table, columns)
                     || explicitlyDropped.Contains(
                         PlanIdentity.UniqueConstraintKey(table, constraint.Name, columns)
                     )
@@ -388,6 +389,38 @@ internal static class PostSyncDifferenceItems
 
         return drops.Count == 0 ? selected : [.. drops, .. selected];
     }
+
+    /// <summary>
+    /// この方言で、選んだ主キーの変更が新しい主キーと同じ列集合の live の一意制約を暗黙に外すか（主キーと同じ列集合の一意制約を持てない
+    /// 逐次 DDL の方言＝Oracle。再構築の方言は合成がその一意制約を省く）
+    /// </summary>
+    /// <param name="capabilities">方言の宣言</param>
+    internal static bool ReplacesUniqueConstraintsWithPrimaryKey(
+        SyncDialectCapabilities capabilities
+    ) =>
+        !TableRebuildDialects.Requires(capabilities)
+        && !capabilities.SupportsUniqueConstraintOnPrimaryKey;
+
+    /// <summary>
+    /// この表の、この列集合の live の一意制約を、選んだ主キーの変更の新しい主キーが置き換えるか（新しい主キーと同じ列集合。
+    /// <see cref="ReplacesUniqueConstraintsWithPrimaryKey"/> の方言でだけ意味を持つ）
+    /// </summary>
+    /// <param name="postSync">選んだ項目の同期後の事実（主キーの変更はどの時点の並びから求めても同じ）</param>
+    /// <param name="table">正規化した表名</param>
+    /// <param name="columns">一意制約の構成列</param>
+    /// <remarks>
+    /// 暗黙の削除を足す <see cref="InjectUniqueConstraintsReplacedByPrimaryKey"/> と、同期後も残る DB の制約
+    /// （<see cref="RemainingLiveConstraints"/>＝この一意制約を残る側に数えない）が共有する。写すと、暗黙に外す一意制約を残る側に数え、
+    /// 同じ名前の一意制約・外部キーの追加を偽の理由で外す。
+    /// </remarks>
+    internal static bool IsReplacedByPrimaryKey(
+        PostSyncSchema postSync,
+        string table,
+        IReadOnlyList<string> columns
+    ) =>
+        postSync.PrimaryKeyChanges.TryGetValue(table, out var newKey)
+        && newKey.Count > 0
+        && PlanFacts.IsSameColumnSet(columns, newKey);
 
     /// <summary>live の外部キーを外す暗黙の DropForeignKey 項目を作る（差分計算の FK 差分と同じフィールド規則）</summary>
     private static SchemaDiffItem BuildImplicitForeignKeyDrop(

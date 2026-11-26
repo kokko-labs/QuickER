@@ -68,6 +68,8 @@ public sealed class SqliteProvider : IDatabaseProvider
             ReferencedKeyRequiresSameColumnOrder = false,
             ForeignKeyAllowsStringLengthDifference = true,
             ForeignKeyAllowsIntegerWidthDifference = true,
+            ForeignKeyColumnWidening = ForeignKeyColumnWidening.Accepted,
+            UniqueConstraintComparesPartiallyNullKeys = false,
             ConstraintNameScope = ConstraintNameScope.None,
             AllowsDuplicateForeignKeyDefinitions = true,
             TransactionalDdl = true,

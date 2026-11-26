@@ -429,3 +429,15 @@ public static class SchemaImportWarnings
 /// <param name="ColumnName">列名（図での名前）</param>
 /// <param name="Expression">既定値の式（DB が返す表記のまま）</param>
 public sealed record SchemaColumnDefault(string TableName, string ColumnName, string Expression);
+
+/// <summary>取り込んだ文字列・バイト列の列の最大バイト数の事実（MySQL だけが埋める）</summary>
+/// <param name="TableName">テーブル名（図での名前）</param>
+/// <param name="ColumnName">列名（図での名前）</param>
+/// <param name="CharacterSet">列の文字集合（バイト列の列は null）</param>
+/// <param name="OctetLength">最大バイト数（DB が返す値）</param>
+public sealed record SchemaColumnByteLength(
+    string TableName,
+    string ColumnName,
+    string? CharacterSet,
+    long OctetLength
+);

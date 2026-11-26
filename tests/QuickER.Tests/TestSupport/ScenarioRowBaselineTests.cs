@@ -57,6 +57,51 @@ public sealed class ScenarioRowBaselineTests
             Recorded,
             "札の理由が具体的でない"
         ),
+        ["new-row-with-review-finding"] = (
+            [
+                Table(
+                    Entry("a"),
+                    Entry(
+                        "c",
+                        RowTag.Reason(
+                            RowTagKind.ReviewFinding,
+                            "PB1（review-measure3 v4）：Oracle だけの暗黙の削除の数え方。軸は既存の名前の重なりの行が受ける（自己検査）"
+                        )
+                    )
+                ),
+            ],
+            Recorded,
+            null
+        ),
+        ["new-row-review-finding-without-record-number"] = (
+            [
+                Table(
+                    Entry("a"),
+                    Entry(
+                        "c",
+                        RowTag.Reason(
+                            RowTagKind.ReviewFinding,
+                            "Oracle だけの暗黙の削除の数え方。軸は既存の名前の重なりの行が受ける（自己検査）"
+                        )
+                    )
+                ),
+            ],
+            Recorded,
+            "低の指摘の札の理由が「指摘の番号（記録）：軸を水準で交差させない理由」の形でない"
+        ),
+        ["new-row-review-finding-without-axis-reason"] = (
+            [
+                Table(
+                    Entry("a"),
+                    Entry(
+                        "c",
+                        RowTag.Reason(RowTagKind.ReviewFinding, "PB1（review-measure3 v4）：")
+                    )
+                ),
+            ],
+            Recorded,
+            "低の指摘の札の理由が「指摘の番号（記録）：軸を水準で交差させない理由」の形でない"
+        ),
         ["new-row-unknown-ledger-id"] = (
             [Table(Entry("a"), Entry("c", RowTag.Ledger("missing")))],
             Recorded,

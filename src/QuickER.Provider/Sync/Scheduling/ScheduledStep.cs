@@ -16,8 +16,8 @@ internal sealed record ScheduledStep(SyncStep Step)
     public Relationship? Relationship { get; init; }
 
     /// <summary>
-    /// 外部キーを付ける文の参照先の表の定義（参照先の表の同期後の主キーが分からないときに、列の組をこの表のキーへそろえる。
-    /// ほかの文は null）
+    /// 外部キーの文の参照先の表の定義（外部キーを付ける文で、参照先の表の同期後の主キーが分からないときに、列の組をこの表のキーへ
+    /// そろえるのに読む。外部キーを外す文にも付くことがあるが読まない。ほかの文は null）
     /// </summary>
     public Entity? ParentDefinition { get; init; }
 }

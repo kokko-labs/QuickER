@@ -329,7 +329,7 @@ public enum SyncPlanWarningKind
 /// </param>
 /// <param name="Detail">
 /// 補足（外部キー制約名など。無ければ空文字）。
-/// <see cref="SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey"/> では壊れうる外部キーの制約名。
+/// <see cref="SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey"/> では「子の表.壊れうる外部キーの制約名」。
 /// <see cref="SyncPlanWarningKind.ForeignKeyColumnTypeMismatch"/> では外し直さない外部キー、または計画から外した追加・作り直しの外部キーの制約名。
 /// <see cref="SyncPlanWarningKind.TableRebuildDropsColumnAttribute"/> では失われる属性の SQL キーワードを
 /// カンマ区切りで並べたもの（<c>AUTOINCREMENT, DEFAULT</c> 等）。SQL の綴りそのものなので言語中立に扱える。

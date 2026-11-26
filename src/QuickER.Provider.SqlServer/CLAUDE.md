@@ -84,4 +84,4 @@
 
 - 外部キーは参照する列の並びが参照先のキーの並びと一致しないと作れない（Msg 1776・`ReferencedKeyRequiresSameColumnOrder`）。
 - 外部キーの両端は文字列の長さも一致が要る（1753）。長さだけ違う外部キーは DDL が `ForeignKeyStatementNotes` で注記する。
-- SET DEFAULT は子の列に DEFAULT 制約が無いと作れない（1762）。NOT NULL の子の列への SET DEFAULT は計画が警告し、実行は止めない。固定は実 SQL Server の行 `realdb-fk-set-default-on-not-null-warns-without-default-fails`／`realdb-fk-set-default-on-not-null-warns-with-default-commits`。
+- SET DEFAULT は子の列に DEFAULT 制約が無いと作れない（1762）。NOT NULL で DB の既定値の無い子の列への SET DEFAULT（選んだ追加と、列の変更・主キーの変更の暗黙の付け直し）は計画が警告し、実行は止めない（DEFAULT 制約のある列は DB が受けるので警告しない）。固定は実 SQL Server の行 `realdb-fk-set-default-on-not-null-warns-without-default-fails`／`realdb-fk-set-default-on-not-null-with-default-commits-without-warning` と `plan-set-default-not-null-child-*`（2 つの腕 × 既定値の有無）。

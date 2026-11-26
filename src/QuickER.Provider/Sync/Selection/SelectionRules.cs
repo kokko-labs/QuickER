@@ -11,7 +11,7 @@ namespace QuickER.Provider.Sync.Selection;
 /// 規則が自分で求め直さない。
 /// </para>
 /// <para>
-/// 規則を流すのは <see cref="SyncPlanner"/> の除外の周だけ（規則をこの表の外から呼ばない）。周は表の順に規則を流し、規則が返した
+/// 規則を流すのは除外の周（<see cref="PlanSelection.ExcludeUntilStable"/>）だけ（規則をこの表の外から呼ばない）。周は表の順に規則を流し、規則が返した
 /// 取り下げを次の規則の前に当てる。
 /// </para>
 /// </remarks>

@@ -65,6 +65,8 @@ public sealed class SqlServerProvider : IDatabaseProvider
             ReferencedKeyRequiresSameColumnOrder = true,
             ForeignKeyAllowsStringLengthDifference = false,
             ForeignKeyAllowsIntegerWidthDifference = false,
+            ForeignKeyColumnWidening = ForeignKeyColumnWidening.Refused,
+            UniqueConstraintComparesPartiallyNullKeys = false,
             ConstraintNameScope = ConstraintNameScope.Schema,
             AllowsDuplicateForeignKeyDefinitions = true,
             TransactionalDdl = true,

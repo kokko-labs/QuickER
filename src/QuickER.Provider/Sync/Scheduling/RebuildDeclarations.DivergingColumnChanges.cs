@@ -9,12 +9,12 @@ internal static partial class RebuildDeclarations
     /// <summary>
     /// 外部キーの両端の列の型を 1 列ずつ変える間、片側だけ変えた途中の状態で両端の型が並べられない外部キーは外れていなければならない
     /// （列の変更で外部キーの外し直しを要しない方言＝
-    /// <see cref="QuickER.Dialects.SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/> が偽）
+    /// <see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/> が偽）
     /// </summary>
     /// <remarks>
     /// <para>
     /// 対象は、ある列の組の両端とも型がこの同期で決まり（<see cref="State.PostSyncSchema.TypeDecidingColumns"/>）、「新しい子 × 古い親」か
-    /// 「古い子 × 新しい親」のどちらかが <see cref="QuickER.Dialects.SyncDialectCapabilities.AreForeignKeyCompatibleTypes"/> で
+    /// 「古い子 × 新しい親」のどちらかが <see cref="SyncDialectCapabilities.AreForeignKeyCompatibleTypes"/> で
     /// 並べられない外部キー。列の変更の順はどちらもありうるので、どちらかが並べられなければ対象にする。
     /// </para>
     /// <para>

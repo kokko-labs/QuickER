@@ -187,6 +187,12 @@ internal static partial class SyncPlanExpectationRows
                         e.After.Count("fk *", 1);
                     })
                 ),
+            // SET DEFAULT の外部キーを付ける文の 2 つの腕（選んだ追加・列の変更の暗黙の付け直し）× 子の列の DB の既定値の有無
+            // （3 回目の効果測定の PE3・台帳の項目 pe3）
+            SetDefaultArmRow(readd: false, withDefault: false),
+            SetDefaultArmRow(readd: false, withDefault: true),
+            SetDefaultArmRow(readd: true, withDefault: false),
+            SetDefaultArmRow(readd: true, withDefault: true),
             // ドットを含む表名
             Row(
                     "plan-dotted-table-name-warns-only-where-declared",
@@ -554,4 +560,120 @@ internal static partial class SyncPlanExpectationRows
         string dialect,
         int count
     ) => e.For(dialect, d => d.Diff.Count("Set*Description *", count));
+
+    /// <summary>
+    /// SET DEFAULT の外部キーを付ける文の腕と子の列の DB の既定値の組の行（SQL Server だけ。3 回目の効果測定の PE3・台帳の項目 pe3）
+    /// </summary>
+    /// <param name="readd">
+    /// 真なら、DB にある SET DEFAULT の外部キーの NULL 許容の子の列を NOT NULL にする（列の変更が外部キーを外して付け直す＝暗黙の付け直しの腕）。
+    /// 偽なら、NOT NULL の子の列へ SET DEFAULT の外部キーを足す（選んだ追加の腕）
+    /// </param>
+    /// <param name="withDefault">子の列に DB の DEFAULT 制約があるか（あれば SQL Server は SET DEFAULT を受け、警告しない）</param>
+    private static ExpectationRow SetDefaultArmRow(bool readd, bool withDefault)
+    {
+        var arm = readd ? "readd" : "selected-add";
+        var shape = withDefault ? "with-default-does-not-warn" : "without-default-warns";
+        var row = Row(
+            $"plan-set-default-not-null-child-{arm}-{shape}",
+            (
+                readd
+                    ? "同期: DB の SET DEFAULT の外部キーの子の列を NOT NULL にすると、列の変更が外部キーを付け直す"
+                    : "同期: NOT NULL の子の列へ SET DEFAULT の外部キーを足す"
+            )
+                + (
+                    withDefault
+                        ? "が、子の列に DB の既定値があるので SQL Server も受けて警告しない"
+                        : "。子の列に DB の既定値が無いので SQL Server は断り、計画が警告する"
+                ),
+            DialectNames.SqlServer
+        );
+
+        row = readd
+            ? row.Live(s =>
+                {
+                    s.Table("parent", S.Pk("id", "int"));
+                    s.Table("child", S.Pk("id", "int"), S.Nullable("parent_id", "int"));
+                    s.Fk("parent", "child", "FK_child_parent", ("id", "parent_id")).OnDelete =
+                        ForeignKeyReferentialAction.SetDefault;
+                })
+                .TargetFromLive(s => s.Col("child", "parent_id").IsNullable = false)
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AlterColumn))
+            : row.Live(s =>
+                {
+                    s.Table("parent", S.Pk("id", "int"));
+                    s.Table("child", S.Pk("id", "int"), S.NotNull("parent_id", "int"));
+                })
+                .TargetFromLive(s =>
+                    s.Fk("parent", "child", "FK_child_parent", ("id", "parent_id")).OnDelete =
+                        ForeignKeyReferentialAction.SetDefault
+                )
+                .Select(items => RealScenarios.SelectKinds(items, SchemaDiffKind.AddForeignKey));
+
+        if (withDefault)
+        {
+            // 網は取込の代わりに既定値の事実を計画の文脈へ渡し、実 DB は DDL の後（取込の前）に DEFAULT 制約を足す
+            row = row.Context(w => new SyncPlanContext
+            {
+                LiveEntities = w.Live.Entities,
+                LiveRelationships = w.Live.Relationships,
+                ColumnDefaults = [new SchemaColumnDefault("child", "parent_id", "((0))")],
+            });
+        }
+
+        return row.Expect(e =>
+            {
+                if (withDefault)
+                {
+                    e.Warnings.Absent("SetDefaultOnNotNullColumn*");
+                }
+                else
+                {
+                    e.Warnings.Count("SetDefaultOnNotNullColumn*", 1)
+                        .Warnings.Single(SetDefaultWarning);
+                }
+            })
+            .OnRealDatabase(r =>
+            {
+                if (withDefault)
+                {
+                    r.Setup(
+                        "ALTER TABLE [child] ADD CONSTRAINT [DF_child_parent_id] DEFAULT 0 FOR [parent_id];"
+                    );
+                }
+
+                r.Expect(e =>
+                {
+                    if (withDefault)
+                    {
+                        e.Outcome.Exact("committed");
+                        e.After.Count("fk *", 1);
+                    }
+                    else
+                    {
+                        e.Outcome.Exact("failed: *");
+                        e.Unchanged();
+                    }
+                });
+            })
+            .Tagged(
+                RowTag
+                    .Ledger("pe3")
+                    .Except(
+                        DialectNames.PostgreSql,
+                        "SetDefaultRequiresColumnDefault が偽で、PostgreSQL は既定値の無い NOT NULL の列への SET DEFAULT を作る（警告の門の外）"
+                    )
+                    .Except(
+                        DialectNames.Sqlite,
+                        "SetDefaultRequiresColumnDefault が偽で、SQLite は既定値の無い NOT NULL の列への SET DEFAULT を作る（警告の門の外）"
+                    )
+                    .Except(
+                        DialectNames.MySql,
+                        "SupportsSetDefaultAction が偽で、MySQL は SET DEFAULT の外部キーを作らない（製品は実効値へ畳む）"
+                    )
+                    .Except(
+                        DialectNames.Oracle,
+                        "SupportsSetDefaultAction が偽で、Oracle は SET DEFAULT の外部キーを作らない（製品は実効値へ畳む）"
+                    )
+            );
+    }
 }

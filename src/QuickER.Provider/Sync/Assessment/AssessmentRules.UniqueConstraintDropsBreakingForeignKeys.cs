@@ -98,17 +98,20 @@ internal static partial class AssessmentRules
                     continue;
                 }
 
+                // Detail は「子の表.外部キーの名前」（外部キーの名前が表ごとの方言で、別の子の表の同じ名前の外部キーを 1 行に畳まない）
                 warnings.Add(
                     new SyncPlanWarning(
                         SyncPlanWarningKind.UniqueConstraintDropMayBreakForeignKey,
                         parentTable,
-                        PlanIdentity.ResolveForeignKeyName(
-                            fk.Relationship,
-                            SchemaDiffService.NormalizeTable(fk.Child),
-                            parentTable,
-                            limit,
-                            liveSchema
-                        )
+                        childTable
+                            + "."
+                            + PlanIdentity.ResolveForeignKeyName(
+                                fk.Relationship,
+                                childTable,
+                                parentTable,
+                                limit,
+                                liveSchema
+                            )
                     )
                 );
             }

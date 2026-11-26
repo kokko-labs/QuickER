@@ -1033,6 +1033,9 @@ internal sealed class SyncPlanScenarioCase(
 /// <summary>決定的な行の DB 側の図を作る部品（列の値は生成器と同じ規則で作る）</summary>
 internal sealed class ScenarioLive(FuzzLiveSchema live, SyncPlanFuzzDialect dialect)
 {
+    /// <summary>方言の部品（測った事実の宣言を読む）</summary>
+    public SyncPlanFuzzDialect Dialect => dialect;
+
     /// <summary>表を足す（行数は既定で 3）</summary>
     public Entity Table(string name, int rows = 3)
     {
@@ -1067,9 +1070,11 @@ internal sealed class ScenarioLive(FuzzLiveSchema live, SyncPlanFuzzDialect dial
         int length,
         bool pk = false,
         bool nullable = false,
-        Func<int, string?>? value = null
-    ) =>
-        Add(
+        Func<int, string?>? value = null,
+        string? characterSet = null
+    )
+    {
+        var column = Add(
             table,
             name,
             FuzzTypeKind.VarChar,
@@ -1078,6 +1083,15 @@ internal sealed class ScenarioLive(FuzzLiveSchema live, SyncPlanFuzzDialect dial
             nullable,
             value ?? (r => dialect.StringLiteral($"{name}{r}"))
         );
+
+        // 列ごとの文字集合（MySQL の型の表記。参照する子の列は Ref が親の型の表記を写す）
+        if (characterSet is not null)
+        {
+            column.DataType += $" CHARACTER SET {characterSet}";
+        }
+
+        return column;
+    }
 
     /// <summary>
     /// 親の主キー（<paramref name="referenced"/> を渡せばその列＝一意制約の列）を参照する列と外部キーを足す（参照する列が
@@ -1115,6 +1129,12 @@ internal sealed class ScenarioLive(FuzzLiveSchema live, SyncPlanFuzzDialect dial
                     : parentRows == 0 ? null
                     : parentInfo.Values[(r - 1) % parentRows]
             );
+            // 文字集合を書いた親の列は、子の列も同じ型の表記にする（文字集合の違う外部キーを MySQL は作らない＝3780）
+            if (key[p].DataType.Contains(" CHARACTER SET ", StringComparison.OrdinalIgnoreCase))
+            {
+                column.DataType = key[p].DataType;
+            }
+
             column.IsForeignKey = true;
             pairs.Add(new RelationshipColumnPair(key[p].Id, column.Id));
             first ??= column;
@@ -1274,6 +1294,33 @@ internal sealed class ScenarioTarget(
     {
         var target = Column(table, column);
         target.DataType = dialect.TypeName(kind, length);
+        mutations.Add($"alter type {table}.{column} -> {target.DataType}");
+    }
+
+    /// <summary>
+    /// 文字列の列の長さだけを変える（型の表記の最初の括弧の数を置き換え、括弧の後ろの指定＝文字集合などは保つ）
+    /// </summary>
+    /// <remarks>
+    /// 網の DB 側の図は型の表記に <c>CHARACTER SET</c> を書くが、実 DB の取込は書かない。どちらでも「DB の今の型の長さだけを変えた型」に
+    /// なるよう、目標の図（DB 側の図の写し）の表記をそのまま書き換える。
+    /// </remarks>
+    public void SetStringLength(string table, string column, int length)
+    {
+        var target = Column(table, column);
+        var open = target.DataType.IndexOf('(', StringComparison.Ordinal);
+        var close = target.DataType.IndexOf(')', StringComparison.Ordinal);
+
+        if (open < 0 || close < open)
+        {
+            throw new InvalidOperationException(
+                $"{table}.{column} has no length to change: {target.DataType}"
+            );
+        }
+
+        target.DataType =
+            target.DataType[..(open + 1)]
+            + length.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            + target.DataType[close..];
         mutations.Add($"alter type {table}.{column} -> {target.DataType}");
     }
 

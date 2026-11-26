@@ -1,4 +1,5 @@
 using System.Reflection;
+using AwesomeAssertions;
 using QuickER.Dialects;
 using QuickER.Provider;
 using QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
@@ -51,6 +52,124 @@ public sealed class BranchAxisLedgerTests
         var problems = BindingProblems(BranchAxisLedgerEntries.Items, output).ToList();
 
         NotGeneratedGuard.Verify("分岐の軸の台帳の結びが生成の表と合わない", problems);
+    }
+
+    [Theory(
+        DisplayName = "[台帳] 網の指摘のセルの照合：未修正はセルの違反が項目の Pending に当たり、修正済みはセルで証拠が出る（自己検査）"
+    )]
+    [InlineData("unfixed-violation-received-by-pending", "unfixed", "violation", "pending", null)]
+    [InlineData(
+        "unfixed-ran-without-violations",
+        "unfixed",
+        "clean",
+        "pending",
+        "switch the status to fixed"
+    )]
+    [InlineData(
+        "unfixed-violation-without-pending-of-item",
+        "unfixed",
+        "violation",
+        "other-item",
+        "no pending known failure"
+    )]
+    [InlineData(
+        "unfixed-violation-pending-of-other-slice",
+        "unfixed",
+        "violation",
+        "other-slice",
+        "no pending known failure"
+    )]
+    [InlineData(
+        "unfixed-violation-accepted-not-pending",
+        "unfixed",
+        "violation",
+        "accepted",
+        "no pending known failure"
+    )]
+    [InlineData("unfixed-cell-did-not-run", "unfixed", "absent", "pending", "did not run")]
+    [InlineData("fixed-with-evidence", "fixed", "evidence", "none", null)]
+    [InlineData("fixed-without-evidence", "fixed", "clean", "none", "without the evidence")]
+    [InlineData("fixed-cell-did-not-run", "fixed", "absent", "none", "did not run")]
+    public void NetProblems_FollowStatus(
+        string name,
+        string status,
+        string cell,
+        string entry,
+        string? expected
+    )
+    {
+        const string ItemId = "self-check";
+        const string Slice = "区切り x";
+        var rowId = SyncPlanShapeRows.RequiredRowIdFor(
+            DialectNames.Oracle,
+            "ah-move-first-divergent-ends"
+        )!;
+        var item = new BranchAxisItem(
+            ItemId,
+            "自己検査の項目",
+            BranchAxisLedgerEntries.SyncPlan,
+            status == "fixed" ? BranchAxisStatus.BoundFixed : BranchAxisStatus.BoundUnfixed,
+            null,
+            new BranchBinding(
+                SyncPlanBranchEvidence.TablePart,
+                [new("TypeChange", "DivergentEnds")],
+                "ah-move-first-divergent-ends",
+                [DialectNames.Oracle],
+                "moved-first-plan",
+                []
+            ),
+            "`SyncPlan/ShapeRows`",
+            [],
+            status == "fixed" ? null : Slice
+        );
+        var outcome = new FuzzSeedOutcome
+        {
+            Seed = 0,
+            Dialect = DialectNames.Oracle,
+            ScenarioId = rowId,
+            Plan = new SyncPlan { MovedFirstCount = cell == "evidence" ? 1 : 0 },
+        };
+
+        if (cell == "violation")
+        {
+            outcome.Violations.Add("static D9: self-check");
+        }
+
+        KnownEntry Entry(string finding, KnownKind kind, string? fixedIn) =>
+            new(
+                finding,
+                kind,
+                fixedIn,
+                kind == KnownKind.Accepted ? "自己検査" : null,
+                SyncPlanScenarios.ScopeOf(DialectNames.Oracle, rowId),
+                KnownMatch.Predicate,
+                Predicate: failure =>
+                    failure.Source is FuzzSeedOutcome o
+                    && o.ScenarioId == rowId
+                    && o.Violations.Count > 0
+            );
+
+        IReadOnlyList<KnownEntry> known = entry switch
+        {
+            "pending" => [Entry(ItemId, KnownKind.Pending, Slice)],
+            "other-item" => [Entry("another-item", KnownKind.Pending, Slice)],
+            "other-slice" => [Entry(ItemId, KnownKind.Pending, "区切り y")],
+            "accepted" => [Entry(ItemId, KnownKind.Accepted, null)],
+            _ => [],
+        };
+
+        var problems = SyncPlanBranchEvidence
+            .NetProblems(DialectNames.Oracle, cell == "absent" ? [] : [outcome], [item], known)
+            .ToList();
+
+        if (expected is null)
+        {
+            problems.Should().BeEmpty(name);
+        }
+        else
+        {
+            problems.Should().ContainSingle(name).Which.Should().Contain(expected, name);
+        }
     }
 
     /// <summary>結び済みの項目の結びの問題（水準が出る方言を出力へ書く）</summary>

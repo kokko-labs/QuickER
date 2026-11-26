@@ -234,9 +234,11 @@ internal static class SyncPlanCoverageRows
                     FuzzSelection.Single,
                     ["computed nullable", "extend pk", "fk action"]
                 ),
+                // 種 525 の ByKinds（3 組）は、一部が NULL の重複の水準（10 本目の乱数の列）で形が変わったので、水準を足した後の夜間の
+                // 1500 種の記録から、3 つの変更の種類を 1 つの種で出す種 668 に選び直した（2026-11-26）
                 SeedRow(
                     DialectNames.MySql,
-                    525,
+                    668,
                     FuzzSelection.ByKinds,
                     ["alter type duplicated unique", "drop one of duplicated uniques", "move pk"]
                 ),
@@ -502,6 +504,14 @@ internal static class SyncPlanCoverageRows
                     ["drop fk", "reorder referenced pk"]
                 ),
                 SeedRow(DialectNames.Oracle, 115, FuzzSelection.Single, ["reorder referenced pk"]),
+                // 一部が NULL の重複の水準（10 本目の乱数の列）で普段の種 22 の形が変わり、普段の 60 種から欠けた 2 組を埋める
+                // （2026-11-26・水準を足した後の 300 種の記録から、2 つの変更の種類を 1 つの種で出す種 100 を選んだ）
+                SeedRow(
+                    DialectNames.Oracle,
+                    100,
+                    FuzzSelection.ByKinds,
+                    ["rename column case", "retarget fk"]
+                ),
             ]
         );
 

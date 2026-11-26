@@ -52,6 +52,34 @@ public enum ConstraintNameScope
 }
 
 /// <summary>
+/// 外部キーを張ったままの列で、可変長の型（varchar・varbinary など）の長さを伸ばす変更を DB が受けるかの区分。
+/// </summary>
+/// <remarks>
+/// 列の変更で外部キーを外し直す方言（<see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/>）で、計画が外し直さずに残す
+/// 外部キー（同期後に両端の型が食い違う外部キー）の列を伸ばす文が、必ず断られる文か（前寄せの対象か）を決める
+/// （<see cref="Sync.Assessment.Refusals.FindCertain"/>）。2026-11-26 のコンテナでの実測。
+/// </remarks>
+public enum ForeignKeyColumnWidening
+{
+    /// <summary>外部キーを張ったままの列の型の変更をどれも断る（SQL Server の Msg 5074）。</summary>
+    Refused,
+
+    /// <summary>可変長の型を伸ばす変更を受ける（PostgreSQL・Oracle・SQLite）。</summary>
+    Accepted,
+
+    /// <summary>
+    /// 可変長の型を伸ばし、長さの頭のバイト数（255 バイト以下は 1 バイト・256 バイト以上は 2 バイト）が変わらない変更だけを受ける。
+    /// 縮小・固定長の型・頭のバイト数が変わる変更は断る（MySQL の 1832）。
+    /// </summary>
+    /// <remarks>
+    /// バイト数は列の文字集合の最大バイト数で決まるので、文字数だけでは判定できない（utf8mb4 は 63 文字まで・latin1 は 255 文字までが
+    /// 1 バイトの頭）。計画は取込が読む列の最大バイト数の事実（<see cref="SchemaImportResult.ColumnByteLengths"/>）で判定し、事実の無い列と、
+    /// 型の表記の括弧の後ろ（文字集合の指定など）を変える変更は受けると数えない（保守側）。
+    /// </remarks>
+    WithinLengthPrefix,
+}
+
+/// <summary>
 /// DB 方言がスキーマ同期でどこまで表現できるかを宣言するケーパビリティ。
 /// </summary>
 /// <remarks>
@@ -317,6 +345,36 @@ public sealed partial record SyncDialectCapabilities
     /// </para>
     /// </remarks>
     public required bool ForeignKeyAllowsIntegerWidthDifference { get; init; }
+
+    /// <summary>
+    /// 外部キーを張ったままの列で、可変長の型の長さを伸ばす変更を DB が受けるか（SQL Server は断る・MySQL は長さの頭のバイト数が
+    /// 変わらないときだけ・ほかは受ける）。
+    /// </summary>
+    /// <remarks>
+    /// 列の変更で外部キーを外し直す方言で、計画が残す外部キー（同期後に両端の型が食い違う外部キー）の列を伸ばす文を、必ず断られる文
+    /// （前寄せの対象）に数えるかを決める。受ける変更を前寄せすると、断られる文（相手の端の変更）が元の位置に残り、その間に外した制約が
+    /// 消えたまま残る。判定は <see cref="Sync.Assessment.Refusals.FindCertain"/>。
+    /// </remarks>
+    public required ForeignKeyColumnWidening ForeignKeyColumnWidening { get; init; }
+
+    /// <summary>
+    /// 一意制約が、構成列の全部が NULL の行だけを検査の外に置き、一部が NULL の行は残りの列で比べるか（Oracle）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 2026-11-26 のコンテナでの実測：Oracle は全部が NULL 許容の一意制約 (v) の下に (v, w) = (NULL, 5) の行を 2 つ持て、その表へ (v, w) の
+    /// 一意制約を足すと ORA-02299 で断る。一部の列が NOT NULL の一意制約の下には、一部が NULL の重複の行は入らない（2 行目の INSERT を断る）。
+    /// PostgreSQL・MySQL・SQLite は NULL の行をどれも比べず、SQL Server は NULL どうしを等しいとみなすので、どちらも上位集合の一意制約は
+    /// 既存の行で断られない。
+    /// </para>
+    /// <para>
+    /// <c>true</c> の方言では、構成列が全部 NULL 許容の DB の一意制約を、それを含む一意制約の追加が既存の行で断られないことの証拠に使わない
+    /// （<see cref="Sync.State.PlanFacts.HoldsInLiveRows"/>）。使うと、追加が断られたときに前後で外した制約が名指しされずに消えたまま
+    /// 残る。主キーの付与には掛けない（新しい主キーの列は先に NOT NULL 化されるので、NULL の行があれば
+    /// NOT NULL 化が先に断られて名指しされる）。
+    /// </para>
+    /// </remarks>
+    public required bool UniqueConstraintComparesPartiallyNullKeys { get; init; }
 
     /// <summary>制約名（外部キー・一意制約）が DB のどの範囲で重なってはいけないか。</summary>
     /// <remarks>
@@ -614,6 +672,102 @@ public sealed partial record SyncDialectCapabilities
                 _ => int.MaxValue,
             };
         }
+    }
+
+    /// <summary>
+    /// 外部キーを張ったままの列のこの型の変更を、DB が受けるか（<see cref="ForeignKeyColumnWidening"/> の宣言で判定する）
+    /// </summary>
+    /// <param name="oldType">DB の今の型</param>
+    /// <param name="newType">変えた後の型</param>
+    /// <param name="oldOctetLength">
+    /// DB の今の列の最大バイト数（取込の事実＝<see cref="SchemaImportResult.ColumnByteLengths"/>。無ければ null）
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// 受けると数えるのは、同じ可変長の型（<c>varchar</c> / <c>nvarchar</c> / <c>varbinary</c> / <c>varchar2</c> / <c>nvarchar2</c>）で長さだけを
+    /// 伸ばす変更（Oracle の単位語と、括弧の後ろの指定＝文字集合など、が同じ）だけ。<see cref="ForeignKeyColumnWidening.Refused"/> は常に偽、
+    /// <see cref="ForeignKeyColumnWidening.Accepted"/> は伸ばす変更なら真。
+    /// </para>
+    /// <para>
+    /// <see cref="ForeignKeyColumnWidening.WithinLengthPrefix"/> は、1 単位あたりのバイト数を「今の最大バイト数 ÷ 今の長さ」で求め、伸ばした後の
+    /// バイト数と今のバイト数の長さの頭のバイト数（255 バイト以下は 1 バイト・256 バイト以上は 2 バイト）が同じなら真。最大バイト数の事実が
+    /// 無い列（取込を経ない計画）と、割り切れない事実は受けると数えない（保守側＝必ず断られる文に数える）。括弧の後ろの指定を変える変更
+    /// （文字集合の変更）も受けると数えない。
+    /// </para>
+    /// </remarks>
+    public bool WidensForeignKeyColumnInPlace(
+        string? oldType,
+        string? newType,
+        long? oldOctetLength
+    )
+    {
+        if (ForeignKeyColumnWidening == ForeignKeyColumnWidening.Refused)
+        {
+            return false;
+        }
+
+        var o = StringLengthPattern().Match(NormalizeTypeNotation(oldType ?? string.Empty));
+        var n = StringLengthPattern().Match(NormalizeTypeNotation(newType ?? string.Empty));
+
+        if (
+            !o.Success
+            || !n.Success
+            || !IsVariableLength(o.Groups["base"].Value)
+            || !string.Equals(
+                o.Groups["base"].Value,
+                n.Groups["base"].Value,
+                StringComparison.OrdinalIgnoreCase
+            )
+            || !string.Equals(
+                o.Groups["unit"].Value,
+                n.Groups["unit"].Value,
+                StringComparison.OrdinalIgnoreCase
+            )
+            || !string.Equals(
+                o.Groups["rest"].Value.Trim(),
+                n.Groups["rest"].Value.Trim(),
+                StringComparison.OrdinalIgnoreCase
+            )
+            || !long.TryParse(
+                o.Groups["len"].Value,
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var oldLength
+            )
+            || !long.TryParse(
+                n.Groups["len"].Value,
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var newLength
+            )
+            || newLength <= oldLength
+            || oldLength == 0
+        )
+        {
+            return false;
+        }
+
+        if (ForeignKeyColumnWidening == ForeignKeyColumnWidening.Accepted)
+        {
+            return true;
+        }
+
+        if (oldOctetLength is not { } oldBytes || oldBytes % oldLength != 0)
+        {
+            return false;
+        }
+
+        var newBytes = newLength * (oldBytes / oldLength);
+
+        return oldBytes <= 255 == newBytes <= 255;
+
+        static bool IsVariableLength(string baseName) =>
+            baseName.ToUpperInvariant()
+                is "VARCHAR"
+                    or "NVARCHAR"
+                    or "VARBINARY"
+                    or "VARCHAR2"
+                    or "NVARCHAR2";
     }
 
     /// <summary>

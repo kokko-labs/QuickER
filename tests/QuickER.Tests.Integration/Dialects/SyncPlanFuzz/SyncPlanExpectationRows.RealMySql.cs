@@ -103,6 +103,62 @@ internal static partial class SyncPlanExpectationRows
                             e.After.Single("fk md_child fk_md *");
                         })
                 ),
+            // 子の列だけの文字集合を変える変更は、外部キーを張ったまま MySQL が断る（伸ばす変更でも受けると数えない＝保守側）ので、
+            // 作り直す別の外部キーより前へ移して何も変えずに失敗させる（台帳の項目 pe1 の文字集合の腕）
+            Row(
+                    "realdb-mysql-fk-child-charset-change-moves-first-and-changes-nothing",
+                    "[Integration] MySQL 同期: 外部キーの子の列だけを伸ばしながら文字集合を変え、別の外部キーを作り直すと、列の変更を先頭へ移して何も変えずに失敗する",
+                    DialectNames.MySql
+                )
+                .TargetFromLive(s =>
+                {
+                    s.Col("cs_child", "p_u").DataType = "varchar(30) CHARACTER SET latin1";
+                    s.Relationships.Single(r => r.ConstraintName == "fk_cs_other").OnDelete =
+                        ForeignKeyReferentialAction.Cascade;
+                })
+                .Select(items =>
+                    RealScenarios.SelectKinds(
+                        items,
+                        SchemaDiffKind.AlterColumn,
+                        SchemaDiffKind.AlterForeignKey
+                    )
+                )
+                .OnRealDatabase(r =>
+                    r.LiveSql(
+                            "CREATE TABLE `cs_parent` (`id` int NOT NULL, `u` varchar(20) NOT NULL, PRIMARY KEY (`id`), CONSTRAINT `uq_cs_parent_u` UNIQUE (`u`));"
+                                + "CREATE TABLE `cs_child` (`id` int NOT NULL, `p_u` varchar(20) NOT NULL, PRIMARY KEY (`id`), CONSTRAINT `fk_cs_child` FOREIGN KEY (`p_u`) REFERENCES `cs_parent` (`u`));"
+                                + "CREATE TABLE `cs_other` (`id` int NOT NULL, `p_id` int NULL, PRIMARY KEY (`id`), CONSTRAINT `fk_cs_other` FOREIGN KEY (`p_id`) REFERENCES `cs_parent` (`id`));"
+                        )
+                        .Expect(e =>
+                        {
+                            e.Warnings.Single(
+                                "ForeignKeyColumnTypeMismatch(*)*",
+                                "ForeignKeyColumnTypeMismatch(cs_child): fk_cs_child"
+                            );
+                            e.Outcome.Exact("failed: *");
+                            e.Unchanged();
+                        })
+                )
+                .Tagged(
+                    RowTag
+                        .Ledger("pe1")
+                        .Except(
+                            DialectNames.SqlServer,
+                            "列ごとの文字集合の指定（CHARACTER SET）は MySQL の型の表記だけが書ける"
+                        )
+                        .Except(
+                            DialectNames.PostgreSql,
+                            "列ごとの文字集合の指定（CHARACTER SET）は MySQL の型の表記だけが書ける"
+                        )
+                        .Except(
+                            DialectNames.Oracle,
+                            "列ごとの文字集合の指定（CHARACTER SET）は MySQL の型の表記だけが書ける"
+                        )
+                        .Except(
+                            DialectNames.Sqlite,
+                            "列ごとの文字集合の指定（CHARACTER SET）は MySQL の型の表記だけが書ける"
+                        )
+                ),
             Row(
                     "realdb-mysql-fk-reorder-referenced-composite-pk-rebuilds-in-new-order",
                     "[Integration] MySQL 同期: 参照される複合主キーの並びだけを入れ替えると、外部キーを新しい並びで付け直して成功する",
@@ -648,7 +704,7 @@ internal static partial class SyncPlanExpectationRows
                             // 並びは残る一意制約で見る（付け直す uq_a の削除を先に置くと、uq_a が消えて uq_b が残る）
                             e.Script.Contains("*DROP INDEX `uq_b`*", "*DROP INDEX `uq_a`*");
                             e.Warnings.Contains(
-                                "UniqueConstraintDropMayBreakForeignKey(md_p): fk_md_c"
+                                "UniqueConstraintDropMayBreakForeignKey(md_p): md_c.fk_md_c"
                             );
                             e.Outcome.Exact("failed: *");
                             e.After.Count("uq md_p *", 1);
