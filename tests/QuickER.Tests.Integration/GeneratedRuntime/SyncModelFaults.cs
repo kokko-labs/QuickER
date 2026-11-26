@@ -485,6 +485,30 @@ internal sealed class SyncModelFaults
         }
     }
 
+    // 次のサーバー役の行の読み取りで 1 回だけ投げる例外を作る関数（null なら投げない）
+    private Func<Exception>? _readFailure;
+
+    /// <summary>
+    /// 次のサーバー役（SQLite の代役）の行の読み取り（キーでの読み・全行の読み・一意な値の照会）で 1 回だけ、
+    /// <paramref name="make"/> の作る例外を投げさせる（決まった形の行だけが使う。乱数の種と同期のモデルの世界は仕掛けない）
+    /// </summary>
+    public void FailNextServerRead(Func<Exception> make) => _readFailure = make;
+
+    /// <summary>サーバー役の行の読み取りの入口で呼ぶ（<see cref="FailNextServerRead"/> が仕掛けてあれば 1 回だけ投げる）</summary>
+    public void ThrowOnServerRead()
+    {
+        if (Interlocked.Exchange(ref _readFailure, null) is { } make)
+        {
+            throw make();
+        }
+    }
+
+    /// <summary>
+    /// サーバー役（SQLite の代役）が品目の blob を書いた後（版を進めた後）に、品目のキーで呼ぶ（null なら何もしない。決まった形の行
+    /// だけが使う）
+    /// </summary>
+    public Func<int, Task>? AfterBlobUpload { get; set; }
+
     /// <summary>これまでに ServerWrite の失敗が当たった（端末・表・キー）の数</summary>
     public int WriteHitCount
     {

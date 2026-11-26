@@ -794,6 +794,18 @@ internal static class SyncTriggerGuardRows
                 )
             ),
             Row(
+                "state-flag-of-wrong-type-on-fast-path-closes-connection",
+                "覚えた DB の状態の表の applying が数でない文字列に書き換えられていると、速い道の読み取りが DbException でない例外（FormatException）で"
+                    + "失敗し、開く処理は接続を閉じてからその例外を投げる（もう一度開いても同じ）",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    Prepared: true,
+                    Outside("UPDATE quicker_sync_state SET applying = 'x'"),
+                    Counts(0, 0),
+                    new SyncTriggerGuardFailure(typeof(FormatException), null, [], FailsAgain: true)
+                )
+            ),
+            Row(
                 "applying-flag-left-set-is-cleared-after-full-check",
                 "印が残り、無関係な表も作られた DB を開くと、2 段目で確かめた後（張り直さない）に印を 0 に戻す",
                 new(

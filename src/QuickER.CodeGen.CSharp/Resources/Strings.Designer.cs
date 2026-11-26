@@ -228,6 +228,12 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Origin_InheritedMember {
+            get {
+                return ResourceManager.GetString("CodeGen_Origin_InheritedMember", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Error_InvalidNamespace {
             get {
                 return ResourceManager.GetString("CodeGen_Error_InvalidNamespace", resourceCulture);

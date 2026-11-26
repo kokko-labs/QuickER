@@ -1245,6 +1245,91 @@ internal static class SyncTriggerRecordingRows
                     [Live(Events, LaterEventAtText), Gone(Events, EventAtText)]
                 )
             ),
+            // 除外 blob のある表の主キーの変更：新しいキーは、挿入と同じく全部の除外 blob の列を書いた行として記録する
+            // （古いキーの行を消して新しいキーで入れ直したのと同じで、新しいキーの行のどの列もサーバーの同じキーの行にまだ無い）。
+            // 付け替え先の行が記録に無い・端末が消したキー（記録に削除の行がある）・仮のキー経由の入れ替えの 3 通り
+            Row(
+                "primary-key-change-blob-to-new-key-names-all-blob-columns",
+                "除外 blob のある品目の主キーを記録に無い新しいキーへ変えると、新しいキーを全部の除外 blob の列つきの送る行、"
+                    + "古いキーを削除の行として記録する",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    PrepareItemAsync,
+                    async (h, ct) =>
+                        (
+                            await h.Model.Sql.ExecuteSqlAsync(
+                                "UPDATE model_items SET item_id = 12 WHERE item_id = 10",
+                                cancellationToken: ct
+                            )
+                        )
+                            .Should()
+                            .Be(1),
+                    [Live(Items, 12, "Payload"), Gone(Items, 10)]
+                )
+            ),
+            Row(
+                "primary-key-change-blob-onto-locally-deleted-key-names-all-blob-columns",
+                "除外 blob のある品目を消し、別の品目の主キーをその消したキーへ変えると、消したキーの行（記録に削除の行がある）を"
+                    + "全部の除外 blob の列つきの送る行へ書き換え、古いキーを削除の行として記録する",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    async (h, ct) =>
+                    {
+                        await PrepareItemAsync(h, ct);
+                        await h.Model.Items.InsertAsync(Item(11, 1, "c11", "eleven"), ct);
+                    },
+                    async (h, ct) =>
+                    {
+                        (await h.Model.Items.DeleteAsync(11, ct)).Should().BeTrue();
+                        (
+                            await h.Model.Sql.ExecuteSqlAsync(
+                                "UPDATE model_items SET item_id = 11 WHERE item_id = 10",
+                                cancellationToken: ct
+                            )
+                        )
+                            .Should()
+                            .Be(1);
+                    },
+                    [Live(Items, 11, "Payload"), Gone(Items, 10)]
+                )
+            ),
+            Row(
+                "primary-key-change-blob-swap-through-temporary-key-names-all-blob-columns",
+                "除外 blob のある 2 つの品目の主キーを仮のキー経由で入れ替えると、入れ替えた 2 つのキーを全部の除外 blob の列つきの"
+                    + "送る行として記録し、仮のキーは削除の行で残る（仮のキーは挿入してから消した行と同じく、書いた列の名前を持つ）",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    async (h, ct) =>
+                    {
+                        await PrepareItemAsync(h, ct);
+                        await h.Model.Items.InsertAsync(
+                            Item(11, 1, "c11", "eleven", [4, 5, 6]),
+                            ct
+                        );
+                    },
+                    async (h, ct) =>
+                    {
+                        foreach (
+                            var sql in new[]
+                            {
+                                "UPDATE model_items SET item_id = 100 WHERE item_id = 10",
+                                "UPDATE model_items SET item_id = 10 WHERE item_id = 11",
+                                "UPDATE model_items SET item_id = 11 WHERE item_id = 100",
+                            }
+                        )
+                        {
+                            (await h.Model.Sql.ExecuteSqlAsync(sql, cancellationToken: ct))
+                                .Should()
+                                .Be(1);
+                        }
+                    },
+                    [
+                        Live(Items, 10, "Payload"),
+                        Live(Items, 11, "Payload"),
+                        Gone(Items, 100, "Payload"),
+                    ]
+                )
+            ),
             // エンジンだけが書く列（トリガーの ON CONFLICT が名指ししない列）
             Row(
                 "engine-columns-kept-by-update",

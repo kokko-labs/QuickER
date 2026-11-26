@@ -320,6 +320,43 @@ internal sealed record RefreshWithOptionsOp(
         );
 }
 
+/// <summary>サーバーの他者が 1 つの手で書く深い鎖の形（<see cref="ServerChainOp"/>）</summary>
+internal enum ServerChainKind
+{
+    /// <summary>フォルダーの親子の鎖を作る（最初のフォルダーの親が根、続くフォルダーの親は 1 つ前のフォルダー）</summary>
+    Folders,
+
+    /// <summary>
+    /// 表をまたぐ鎖を作る（段 k ごとに、品目 First+k を 1 つ前の段のフォルダー〔最初の段は根〕に置き、フォルダー First+k が
+    /// その品目をピン留めする＝フォルダー → 品目 → フォルダー … と、表どうしの循環の列でつながる）
+    /// </summary>
+    FoldersAndItems,
+
+    /// <summary><see cref="Folders"/> で作った鎖を、葉から根まで子から順に消す（根も消す）</summary>
+    DeleteFolders,
+}
+
+/// <summary>
+/// サーバーの他者が深い鎖を 1 つの手で書く（サーバー役のリポジトリへ 1 行ずつ。書き込みの手 1 つを並べるより、手ごとの DB の読み直しが
+/// 1 回で済む）。適用の試行の上限（エンジンの MaxApplyAttempts＝200）を超える深さの鎖を作るシナリオだけが使う
+/// </summary>
+/// <param name="Kind">形</param>
+/// <param name="Root">根のフォルダー（作る形では作ってある前提）</param>
+/// <param name="First">鎖の最初のキー</param>
+/// <param name="Depth">段の数（フォルダーの鎖はフォルダーの数、表をまたぐ鎖は品目とフォルダーの組の数）</param>
+internal sealed record ServerChainOp(ServerChainKind Kind, int Root, int First, int Depth) : ModelOp
+{
+    /// <summary>鎖のフォルダーの名前（表をまたぐ鎖の品目の code も同じ形）</summary>
+    public static string NameOf(int id) =>
+        string.Create(CultureInfo.InvariantCulture, $"chain-{id}");
+
+    public override string Describe() =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"SV ServerChain {Kind} root={Root} keys={First}..{First + Depth - 1}"
+        );
+}
+
 /// <summary>キーの並びを短く書く（連続する範囲は <c>a..b</c>）</summary>
 internal static class ModelIdRanges
 {

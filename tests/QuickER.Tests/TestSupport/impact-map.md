@@ -23,9 +23,9 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.AI.Mock` | 一部 | `Ai/MockAgents`・`Ai/MockBuildBoundary`・`Ai/MockDialog`・`Ai/MockFolder`・`Ai/MockOutputs`・`Ai/MockRunner`・`Ai/MockScaffold`・`OsBoundary/Containment`・`OsBoundary/FeatureModules`・`OsBoundary/PathEntrances`・`OsBoundary/Segments` |
 | `src/QuickER.AI.UI` | 一部 | `Ai/ApiKeyStore`・`Ai/Attachments`・`Ai/ConnectionSettings`・`Ai/MarkdownRender`・`OsBoundary/ProcessLaunch`・`table:Converters` |
 | `src/QuickER.Cli` | 一部 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`DiagramEdit/ToolArgument` |
-| `src/QuickER.CodeGen.CSharp` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`Name/Entrances`・`OsBoundary/Segments`・`SyncModel/Config`・`SyncModel/Random`・`rule:mutation-safe-mode-jump-guards`・`rule:sync-auxiliary-names-in-template`・`rule:sync-auxiliary-trigger-names-in-template`・`rule:sync-dedicated-connection-openers`・`table:EditModelScenarios`・`table:NamedQueryRawSql`・`table:PostgreSqlQueryParameters`・`table:SyncEngineFixed`・`table:SyncTriggerGuard`・`table:SyncTriggerRecording`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
+| `src/QuickER.CodeGen.CSharp` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`Name/Entrances`・`OsBoundary/Segments`・`SyncModel/Config`・`SyncModel/Random`・`rule:mutation-safe-mode-jump-guards`・`rule:sync-auxiliary-names-in-template`・`rule:sync-auxiliary-trigger-names-in-template`・`rule:sync-dedicated-connection-openers`・`table:EditModelScenarios`・`table:NamedQueryRawSql`・`table:PostgreSqlQueryParameters`・`table:SyncEngineFixed`・`table:SyncKeyPaging`・`table:SyncTriggerGuard`・`table:SyncTriggerRecording`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.CodeGen.CSharp/Queries` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`Name/Entrances`・`rule:mutation-safe-mode-jump-guards` |
-| `src/QuickER.CodeGen.CSharp/Templates` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`Name/Entrances`・`SyncModel/Config`・`SyncModel/Random`・`rule:mutation-safe-mode-jump-guards`・`rule:sync-auxiliary-names-in-template`・`rule:sync-auxiliary-trigger-names-in-template`・`rule:sync-dedicated-connection-openers`・`table:EditModelScenarios`・`table:NamedQueryRawSql`・`table:PostgreSqlQueryParameters`・`table:SyncEngineFixed`・`table:SyncTriggerGuard`・`table:SyncTriggerRecording`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
+| `src/QuickER.CodeGen.CSharp/Templates` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`Name/Entrances`・`SyncModel/Config`・`SyncModel/Random`・`rule:mutation-safe-mode-jump-guards`・`rule:sync-auxiliary-names-in-template`・`rule:sync-auxiliary-trigger-names-in-template`・`rule:sync-dedicated-connection-openers`・`table:EditModelScenarios`・`table:NamedQueryRawSql`・`table:PostgreSqlQueryParameters`・`table:SyncEngineFixed`・`table:SyncKeyPaging`・`table:SyncTriggerGuard`・`table:SyncTriggerRecording`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.CodeGen.UI` | 全体 | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Name/Entrances`・`OsBoundary/FeatureModules` |
 | `src/QuickER.CodeReverse.CSharp` | 全体 | `FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules` |
 | `src/QuickER.Db.UI` | 一部 | `Ai/DbConnectionDialog`・`Ai/DbImportSync`・`OsBoundary/FeatureModules`・`OsBoundary/ProfileStore` |
@@ -52,13 +52,13 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider.SqlServer` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`GeneratedRuntime/ParityValuesSqlServer`・`Name/DdlRoundTrip`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses`・`rule:sync-auxiliary-name-prefix-copies` |
 | `src/QuickER.Provider.Sqlite` | 全体 | `Dialect/DdlText`・`Dialect/Identifiers`・`Dialect/Types`・`Dialect/TypesRealDb`・`Name/DdlRoundTrip`・`Name/Entrances`・`SyncPlan/Fuzz`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:schema-command-bypasses`・`rule:schema-command-helper-uses`・`rule:schema-sync-raw-rollbacks`・`rule:schema-sync-rollback-helper-uses`・`rule:sqlite-file-connection-pooling-off`・`rule:sync-auxiliary-name-prefix-copies` |
 | `src/QuickER.Provider/Sync` | 全体 | `Dialect/DdlText`・`Dialect/ImportWarnings`・`Dialect/Types`・`SyncPlan/CapabilityNet`・`SyncPlan/Fuzz`・`SyncPlan/ShapeRows`・`rule:mutation-safe-mode-jump-guards`・`rule:provider-column-nullability-raw-reads`・`rule:sync-assessment-builds-warnings-only`・`rule:sync-assessment-rule-callers`・`rule:sync-auxiliary-name-prefix-copies`・`rule:sync-exclusions-inside-stable-loop`・`rule:sync-live-schema-single-source`・`rule:sync-name-comparison-tokens`・`rule:sync-plan-mark-owners`・`rule:sync-post-sync-schema-single-source`・`rule:sync-scheduling-builds-steps-only`・`rule:sync-selected-foreign-key-names`・`rule:sync-type-deciding-column-copies`・`table:SyncPlanExpectations` |
-| `src/QuickER.Runtime` | 全体 | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:EditModelScenarios`・`table:NamedQueryRawSql`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
+| `src/QuickER.Runtime` | 全体 | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:EditModelScenarios`・`table:NamedQueryRawSql`・`table:SyncKeyPaging`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.Runtime.AspNetCore` | 全体 | `GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues` |
 | `src/QuickER.Runtime.EntityFrameworkCore` | 全体 | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:NamedQueryRawSql`・`table:PostgreSqlQueryParameters`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.InMemory` | 全体 | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.SqlServer` | 全体 | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValuesSqlServer`・`table:NamedQueryRawSql`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.Sqlite` | 全体 | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParityValues`・`table:NamedQueryRawSql`・`table:SyncEngineFixed`・`table:SyncTriggerGuard`・`table:TranslatorParityPredicates` |
-| `src/QuickER.Runtime.Sync` | 全体 | `SyncModel/Config`・`SyncModel/Outcomes`・`SyncModel/Random`・`table:SyncEngineFixed`・`table:SyncTriggerGuard`・`table:SyncTriggerRecording` |
+| `src/QuickER.Runtime.Sync` | 全体 | `SyncModel/Config`・`SyncModel/Outcomes`・`SyncModel/Random`・`table:SyncEngineFixed`・`table:SyncKeyPaging`・`table:SyncTriggerGuard`・`table:SyncTriggerRecording` |
 | `src/QuickER.Settings` | 全体 | `DocumentFile/Settings` |
 
 ## 範囲の表
@@ -122,15 +122,16 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Cli/GenerationExecutor.cs` | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success` |
 | `src/QuickER.CodeGen.CSharp` | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Name/Entrances`・`rule:mutation-safe-mode-jump-guards` |
 | `src/QuickER.CodeGen.CSharp/CSharpCodeGenerationService.cs` | `OsBoundary/Segments` |
+| `src/QuickER.CodeGen.CSharp/CSharpGenerationModelBuilder.Sync.cs` | `table:SyncKeyPaging` |
 | `src/QuickER.CodeGen.CSharp/GeneratedFileWriter.cs` | `OsBoundary/Segments` |
 | `src/QuickER.CodeGen.CSharp/Queries` | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql` |
 | `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime` | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity` |
 | `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_01_ValueObjects.scriban` | `table:ValueObjectScenarios` |
 | `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_03_EditModelsAndMappers.scriban` | `table:EditModelScenarios` |
-| `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_04_RepositoryContractCore.scriban` | `table:NamedQueryRawSql`・`table:SyncTriggerGuard` |
+| `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_04_RepositoryContractCore.scriban` | `table:NamedQueryRawSql`・`table:SyncKeyPaging`・`table:SyncTriggerGuard` |
 | `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_05_QueryPipeline.scriban` | `table:TranslatorParityPredicates` |
 | `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_08_EfCore.scriban` | `table:PostgreSqlQueryParameters`・`table:TranslatorParityPredicates` |
-| `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban` | `SyncModel/Config`・`SyncModel/Random`・`rule:sync-auxiliary-names-in-template`・`rule:sync-auxiliary-trigger-names-in-template`・`rule:sync-dedicated-connection-openers`・`table:SyncEngineFixed`・`table:SyncTriggerGuard`・`table:SyncTriggerRecording` |
+| `src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban` | `SyncModel/Config`・`SyncModel/Random`・`rule:sync-auxiliary-names-in-template`・`rule:sync-auxiliary-trigger-names-in-template`・`rule:sync-dedicated-connection-openers`・`table:SyncEngineFixed`・`table:SyncKeyPaging`・`table:SyncTriggerGuard`・`table:SyncTriggerRecording` |
 | `src/QuickER.CodeGen.UI` | `CodegenConfig/Cases`・`CodegenConfig/Errors`・`CodegenConfig/Success`・`Name/Entrances` |
 | `src/QuickER.CodeGen.UI/CodeGenerationFeatureModule.cs` | `OsBoundary/FeatureModules` |
 | `src/QuickER.CodeReverse.CSharp` | `FormatRoundTrip/Merge`・`FormatRoundTrip/Omissions`・`FormatRoundTrip/RoundTrip`・`FormatRoundTrip/Rules` |
@@ -243,13 +244,13 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 | `src/QuickER.Provider/SyncScriptBuilderBase.cs` | `SyncPlan/Fuzz` |
 | `src/QuickER.Provider/SyncScriptBuilderHelper.cs` | `SyncPlan/Fuzz` |
 | `src/QuickER.Provider/UniqueConstraintNaming.cs` | `rule:sync-name-comparison-tokens` |
-| `src/QuickER.Runtime` | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:EditModelScenarios`・`table:NamedQueryRawSql`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
+| `src/QuickER.Runtime` | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:EditModelScenarios`・`table:NamedQueryRawSql`・`table:SyncKeyPaging`・`table:TranslatorParityPredicates`・`table:ValueObjectScenarios` |
 | `src/QuickER.Runtime.AspNetCore` | `GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues` |
 | `src/QuickER.Runtime.EntityFrameworkCore` | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValues`・`GeneratedRuntime/ParityValuesSqlServer`・`table:NamedQueryRawSql`・`table:PostgreSqlQueryParameters`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.InMemory` | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityValues`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.SqlServer` | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/ParitySqlServerSaves`・`GeneratedRuntime/ParityValuesSqlServer`・`table:NamedQueryRawSql`・`table:TranslatorParityPredicates` |
 | `src/QuickER.Runtime.Sqlite` | `Dsl/MySql`・`Dsl/Oracle`・`Dsl/PostgreSql`・`Dsl/SqlServer`・`Dsl/SqliteMySql`・`GeneratedRuntime/Parity`・`GeneratedRuntime/ParityOutcomes`・`GeneratedRuntime/ParityValues`・`table:NamedQueryRawSql`・`table:SyncEngineFixed`・`table:SyncTriggerGuard`・`table:TranslatorParityPredicates` |
-| `src/QuickER.Runtime.Sync` | `SyncModel/Config`・`SyncModel/Outcomes`・`SyncModel/Random`・`table:SyncEngineFixed`・`table:SyncTriggerGuard`・`table:SyncTriggerRecording` |
+| `src/QuickER.Runtime.Sync` | `SyncModel/Config`・`SyncModel/Outcomes`・`SyncModel/Random`・`table:SyncEngineFixed`・`table:SyncKeyPaging`・`table:SyncTriggerGuard`・`table:SyncTriggerRecording` |
 | `src/QuickER.Settings` | `DocumentFile/Settings` |
 
 ## 守りの一覧
@@ -736,6 +737,12 @@ src の単位（プロジェクトと、その直下のフォルダ）ごとに�
 - テストのソース：`tests/QuickER.Tests.Integration/GeneratedRuntime/SyncEngineFixedRows.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/SyncEngineFixedHarness.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/SyncEngineFixtureDevices.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportAdoSqliteEngineRuntimeTests.cs`
 - 範囲：`src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban`・`src/QuickER.Runtime.Sync`・`src/QuickER.Runtime.Sqlite`
 
+### `table:SyncKeyPaging`
+
+- 名前：版なしの同期の表のキー順ページングの表（主キーの型 × ページの境目の値ごとに、生成の直結の差分ソースが実 SQL Server の全行を順に 1 回ずつ読むか）
+- テストのソース：`tests/QuickER.Tests.Integration/GeneratedRuntime/SyncKeyPagingRows.cs`・`tests/QuickER.Tests.Integration/GeneratedRuntime/SyncSupportAdoSqlServerKeyPagingRuntimeTests.cs`
+- 範囲：`src/QuickER.CodeGen.CSharp/CSharpGenerationModelBuilder.Sync.cs`・`src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_04_RepositoryContractCore.scriban`・`src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban`・`src/QuickER.Runtime`・`src/QuickER.Runtime.Sync`
+
 ### `table:SyncPlanExpectations`
 
 - 名前：同期の差分と計画の期待の行（SyncPlan のエンジン〔SyncPlan/Fuzz・SyncPlan/CapabilityNet〕が流す。方言ごとの期待と実 DB の段の汎用の表明）
@@ -940,7 +947,7 @@ src 全体か src の外を読む守り。単位の守りには数えない（�
 | `rule:cjk-range-copies` | tests/**/*.cs |
 | `rule:regex-ignore-case-culture` | src/**/*.cs |
 | `rule:regex-digit-classes` | src/**/*.cs |
-| `rule:ef-core-provider-cache-limit` | tests/**/*.cs（除外 35 件） |
+| `rule:ef-core-provider-cache-limit` | tests/**/*.cs（除外 36 件） |
 | `rule:window-activation-collection` | tests/QuickER.Tests/**/*.cs（除外 3 件） |
 | `rule:window-activation-markers` | tests/QuickER.Tests/AI.Chat/AiChatDialogApiKeyBoxTests.cs・tests/QuickER.Tests/Gui/Behaviors/CanvasViewportBehaviorSpaceKeyTests.cs・tests/QuickER.Tests/Gui/Views/PropertyPanelMemoEditTests.cs |
 | `rule:thread-pool-delivery-collection` | tests/QuickER.Tests/**/*.cs |

@@ -25,4 +25,4 @@
 | `_07_InMemory.scriban` | `src/QuickER.Runtime.InMemory/CLAUDE.md` | ステージングの判定順（重複キー → 存否 → 版）とキーの比較器を崩すと、実 DB と結果が割れる |
 | `_08_EfCore.scriban` | `src/QuickER.Runtime.EntityFrameworkCore/CLAUDE.md` | `TrackGraph` へ戻すと Include して読んだ子の削除で親ごと消える |
 | `_09_RemoteServer.scriban` | `src/QuickER.Runtime.AspNetCore/CLAUDE.md` | 分類の判定順と切断の扱いを変えると、切断が 400 / 500 に化けてログとフックが鳴る |
-| `_10_Sync.scriban` | `src/QuickER.Runtime.Sync/CLAUDE.md` | トリガーの `ON CONFLICT` はエンジンの列（`base_version`・`sw_seq` ほか）を名指ししない。名指しすると基準の版と持ち越した決定の印が消え、サーバーが知っている行を知らない行として送り直す。エンジンの書き込みは適用中の印の中で行う |
+| `_10_Sync.scriban` | `src/QuickER.Runtime.Sync/CLAUDE.md` | トリガーの `ON CONFLICT` はエンジンの列（`base_version`・`sw_seq` ほか）を名指ししない。名指しすると基準の版と持ち越した決定の印が消え、サーバーが知っている行を知らない行として送り直す（例外は主キーの変更の新しいキーの `applied_version` で、古いキーの値を写す）。エンジンの書き込みは適用中の印の中で行う |

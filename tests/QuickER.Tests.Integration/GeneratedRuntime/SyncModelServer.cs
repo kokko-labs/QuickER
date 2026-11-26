@@ -56,17 +56,29 @@ internal sealed class SyncModelServerRepository<TEntity, TKey>(
         }
     }
 
-    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
-        inner.GetByIdAsync(id, cancellationToken);
+    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
+    {
+        faults.ThrowOnServerRead();
 
-    public Task<IReadOnlyList<TEntity>> GetAllAsync(
-        CancellationToken cancellationToken = default
-    ) => inner.GetAllAsync(cancellationToken);
+        return inner.GetByIdAsync(id, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        faults.ThrowOnServerRead();
+
+        return inner.GetAllAsync(cancellationToken);
+    }
 
     public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
         TEntity entity,
         CancellationToken cancellationToken = default
-    ) => inner.CheckUniquenessAsync(entity, cancellationToken);
+    )
+    {
+        faults.ThrowOnServerRead();
+
+        return inner.CheckUniquenessAsync(entity, cancellationToken);
+    }
 
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
@@ -395,6 +407,11 @@ internal sealed class SyncModelItemBinaryColumns(
             await serverSqlExecutor
                 .ExecuteSqlAsync(StampSql, new { version = versions.Next(), id }, cancellationToken)
                 .ConfigureAwait(false);
+
+            if (faults.AfterBlobUpload is { } after)
+            {
+                await after(id).ConfigureAwait(false);
+            }
         }
 
         return written;
@@ -456,17 +473,29 @@ internal sealed class SyncModelFaultingRepository<TEntity, TKey>(
 ) : IRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
-        inner.GetByIdAsync(id, cancellationToken);
+    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
+    {
+        faults.ThrowOnServerRead();
 
-    public Task<IReadOnlyList<TEntity>> GetAllAsync(
-        CancellationToken cancellationToken = default
-    ) => inner.GetAllAsync(cancellationToken);
+        return inner.GetByIdAsync(id, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        faults.ThrowOnServerRead();
+
+        return inner.GetAllAsync(cancellationToken);
+    }
 
     public Task<IReadOnlyList<UniquenessViolation>> CheckUniquenessAsync(
         TEntity entity,
         CancellationToken cancellationToken = default
-    ) => inner.CheckUniquenessAsync(entity, cancellationToken);
+    )
+    {
+        faults.ThrowOnServerRead();
+
+        return inner.CheckUniquenessAsync(entity, cancellationToken);
+    }
 
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {

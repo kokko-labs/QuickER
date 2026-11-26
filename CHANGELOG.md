@@ -84,6 +84,13 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **The EF Core Repository now stores the same values as the QuickER Repository in SQL Server `datetime` and `smalldatetime` columns** — The generated DbContext configures their column types, so `smalldatetime` rounds up from 29.999 seconds, and a `datetime` value that rounds outside the type's range is refused instead of being stored as 23:59:59.997.
 - **Diagrams with SQL Server `smalldatetime`, `smallmoney`, or `image` columns can now be generated as a multi-target build with SQLite** — SQLite treats them the same as `datetime`, `money`, and `blob`. In a SQLite diagram, these columns now become `DateTime`, `decimal`, and `byte[]` properties instead of `string`.
 - **Conditions on SQL Server `datetime` and `smalldatetime` columns now answer as C# does in both repositories** — A value the column cannot hold is compared without being rounded to the column's precision. On the EF Core Repository, a date constant written directly in hand-written LINQ is now rounded to the column's precision instead of failing.
+- **Generating bidirectional sync now names a table whose descriptor collides with a fixed member of `GeneratedSyncTables`** — A table named `all` or `alls` made the generated code fail to compile, and a table named after a member of `object` (such as `to_string`) made it warn, while generation reported nothing. Rename the table.
+
+#### Bidirectional sync
+
+- **A table without a version column whose primary key is `datetime2` or `date` no longer skips rows on the server** — The key was sent as SQL Server's legacy `datetime`, which rounds to 1/300 second and cannot hold a date before 1753, so a page boundary could skip a row or the sync could fail.
+- **A sync no longer stops when the server changes a unique value that a local row refers to through a foreign key the engine does not know** — The download holds that parent row back and reports it in `Truncations`, and the parent comes down once the local row stops referring to the old value. Until then the parent keeps its old content.
+- **A write failure is no longer lost when looking up why the server refused it times out** — The run used to end as if it had been cancelled. It now throws an `AggregateException` holding the write failure and the timeout.
 
 ## [0.4.0] - 2026-11-16
 

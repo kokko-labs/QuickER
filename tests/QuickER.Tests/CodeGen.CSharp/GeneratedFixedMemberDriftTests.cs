@@ -268,6 +268,68 @@ public sealed class GeneratedFixedMemberDriftTests
         GeneratedFixedMemberNames.EntityJsonVisibleBase.Should().BeEquivalentTo(properties);
     }
 
+    /// <summary>
+    /// 同期の記述子の一覧 <c>GeneratedSyncTables</c> の宣言メンバーから、表ごとの記述子のプロパティ（型
+    /// <c>SyncTableDescriptor&lt;,&gt;</c>）を差し引いた残余が、固定メンバーの名簿
+    /// （<see cref="GeneratedFixedMemberNames.SyncTablesFixed"/>）と完全一致することを表明する
+    /// </summary>
+    /// <remarks>テンプレートが一覧へメンバーを足したのに名簿へ足し忘れると、その名前の表を同期で生成したとき診断ゼロでコンパイルできない。</remarks>
+    [Fact(
+        DisplayName = "同期の記述子の一覧が表に依らず宣言するメンバーは、固定メンバーの名簿と完全一致する"
+    )]
+    public void SyncTablesFixed_ShouldMatchGeneratedSyncTablesResidual()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            BuildDiagram(),
+            new CodeGenerationOptions
+            {
+                RootNamespace = "Sample.Domain",
+                GenerateRepositories = true,
+                RepositoryDialects = ["sqlserver", "sqlite"],
+                GenerateSyncSupport = true,
+            }
+        );
+        result.HasErrors.Should().BeFalse("ドリフト検証の前提として図は正常に生成できること");
+        var source = result.Files.Select(file => file.Content).ToList();
+
+        var descriptors = FindClass(source, "GeneratedSyncTables")
+            .Members.OfType<PropertyDeclarationSyntax>()
+            .Where(property =>
+                property.Type is GenericNameSyntax { Identifier.ValueText: "SyncTableDescriptor" }
+            )
+            .Select(property => property.Identifier.ValueText)
+            .ToList();
+        descriptors.Should().HaveCount(3, "検証用の図の 3 表はどれも同期の記述子を持つ");
+
+        var residual = DeclaredMemberNames(source, "GeneratedSyncTables");
+        residual.ExceptWith(descriptors);
+
+        residual.Should().BeEquivalentTo(GeneratedFixedMemberNames.SyncTablesFixed);
+    }
+
+    /// <summary>
+    /// 同期の記述子の一覧が object から継ぐメンバーの名簿（<see cref="GeneratedFixedMemberNames.SyncTablesInherited"/>）が、
+    /// 静的クラスの静的プロパティが隠しうる object のメンバー（公開・プロテクトのメソッド）と完全一致することを表明する
+    /// </summary>
+    [Fact(
+        DisplayName = "同期の記述子の一覧が継ぐメンバーの名簿は、object の公開・プロテクトのメソッドと完全一致する"
+    )]
+    public void SyncTablesInherited_ShouldMatchObjectMembers()
+    {
+        var methods = typeof(object)
+            .GetMethods(
+                System.Reflection.BindingFlags.Public
+                    | System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Instance
+                    | System.Reflection.BindingFlags.Static
+            )
+            .Where(method => method.IsPublic || method.IsFamily || method.IsFamilyOrAssembly)
+            .Select(method => method.Name)
+            .Distinct();
+
+        GeneratedFixedMemberNames.SyncTablesInherited.Should().BeEquivalentTo(methods);
+    }
+
     [Fact(DisplayName = "検証用の図の派生名は固定メンバー名と重ならない")]
     public void DerivedMemberNames_ShouldNotOverlapFixedMemberRoster()
     {

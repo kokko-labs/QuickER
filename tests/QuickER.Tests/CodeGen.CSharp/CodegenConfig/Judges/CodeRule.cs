@@ -438,6 +438,26 @@ internal abstract record CodeRule
     ) => new XmlDocRule(type, member, element, expected, ns);
 
     /// <summary>
+    /// 型 <paramref name="type"/>（<paramref name="member"/> を指定すればそのメンバー）の XmlDoc の要素 <paramref name="element"/> の中身が、
+    /// 断片 <paramref name="fragment"/> を含む（<paramref name="present"/> が false なら含まない。空白の連なりは 1 つにまとめて比べる）
+    /// </summary>
+    /// <remarks>構成で出し分ける文（オプションに依る段落）を、要素の全文を写さずに見るときに使う。</remarks>
+    /// <param name="type">型の単純名</param>
+    /// <param name="member">メンバー名（null なら型そのもの）</param>
+    /// <param name="element">要素名（<c>summary</c>・<c>remarks</c> など）</param>
+    /// <param name="fragment">断片</param>
+    /// <param name="present">含むか</param>
+    /// <param name="ns">型の名前空間</param>
+    public static CodeRule XmlDocFragment(
+        string type,
+        string? member,
+        string element,
+        string fragment,
+        bool present = true,
+        string? ns = null
+    ) => new XmlDocFragmentRule(type, member, element, fragment, present, ns);
+
+    /// <summary>
     /// XmlDoc の要素 <paramref name="element"/> の中身が <paramref name="text"/>（<see cref="XmlDoc"/> と同じ比べ方）であるシンボルの集合が、
     /// <paramref name="owners"/>（<c>型名</c> か <c>型名.メンバー名</c>）と完全一致する
     /// </summary>
@@ -1688,6 +1708,49 @@ internal abstract record CodeRule
             if (found != Present)
             {
                 yield return $"コード: {where} が {Symbol} を{(Present ? "参照しない" : "参照する（しないはず）")}";
+            }
+        }
+    }
+
+    private sealed record XmlDocFragmentRule(
+        string TypeName,
+        string? MemberName,
+        string Element,
+        string Fragment,
+        bool Present,
+        string? Ns
+    ) : CodeRule
+    {
+        public override IEnumerable<string> Check(CodeRuleContext context)
+        {
+            if (!context.TryGetType(TypeName, Ns, out var type, out var problem))
+            {
+                yield return problem;
+                yield break;
+            }
+
+            var target = $"{TypeName}{(MemberName is null ? "" : "." + MemberName)}";
+            var symbols = MemberName is null
+                ? [type]
+                : type.GetMembers(MemberName)
+                    .Where(member => !member.IsImplicitlyDeclared)
+                    .ToList();
+
+            if (symbols.Count != 1)
+            {
+                yield return string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"コード: {target} が {symbols.Count} 個（XmlDoc はちょうど 1 つに決まるメンバーで見る）"
+                );
+                yield break;
+            }
+
+            var actual = DocElement(symbols[0], Element) ?? "";
+            var fragment = NormalizeDoc(Fragment);
+
+            if (actual.Contains(fragment, StringComparison.Ordinal) != Present)
+            {
+                yield return $"コード: {target} の XmlDoc <{Element}> が「{fragment}」を{(Present ? "含まない" : "含む")}（中身「{actual}」）";
             }
         }
     }

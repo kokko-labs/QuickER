@@ -80,6 +80,11 @@ internal sealed class CSharpSyncTableModel
     /// <summary>版なしテーブルの続きページ取得 SQL（C# 文字列リテラル・<c>@afterKey</c> より上・キー昇順。版ありでは空文字）</summary>
     public required string ServerPageAfterSql { get; init; }
 
+    /// <summary>
+    /// 版なしテーブルの続きページ取得 SQL の <c>@afterKey</c> に束縛する値の式（変数 <c>key</c>。主キーをそのまま束縛するときは空文字）
+    /// </summary>
+    public required string ServerAfterKeyValueExpression { get; init; }
+
     /// <summary>対象の Repository 契約インターフェイス名（例 <c>ISyncItemRepository</c>）</summary>
     public required string InterfaceName { get; init; }
 

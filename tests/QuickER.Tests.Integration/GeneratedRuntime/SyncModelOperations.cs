@@ -33,6 +33,11 @@ internal enum ModelWriteVia
 
     /// <summary>RowState を付けた実体の SaveAsync</summary>
     Graph,
+
+    /// <summary>
+    /// 生の SQL（Repository を通らない。端末のトリガーは記録する）。主キーの付け替え（<see cref="RekeyItemOp"/>）だけが使う
+    /// </summary>
+    Sql,
 }
 
 /// <summary>同期の呼び方</summary>
@@ -341,6 +346,73 @@ internal sealed record DeleteItemOp(ModelActor Actor, ModelWriteVia Via, int Id)
     public override string KeyText => Id.ToString(CultureInfo.InvariantCulture);
 
     public override string Describe() => $"{Who(Actor)} DeleteItem id={Id}{ViaText}";
+}
+
+/// <summary>主キーの付け替えの形（<see cref="RekeyItemOp"/>）</summary>
+internal enum RekeyShape
+{
+    /// <summary>端末にもサーバーにも無い新しいキーへ移す</summary>
+    Fresh,
+
+    /// <summary>付け替え先の行を同じ手の中で先に消し、そのキー（端末がサーバーと共有していたキー）へ移す</summary>
+    OntoDeleted,
+
+    /// <summary>2 つの行のキーを、仮のキーを経て入れ替える</summary>
+    Swap,
+}
+
+/// <summary>
+/// 端末の品目の主キーを生の SQL で付け替える（Repository を通らない。端末のトリガーは主キーを変える更新として、古いキーを削除・
+/// 新しいキーを送る行として記録する）。形は <see cref="RekeyShape"/>。乱数の生成器は 5 本目の乱数で、本流が選んだ端末の品目の
+/// 更新・削除をこの手へ置き換える（<see cref="SyncModelGenerator.RekeyRate"/>）。動かす行と消す・入れ替える行は、子（参照するイベント・
+/// ピン留めするフォルダー）の無い品目だけ（NO ACTION の外部キーが子のある行のキーの変更を断る）
+/// </summary>
+/// <param name="Actor">端末</param>
+/// <param name="From">動かす行のキー</param>
+/// <param name="To">移す先のキー（入れ替えでは相手の行のキー）</param>
+/// <param name="Shape">形</param>
+/// <param name="Temp">入れ替えの仮のキー（入れ替えだけ）</param>
+internal sealed record RekeyItemOp(
+    ModelActor Actor,
+    int From,
+    int To,
+    RekeyShape Shape,
+    int? Temp = null
+) : ModelWriteOp(Actor, ModelWriteVia.Sql)
+{
+    public override string Table => ModelTables.Items;
+
+    public override string KeyText => To.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>端末で流す文（どれもちょうど 1 行を変える）</summary>
+    public IReadOnlyList<string> Statements() =>
+        Shape switch
+        {
+            RekeyShape.Fresh => [Move(From, To)],
+            RekeyShape.OntoDeleted =>
+            [
+                $"DELETE FROM model_items WHERE item_id = {To.ToString(CultureInfo.InvariantCulture)}",
+                Move(From, To),
+            ],
+            RekeyShape.Swap when Temp is { } temp =>
+            [
+                Move(From, temp),
+                Move(To, From),
+                Move(temp, To),
+            ],
+            _ => throw new InvalidOperationException($"{Describe()}: a swap needs a temporary key"),
+        };
+
+    private static string Move(int from, int to) =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"UPDATE model_items SET item_id = {to} WHERE item_id = {from}"
+        );
+
+    public override string Describe() =>
+        $"{Who(Actor)} RekeyItem {Shape} from={From} to={To}"
+        + (Temp is { } temp ? $" temp={temp.ToString(CultureInfo.InvariantCulture)}" : "")
+        + ViaText;
 }
 
 /// <summary>除外列（payload）を Write{列}Async で書く（端末はトリガーがその列の名前を記録する）</summary>

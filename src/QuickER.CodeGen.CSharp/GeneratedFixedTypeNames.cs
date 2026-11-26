@@ -499,6 +499,7 @@ public static class GeneratedFixedTypeNames
             "PropertyValues",
             "Query",
             "Queryable",
+            "Queue",
             "ReadOnlyMemory",
             "ReadOnlySpan",
             "ReferenceEqualityComparer",

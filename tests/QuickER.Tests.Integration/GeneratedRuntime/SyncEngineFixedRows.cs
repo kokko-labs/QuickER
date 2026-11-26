@@ -157,6 +157,38 @@ internal static partial class SyncEngineFixedRows
                 UnsentGoneRowOfUnknownKeyAsync
             ),
             .. StaleEntityRows(),
+            .. UniqueReferenceRows(),
+            .. FailurePathRows(),
+            Row(
+                "apply-held-parent-present-locally-does-not-hold-its-children",
+                "1 回で全部の道で、端末に在るフォルダーが新しい親（端末の未送信の行が名前を持つので保留される）へ移されて保留になっても、"
+                    + "そのフォルダーを親にする端末に在る子の更新は同じ実行で降りる（保留した行が端末に在れば、子は古い親を参照したまま違反に"
+                    + "ならないので、保留を子へ広げない）",
+                HeldParentPresentLocallyAsync
+            ),
+            Row(
+                "chunk-deep-selfref-chain-root-in-later-chunk-settles",
+                "塊ごとに確定する経路で、深さが適用の試行の上限（200）を超える自己参照の鎖（210 段）が 1 つの塊に入り、鎖より後に"
+                    + "書き直した根が後ろの塊に来ても、同期は止まらずに終わり、端末とサーバーの内容が同じになる（同期のモデルの決定的な"
+                    + "シナリオ deep-chain-root-rewritten-after-chain-downloads の塊の道。モデルの端末の塊は 2 行で、この形を作れない）",
+                DeepChainRootInLaterChunkAsync
+            ),
+            .. new[] { 50, 250 }.Select(depth =>
+                Row(
+                    $"apply-attempts-held-chain-in-chunk-depth-{depth}-stay-constant",
+                    $"塊ごとに確定する経路で、根が後ろの塊に来る深さ {depth} の自己参照の鎖を降ろすと、鎖の塊の適用は 2 回以内の"
+                        + "試行で確定する（保留した行を参照する行を同じ段で保留する＝試行の数は鎖の深さに依らない）",
+                    (h, ct) => HeldChainAttemptsAsync(h, depth, ct)
+                )
+            ),
+            .. new[] { 50, 250 }.Select(depth =>
+                Row(
+                    $"apply-attempts-kept-chain-deleted-under-unsent-child-depth-{depth}-stay-constant",
+                    $"1 回で全部の道で、サーバーが深さ {depth} の鎖を消し、端末の未送信の子が葉を参照していると、適用は 2 回以内の"
+                        + "試行で確定し、鎖は端末に残る（残す親が参照する消した親を同じ段で残す＝試行の数は鎖の深さに依らない）",
+                    (h, ct) => KeptChainAttemptsAsync(h, depth, ct)
+                )
+            ),
             Row(
                 "chunk-failure-between-chunks-keeps-first-chunk-and-next-sync-resumes",
                 "塊ごとに確定する経路で 2 ページ目の取得が失敗すると、失敗の時点で最初の塊の行だけが端末に書かれ、表の再開点は"
@@ -312,7 +344,7 @@ internal static partial class SyncEngineFixedRows
             ),
             Row(
                 "untracked-write-refuses-closed-connection-and-missing-tracking",
-                "記録しない書き込みは、開いていない接続・関数の中で閉じられた接続・状態の表に行の無い DB を "
+                "記録しない書き込みは、開いていない接続・関数の中で閉じられた接続・状態の表に行の無い DB・状態の表の無い DB を "
                     + "InvalidOperationException で断り、どれも何もコミットしない",
                 UntrackedWriteRefusesUnusableAsync
             ),
@@ -327,7 +359,14 @@ internal static partial class SyncEngineFixedRows
                 "記録しない書き込みの関数がプールの接続を閉じると、名指しの例外が出て、その接続はトランザクションと書き込みの"
                     + "ロックを持ったままプールへ戻る（別の接続の書き込みはロック待ちで失敗する）。同じプールの次の接続を開くと、"
                     + "開くたびの確認がそのトランザクションを巻き戻し、何も残らず、別の接続が書けて記録される",
-                UntrackedWriteClosedPooledConnectionAsync
+                (h, ct) => UntrackedWriteClosedPooledConnectionAsync(h, nextByOtherGuard: false, ct)
+            ),
+            Row(
+                "untracked-write-closed-pooled-connection-is-rolled-back-by-full-check-of-other-guard",
+                "記録しない書き込みの関数がプールの接続を閉じた後、同じプールの次の接続を、表の集合の違う（まだ何も覚えていない）"
+                    + "開くたびの確認で開くと、全部の確認が自分のトランザクションを始める前に残ったトランザクションを巻き戻し、"
+                    + "接続は開いて何も残らない",
+                (h, ct) => UntrackedWriteClosedPooledConnectionAsync(h, nextByOtherGuard: true, ct)
             ),
             Row(
                 "refresh-unlisted-referring-table-refuses-while-present-locally",
@@ -1882,6 +1921,178 @@ internal static partial class SyncEngineFixedRows
         engine.ChunkWriteGap = TimeSpan.Zero;
 
         return engine;
+    }
+
+    /// <summary>
+    /// 塊の中の深い自己参照の鎖：サーバーに根 1 と、1 つ前の行を親にする 2〜211 の鎖を作ってから根を書き直す（版の順は鎖 → 根）。
+    /// 閾値 2・塊の大きさを鎖と同じ 210 にしたエンジンの同期では、最初の塊が鎖の全部、後ろの塊が根になる
+    /// </summary>
+    private static async Task DeepChainRootInLaterChunkAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        const int depth = 210;
+        await InsertServerFoldersAsync(h, ct, (1, null, "root"));
+
+        for (var id = 2; id <= depth + 1; id++)
+        {
+            await InsertServerFoldersAsync(h, ct, (id, id - 1, $"n{id}"));
+        }
+
+        await RenameServerFolderAsync(h, 1, "root-renamed", ct);
+        var engine = h.CreateEngine();
+        engine.ChunkThreshold = 2;
+        engine.ChunkSize = depth;
+        engine.ChunkWriteGap = TimeSpan.Zero;
+
+        var thrown = await Record.ExceptionAsync(() => h.SyncAsync(WithoutBlobs, ct, engine));
+
+        thrown
+            .Should()
+            .BeNull($"同期は止まらずに終わる（例外：{thrown?.GetType().Name}: {thrown?.Message}）");
+        Describe(await h.ReadLocalAsync(ct))
+            .Should()
+            .Be(Describe(await h.ReadServerAsync(ct)), "端末とサーバーの内容が同じ");
+    }
+
+    /// <summary>
+    /// 塊の中で保留する鎖の試行の数：サーバーに根 1 と深さ <paramref name="depth"/> の鎖を作ってから根を書き直し、閾値 2・塊の大きさ
+    /// <paramref name="depth"/> のエンジンで同期する（最初の塊が鎖の全部で、根を持たないので鎖を全部保留する）
+    /// </summary>
+    private static async Task HeldChainAttemptsAsync(
+        SyncEngineFixedHarness h,
+        int depth,
+        CancellationToken ct
+    )
+    {
+        await InsertServerFoldersAsync(h, ct, (1, null, "root"));
+
+        for (var id = 2; id <= depth + 1; id++)
+        {
+            await InsertServerFoldersAsync(h, ct, (id, id - 1, $"n{id}"));
+        }
+
+        await RenameServerFolderAsync(h, 1, "root-renamed", ct);
+        var engine = h.CreateEngine();
+        engine.ChunkThreshold = 2;
+        engine.ChunkSize = depth;
+        engine.ChunkWriteGap = TimeSpan.Zero;
+        var routes = new List<SyncDownloadRoute>();
+        var attempts = new List<int>();
+        engine.DownloadRouteObserved = routes.Add;
+        engine.ApplyAttemptsObserved = attempts.Add;
+
+        await h.SyncAsync(WithoutBlobs, ct, engine);
+
+        var observed =
+            $"道={string.Join(",", routes)}／適用ごとの試行={string.Join(",", attempts)}";
+        routes.Should().Contain(SyncDownloadRoute.Chunked, observed);
+        attempts.Should().NotBeEmpty(observed);
+        attempts.Max().Should().BeLessThanOrEqualTo(2, observed);
+        Describe(await h.ReadLocalAsync(ct))
+            .Should()
+            .Be(Describe(await h.ReadServerAsync(ct)), "端末とサーバーの内容が同じ");
+    }
+
+    /// <summary>
+    /// 残す鎖の試行の数：サーバーに深さ <paramref name="depth"/> の鎖（根 1）を作って同期し、端末で葉の下に未送信のフォルダーを作ってから、
+    /// サーバーが鎖を葉から順に消して同期する（削除伝搬が鎖を消すと、未送信の子が葉を、葉が親を参照して違反になる）
+    /// </summary>
+    private static async Task KeptChainAttemptsAsync(
+        SyncEngineFixedHarness h,
+        int depth,
+        CancellationToken ct
+    )
+    {
+        await InsertServerFoldersAsync(h, ct, (1, null, "root"));
+
+        for (var id = 2; id <= depth; id++)
+        {
+            await InsertServerFoldersAsync(h, ct, (id, id - 1, $"n{id}"));
+        }
+
+        await h.SyncAsync(WithoutBlobs, ct);
+        await h.ExecuteLocalAsync(
+            $"INSERT INTO model_folders (folder_id, parent_id, name) VALUES (9000, {depth}, 'local-child')",
+            ct
+        );
+
+        for (var id = depth; id >= 1; id--)
+        {
+            (await h.Server.Folders.DeleteAsync(id, ct)).Should().BeTrue();
+        }
+
+        var engine = h.CreateEngine();
+        var routes = new List<SyncDownloadRoute>();
+        var attempts = new List<int>();
+        engine.DownloadRouteObserved = routes.Add;
+        engine.ApplyAttemptsObserved = attempts.Add;
+
+        var thrown = await Record.ExceptionAsync(() => h.SyncAsync(WithoutBlobs, ct, engine));
+
+        var observed =
+            $"例外={thrown?.GetType().Name}: {thrown?.Message}／道={string.Join(",", routes)}"
+            + $"／適用ごとの試行={string.Join(",", attempts)}";
+        thrown.Should().BeNull(observed);
+        routes.Should().Contain(SyncDownloadRoute.Single, observed);
+        attempts.Max().Should().BeLessThanOrEqualTo(2, observed);
+        var local = await h.ReadLocalAsync(ct);
+        Enumerable
+            .Range(1, depth)
+            .Where(id => !local.Folders.ContainsKey(id))
+            .Should()
+            .BeEmpty("未送信の子が参照する鎖は端末に残る（" + observed + "）");
+    }
+
+    /// <summary>
+    /// 端末に在る保留の親：サーバーにフォルダー 1（P）と子 2（C）を作って同期し、端末が名前 q を持つ未送信のフォルダー 50 を作る。
+    /// サーバーが名前 q のフォルダー 10（Q）を作り、P を Q の下へ移し、C の名前を変えて、端末が同期する（Q は名前の重なりで保留され、
+    /// P は親 Q が無いので違反で保留される）
+    /// </summary>
+    private static async Task HeldParentPresentLocallyAsync(
+        SyncEngineFixedHarness h,
+        CancellationToken ct
+    )
+    {
+        await InsertServerFoldersAsync(h, ct, (1, null, "p"), (2, 1, "c"));
+        await h.SyncAsync(WithoutBlobs, ct);
+        await h.ExecuteLocalAsync(
+            "INSERT INTO model_folders (folder_id, parent_id, name) VALUES (1050, NULL, 'q')",
+            ct
+        );
+        await InsertServerFoldersAsync(h, ct, (10, null, "q"));
+        var parent = (await h.Server.Folders.GetByIdAsync(1, ct))!;
+        parent.ParentId = 10;
+        (await h.Server.Folders.UpdateAsync(parent, cancellationToken: ct)).Should().BeTrue();
+        await RenameServerFolderAsync(h, 2, "c-server", ct);
+        var engine = h.CreateEngine();
+        var routes = new List<SyncDownloadRoute>();
+        engine.DownloadRouteObserved = routes.Add;
+
+        var result = await h.SyncAsync(WithoutBlobs, ct, engine);
+
+        var local = await h.ReadLocalAsync(ct);
+        var observed =
+            $"道={string.Join(",", routes)}／打ち切り={string.Join(",", result.Truncations.Select(t => $"{t.TableName}/{t.PendingKeyText}"))}"
+            + $"／C={local.Folders[2].Name}／P の親={local.Folders[1].ParentId?.ToString() ?? "null"}";
+        routes.Should().Contain(SyncDownloadRoute.Single, observed);
+        result
+            .Truncations.Select(t => t.PendingKeyText)
+            .Should()
+            .Contain(
+                ["10", "1"],
+                "Q は名前の重なりで、P は親 Q が無いので保留される（" + observed + "）"
+            )
+            .And.NotContain("2", "端末に在る P を親にする C は保留しない（" + observed + "）");
+        local
+            .Folders[2]
+            .Name.Should()
+            .Be("c-server", "C の更新は同じ実行で降りる（" + observed + "）");
+        local
+            .Folders[1]
+            .ParentId.Should()
+            .BeNull("保留した P は端末の古い内容のまま（" + observed + "）");
     }
 
     /// <summary>サーバーの他者がフォルダーを入れる（並べた順に版が付く）</summary>
@@ -3861,6 +4072,31 @@ internal static partial class SyncEngineFixedRows
                 "断った後、接続はトランザクションの外に戻る",
                 ct
             );
+
+            // 状態の表そのものが無い DB も、生の DbException でなく同じ例外で断る
+            await ExecuteOnAsync(raw, $"DROP TABLE {SyncLocalTracking.StateTableName}", ct);
+            var missing = await Record.ExceptionAsync(() =>
+                SyncLocalTracking.WriteUntrackedAsync(
+                    raw,
+                    (_, _) =>
+                    {
+                        called = true;
+                        return Task.CompletedTask;
+                    },
+                    ct
+                )
+            );
+            missing
+                .Should()
+                .BeOfType<InvalidOperationException>("状態の表の無い DB は断る")
+                .Which.Message.Should()
+                .Contain("not set up");
+            called.Should().BeFalse();
+            await ShouldBeOutsideTransactionAsync(
+                raw,
+                "状態の表の無い DB を断った後も、接続はトランザクションの外に戻る",
+                ct
+            );
         }
 
         Describe(await h.ReadLocalAsync(ct)).Should().Be(localBefore);
@@ -3869,8 +4105,16 @@ internal static partial class SyncEngineFixedRows
     /// <summary>
     /// 関数がプールの接続を閉じる：トランザクションとロックがプールに残り、同じプールの次の接続を開くと確認が巻き戻す
     /// </summary>
+    /// <param name="h">ハーネス</param>
+    /// <param name="nextByOtherGuard">
+    /// 次の接続を、表の集合の違う（定義のハッシュの違う＝まだ何も覚えていない）確認で開くか。その確認は速い道（残ったトランザクションの
+    /// 適用中の印を読んで巻き戻す枝）を通らずに全部の確認に入るので、残ったトランザクションを先に終わらせないと自分のトランザクションを
+    /// 始められない
+    /// </param>
+    /// <param name="ct">取り消し</param>
     private static async Task UntrackedWriteClosedPooledConnectionAsync(
         SyncEngineFixedHarness h,
+        bool nextByOtherGuard,
         CancellationToken ct
     )
     {
@@ -3880,15 +4124,20 @@ internal static partial class SyncEngineFixedRows
 
         // 製品の接続ファクトリを開くたびの確認で包む（プールする）。接続文字列を端末のほかの接続と変えて、プールを分ける
         // （残ったトランザクションを持つ接続を、この行の次の接続だけが借りる）
+        var connectionString = new SqliteConnectionStringBuilder(h.ConnectionString)
+        {
+            DefaultTimeout = 2,
+        }.ToString();
         var factory = new Sqlite.ObservedSqlConnectionFactory(
-            new Sqlite.SqlConnectionFactory(
-                new SqliteConnectionStringBuilder(h.ConnectionString)
-                {
-                    DefaultTimeout = 2,
-                }.ToString()
-            ),
+            new Sqlite.SqlConnectionFactory(connectionString),
             new SyncLocalTrackingGuard(GeneratedSyncTables.All).OnStateChange
         );
+        var nextFactory = nextByOtherGuard
+            ? new Sqlite.ObservedSqlConnectionFactory(
+                new Sqlite.SqlConnectionFactory(connectionString),
+                new SyncLocalTrackingGuard(GeneratedSyncTables.All.Take(2).ToList()).OnStateChange
+            )
+            : factory;
 
         await using (var connection = factory.CreateConnection())
         {
@@ -3923,7 +4172,7 @@ internal static partial class SyncEngineFixedRows
         }
 
         // 同じプールの次の接続を開くと、開くたびの確認が残ったトランザクションを巻き戻す
-        await using (var next = factory.CreateConnection())
+        await using (var next = nextFactory.CreateConnection())
         {
             await next.OpenAsync(ct);
             await ShouldBeOutsideTransactionAsync(

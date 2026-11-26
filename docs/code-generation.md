@@ -3389,6 +3389,9 @@ A refresh fetches every row again, so a large database can go over `DownloadRowL
 - **A foreign key that refers to a unique constraint, or spans several columns, cannot be asked which rows it refers to.**
   A local table with such a foreign key to a table a refresh rebuilds makes that refresh refuse whenever the table exists locally, without looking at its rows.
   When the server refuses a delete because of such a foreign key, or of a table the engine does not synchronize, the delete is not reported as `DeleteRefusedOnServer`: the engine looks only at the server rows of the synchronized tables, through the foreign keys it knows, and finding none, it throws the original failure back unchanged.
+  When the server changes a value that a local row still refers to through a foreign key to a unique constraint (a row of a table the engine does not synchronize, of a table the run excludes, or an unsent row), the download holds the parent row back instead of stopping.
+  The parent keeps its old content, the other rows come down, and the parent is reported in `SyncResult.Truncations`.
+  The parent comes down on the first run after the local row stops referring to the old value, so until then it does not catch up with the server.
 - **Cannot be combined with the EF Core Repository**, since the sync support requires a multi-target build and that combination is already exclusive.
 - **The HTTP transport requires `--generate-remote-services`.**
   Without it the direct sources are generated and the engine still works, but there is no client or endpoint to reach the server with.

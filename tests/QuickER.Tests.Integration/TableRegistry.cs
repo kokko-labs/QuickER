@@ -102,6 +102,21 @@ internal static class TableRegistry
             ]
         ),
         new(
+            "SyncKeyPaging",
+            "版なしの同期の表のキー順ページングの表（主キーの型 × ページの境目の値ごとに、生成の直結の差分ソースが実 SQL Server の全行を順に 1 回ずつ読むか）",
+            [
+                Runtime + "SyncKeyPagingRows.cs",
+                Runtime + "SyncSupportAdoSqlServerKeyPagingRuntimeTests.cs",
+            ],
+            [
+                "src/QuickER.CodeGen.CSharp/CSharpGenerationModelBuilder.Sync.cs",
+                "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_04_RepositoryContractCore.scriban",
+                "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_10_Sync.scriban",
+                "src/QuickER.Runtime",
+                "src/QuickER.Runtime.Sync",
+            ]
+        ),
+        new(
             "SyncPlanExpectations",
             "同期の差分と計画の期待の行（SyncPlan のエンジン〔SyncPlan/Fuzz・SyncPlan/CapabilityNet〕が流す。方言ごとの期待と実 DB の段の汎用の表明）",
             ["tests/QuickER.Tests.Integration/Dialects/SyncPlanFuzz/SyncPlanExpectationRows.cs"],

@@ -296,6 +296,7 @@ public sealed class QuickER.Runtime.Sync.SyncTableDescriptor<TEntity, TKey> : Qu
     public System.Collections.Generic.IReadOnlyList<string> UnlistedReferencingTableNames { get; init; }
     public System.Func<TEntity, TKey> ReadKey { get; init; }
     public System.Func<TEntity, byte[]> ReadRowVersion { get; init; }
+    public System.Func<TKey, object> ServerAfterKeyValue { get; init; }
     public System.Func<TKey, string> FormatKey { get; init; }
     public System.Func<string, TKey> ParseKey { get; init; }
     public System.Type EntityType { get; }

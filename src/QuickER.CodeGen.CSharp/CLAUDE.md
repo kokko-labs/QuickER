@@ -526,6 +526,14 @@ DB が値を生成する列は、生成 Entity にマーカー属性を刻み、
 - EditModel は JSON で読み書きしないので Ordinal のまま
 - ガード：`CodegenCaseTests` の行 `diag-member-name-case-only-*`（大小だけ違う列・列とナビゲーション・基底の 3 名 × 構成 2 つ＝リモートあり・なしでエラー。構成 full の列の行は、エラーだけで値オブジェクトの型名の大小違いの警告を重ねないことも見る）・`compile-member-name-case-editmodel-only`（EditModel だけの大小違いは診断なしでコンパイル）・`diag-type-name-refused-pair-not-warned-reserved`（型名側の `sql_parameter` と `sqlparameter` もエラーだけで警告を重ねない）・`GeneratedMemberNameCaseTests`（診断の無い図は実際の Kestrel のリモートで全エンティティを書いて読み戻せる）・`GeneratedFixedMemberDriftTests`（基底の名簿の一致）・`NameFuzzCompilationTests` の SqlServerFull の実行時の段（`GeneratedRuntimeProbe`＝読み込んだ生成物で全エンティティを両方の JSON の設定で組み立て、エンドポイントを登録して、同じ HTTP メソッドで大小だけ違うパターンを探す。種に依らず `i_d`・`rowstate`・`case_route`・`caseroute` を置く）。mutation 実証済み
 
+### 同期の記述子の一覧のメンバー名
+
+- 同期を生成するとき、記述子の一覧 `GeneratedSyncTables`（静的クラス）に、表ごとの記述子のプロパティ（名前はリポジトリ名）と固定の一覧 `All` が並ぶ。記述子のプロパティ名が `All` と同じになる表（`all`・`alls`＝単数化で同じリポジトリ名）は CS0102 でコンパイルできず、object から継ぐメンバーの名前になる表（`to_string`・`get_hash_code`・`get_type`・`memberwise_clone`・`finalize`）は継いだメンバーを隠して CS0108 の警告になる。どちらも生成の診断は 0 だった。
+- シンボル表検証（`ValidateGeneratedMemberNames`）が `model.SyncTables`（同期を生成しないとき空）の表ごとに、記述子のプロパティ名を名簿 `GeneratedFixedMemberNames.SyncTablesFixed`（`All`）・`SyncTablesInherited`（object の公開・プロテクトのメソッド）と照らし、`CodeGen_Error_GeneratedMemberNameCollision`（クラス `GeneratedSyncTables`・表）で止める。継いだメンバーの由来は `CodeGen_Origin_InheritedMember`。
+  - 同期を生成しない構成では断らない（`GeneratedSyncTables` は同期を生成するときだけ出る）。型名の判定（`GeneratedTypeNames.Analyze`）が構成に依らず断るのと違うのは、こちらが同期の出力の中のメンバー名だから。
+  - object の `Equals`・`ReferenceEquals` は、単数化（末尾の s を外し、ss は残す）がリポジトリ名に作らないので、行では確かめない（名簿には入れる）。
+- ガード：`CodegenCaseTests` の行 `diag-sync-member-name-reserved-*`（6 表 × 出力の形 3 つ）・`compile-sync-member-names-distinct-*`（近いがぶつからない名前は警告 0 でコンパイル）・`compile-sync-member-reserved-names-without-sync-support`・`NameFuzzCompilationTests`（構成 SyncBoth と、種に依らず置く名前 `all`）・`GeneratedFixedMemberDriftTests.SyncTablesFixed_ShouldMatchGeneratedSyncTablesResidual`・`GeneratedFixedMemberDriftTests.SyncTablesInherited_ShouldMatchObjectMembers`。
+
 ### ナビゲーション名と外部キーの重複
 
 - `ResolveNavigationNames` は、2 つのテーブルの間の全リレーション（向きを問わない）ごとに、まず向きごとの規則（同じ（親表, 子表）に 2 本以上なら役割名）で名付ける

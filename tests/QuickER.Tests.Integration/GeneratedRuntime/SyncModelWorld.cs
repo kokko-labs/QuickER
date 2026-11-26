@@ -964,6 +964,25 @@ internal sealed class SyncModelWorld : IAsyncDisposable
                 await DeleteAsync(device.Items, delete.Id, op, ct);
                 break;
 
+            case RekeyItemOp rekey:
+            {
+                // 生の SQL の文を 1 つのトランザクションで流す（端末のトリガーが記録する。どの文もちょうど 1 行を変える）
+                var statements = rekey.Statements();
+                var counts = await ((ISqlBatchExecutor)device.Sql).ExecuteSqlBatchAsync(
+                    statements,
+                    ct
+                );
+
+                if (counts.Any(count => count != 1))
+                {
+                    throw new InvalidOperationException(
+                        $"{op.Describe()}: changed {string.Join(",", counts)} rows"
+                    );
+                }
+
+                break;
+            }
+
             case WritePayloadOp write:
             {
                 var bytes = Convert.FromHexString(write.PayloadHex);

@@ -51,7 +51,9 @@
   - どのトリガーも適用中の印が 0 のときだけ記録する。エンジンが書く行（サーバーの行の適用）を、ローカルの変更として記録しないため。
   - `ON CONFLICT` の更新は名指しした列だけを書く。エンジンだけが書く 5 列は名指ししないので、行の更新・削除・同じキーでの入れ直し・主キーの変更（古いキーの行）・無制限バイナリ列の書き込みをまたいで値を保つ。上書きすると、サーバーが知っている行を知らない行として送り直し、基準の版や戻せなかった決定の印が消える。
   - 挿入は、除外した無制限バイナリ列の名前を全部付けて記録する（同じキーで消して入れ直した行も）。
-  - 主キーを変える更新は、更新後のキーの行と、古いキーの行（削除）の両方を記録する。
+  - 主キーを変える更新は、更新後のキーの行と、古いキーの行（削除）の両方を記録する。更新後のキーの行には、除外した無制限バイナリ列の名前を全部付け（`ON CONFLICT` でも置き換える）、古いキーの行の `applied_version` を写す（エンジンの列を書く唯一の例外。移った内容はエンジンが古いキーへ入れた内容なので、版の比べ方の相手もそれにする＝「古い読みの書き込みの見分け」）。
+    - 名前を付けないと、端末が消したキー（サーバーが知るキー）へ移した行は更新として送られ、blob が送られずにサーバーの古い blob が残る。`applied_version` を新しいキーのまま残すと、移した行の版（古いキーのもの）を新しいキーの他者の内容と比べて ModifiedOnServer を偽に報告し、LocalWins の後は端末の blob がサーバーの古い blob に置き換わる。NULL にすると、古いキーで読んだ古い実体を付け替えて保存した行を見逃す（比べた結果は `table:SyncEngineFixed` の行 `stale-entity-saved-after-download-then-key-moved-onto-locally-deleted-key-collect-reports-modified-on-server` が赤・`stale-entity-fresh-read-saved-then-key-moved-onto-locally-deleted-key-is-not-a-conflict` が緑）。
+    - 端末で 2 行の主キーを入れ替えると、上げる 2 つの更新は一意な値を入れ替えるので、どちらも UniqueValueTakenOnServer で断られる（「送信」の巡の規則のとおり。版の競合にはしない）。
   - 無制限バイナリ列の更新は、その列の名前を重複なく `blob_columns` へ足す。記録のたびに連番が進む。
 - `blob_columns` に入れる名前は、アクセサの名前（記述子の `UnboundedBinaryColumnNames`＝プロパティの名前）。トリガーの `UPDATE OF` に使うのは DB の列名（`LocalUnboundedBinaryColumnNames`）。2 つは同じ並び・同じ数で、数が違えば `TriggersFor` が断る。
 - 記述子の `Local*` の 3 メンバー（`LocalTableName`・`LocalKeyColumnName`・`LocalUnboundedBinaryColumnNames`）は引用していない生の名前で、トリガーの SQL が自分でクォートする。同期する表は `main` にある（スキーマ修飾の表は生成時に外す＝「生成の条件と診断」）。
@@ -62,7 +64,7 @@
 - 期待の定義のハッシュ（開くたびの確認の鍵）は、状態の表 3 つの `CREATE` の文・初期の 1 行の文・期待のトリガーの文から作る。状態の表の形が変わると鍵が変わり、覚えた結果が古い形のまま使われない。
 - 記録しないもの：`REPLACE`（`INSERT OR REPLACE`・`UPDATE OR REPLACE`）が一意制約で消す別の行の削除。`recursive_triggers` が切のとき、SQLite が削除のトリガーを発火させない。
 - トリガーの記録では、保存が DB から消した行だけが削除として記録に残る（グラフ保存の、書かれなかった新しい子の DELETE はどの行にも当たらず、トリガーが発火しない）。
-- ガード：`SyncSupportAdoSqliteTriggerRuntimeTests` が行の表 `SyncTriggerRecordingRows`（影響の地図の名前 `table:SyncTriggerRecording`）を流す。主な行は `int-key-insert`・`primary-key-change-int`・エンジンの列を保つ行 `engine-columns-kept-by-update`・`engine-columns-kept-by-delete-then-reinsert`・`engine-columns-kept-on-old-key-by-primary-key-change`・`engine-columns-kept-by-blob-write`・`stream-write-names-blob-column`・`delete-then-reinsert-without-blob-write-names-all-blob-columns`・`applying-within-transaction-is-not-recorded`・`cascade-delete-and-set-null`・`graph-save-removed-parent-with-new-children-records-only-deleted-rows`・`graph-save-through-untracked-parent-records-only-tracked-child`。張る前の列の確かめは `table:SyncTriggerGuard`（行 `key-column-renamed-refuses-open-until-renamed-back`）。生成の行は `CodegenCaseTests` の行 `exec-sync-quoted-names-local-tracking-records-on-sqlite`（引用符を含む名前でも記録する）。名前の前置きは規則 `sync-auxiliary-trigger-names-in-template`。mutation 実証済み（適用中の印の条件を外す・連番を進めない・主キーを変える更新の古いキーを削除として記録しない・挿入し直しで無制限バイナリ列の名前を付け直さない・張る前に列を確かめない・トリガーの `ON CONFLICT` がエンジンの列を上書きする）。
+- ガード：`SyncSupportAdoSqliteTriggerRuntimeTests` が行の表 `SyncTriggerRecordingRows`（影響の地図の名前 `table:SyncTriggerRecording`）を流す。主な行は `int-key-insert`・`primary-key-change-int`・除外 blob のある品目の主キーの変更 `primary-key-change-blob-to-new-key-names-all-blob-columns`・`primary-key-change-blob-onto-locally-deleted-key-names-all-blob-columns`・`primary-key-change-blob-swap-through-temporary-key-names-all-blob-columns`・エンジンの列を保つ行 `engine-columns-kept-by-update`・`engine-columns-kept-by-delete-then-reinsert`・`engine-columns-kept-on-old-key-by-primary-key-change`・`engine-columns-kept-by-blob-write`・`stream-write-names-blob-column`・`delete-then-reinsert-without-blob-write-names-all-blob-columns`・`applying-within-transaction-is-not-recorded`・`cascade-delete-and-set-null`・`graph-save-removed-parent-with-new-children-records-only-deleted-rows`・`graph-save-through-untracked-parent-records-only-tracked-child`。張る前の列の確かめは `table:SyncTriggerGuard`（行 `key-column-renamed-refuses-open-until-renamed-back`）。生成の行は `CodegenCaseTests` の行 `exec-sync-quoted-names-local-tracking-records-on-sqlite`（引用符を含む名前でも記録する）。名前の前置きは規則 `sync-auxiliary-trigger-names-in-template`。mutation 実証済み（適用中の印の条件を外す・連番を進めない・主キーを変える更新の古いキーを削除として記録しない・挿入し直しで無制限バイナリ列の名前を付け直さない・張る前に列を確かめない・トリガーの `ON CONFLICT` がエンジンの列を上書きする）。
 
 ## 記録させずに書く（SyncLocalTracking.WriteUntrackedAsync）
 
@@ -73,6 +75,7 @@
 - **どの出口でもトランザクションを終わらせる**：`write` の例外・取り消し・印を立てる文の失敗（ロック待ちの時間切れ）・コミットの失敗のどれでも、`ROLLBACK` を試みてから元の例外を投げ直す（`ROLLBACK` の失敗は元の例外を隠さない）。印を戻す文・`COMMIT`・`ROLLBACK` は `CancellationToken.None` で流す。
   - 理由：Microsoft.Data.Sqlite は、SQL の `BEGIN` で始めたトランザクションを、接続を閉じても巻き戻さない。プールの接続は、トランザクションと書き込みのロックを持ったままプールへ戻り、ほかの接続の書き込みが `database is locked` で失敗し、次にその接続を借りた処理はそのトランザクションの中で動く。
   - 残る限界：`ROLLBACK` 自体が失敗したプールの接続と、`write` の中で閉じられたプールの接続は、トランザクションとロックを持ったままプールへ戻る。`write` が接続を閉じたら `InvalidOperationException` で知らせる。その接続を次に開くのが開くたびの確認で包んだ接続ファクトリなら、確認が巻き戻す（「開くたびの確認（SyncLocalTrackingGuard）」）。プールしない接続（`ILocalRowStore.CreateDedicatedConnection`）は、閉じればロックを手放す。
+- 状態の表が無い DB（印を立てる文が DbException で失敗し、その表が無い）は、生の DbException でなく InvalidOperationException（"not set up"）で断る。状態の表に行が無い DB と同じ扱い。ガード：`table:SyncEngineFixed`（行 `untracked-write-refuses-closed-connection-and-missing-tracking`）。
 - `write` の中の制約（XmlDoc に書いてある）：渡された接続だけで書く（SQL か `ILocalRowStore`）。生成の Repository・`ISqlExecutor` は自分の接続を開くので、ロック待ちで失敗する。トランザクションを始めない・終わらせない（セーブポイントは可）・接続を閉じない・この API と同期を呼ばない。外部キーの検査は渡した接続の設定のまま。
 - `DbTransaction`（`connection.BeginTransaction()`）の形にしない：中のコマンドがどれもトランザクションを持つ必要があり、接続だけを受け取る `ILocalRowStore` と、`write` の中の素の SQL が動かない。
 - ガード：`SyncEngineFixedRows`（影響の地図の名前 `table:SyncEngineFixed`）の行 `untracked-write-is-not-recorded-and-keeps-earlier-records`・`untracked-write-that-throws-leaves-nothing-and-no-transaction`・`untracked-write-cancelled-leaves-nothing-and-no-transaction`・`untracked-write-holds-off-other-writers-until-commit`・`untracked-write-through-repository-fails-on-lock-wait`・`untracked-write-refuses-connection-in-transaction-and-nested-call`・`untracked-write-refuses-closed-connection-and-missing-tracking`・`untracked-write-clears-applying-flag-left-set`・`untracked-write-closed-pooled-connection-is-rolled-back-on-next-open`。生成の行は `CodegenCaseTests` の行 `exec-sync-quoted-names-local-tracking-records-on-sqlite`（生成し直したコードの API が、書いた行を記録せず、印を 0 に戻す）。同期のモデルの端末は、記録しない書き込みをこの API で流す（`tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`「判定役の継ぎ目・台帳・実行ごとの照合」）。mutation 実証済み（失敗の出口で巻き戻さない・巻き戻しを呼び出し側の取り消しのトークンで流す・印を立てない・印を戻さずにコミットする・トランザクションの中の接続を名指しで断らない・関数の中で閉じた接続を確かめない・状態の表の行を確かめない）。
@@ -89,6 +92,8 @@
   - 鍵に定義のハッシュを含める理由：同じ DB に、同期する表の集合が違う 2 つのガードが向きうる。
   - インスタンスでなく静的に覚える理由：包む接続ファクトリが scoped・transient で登録されると、インスタンスごとに確かめ直すことになる。
 - 失敗したら、**接続を閉じてから**例外を投げ、覚えた値は進めない（`StateChange` のハンドラが投げるだけだと、例外が出たのに接続が開いたまま残る）。`DbException` は `InvalidOperationException` で包む。
+  - 速い道の読み取りも同じ try の中に置く（DbException 以外の例外＝状態の表の値の型違いなどでも、接続を閉じてから投げる）。ガード：`table:SyncTriggerGuard`（行 `state-flag-of-wrong-type-on-fast-path-closes-connection`）。
+- 2 段目に入る前に、残ったトランザクションを静かに巻き戻す（`RollBackLeftoverTransaction`。トランザクションが無ければ失敗して何も変えない）：プールの接続がトランザクションの途中で閉じられて戻っていると、覚えていない確認（表の集合の違うガード・DB を差し替えた後）の 2 段目は自分の `BEGIN` を断られ、開けない。ガード：`table:SyncEngineFixed`（行 `untracked-write-closed-pooled-connection-is-rolled-back-by-full-check-of-other-guard`）。
 - 残った適用中の印を戻す：確認がそろったと答えた後（3 段のどれでも）、状態の表の印が 0 でなければ `UPDATE … SET applying = 0 WHERE applying <> 0` で戻す。
   - エンジンと `WriteUntrackedAsync` は印を 1 つのトランザクションの中で立てて戻し、開いているトランザクションの印はほかの接続からは見えない（戻さないし、書き込みのロックも待たない）。開いたばかりの接続から印が 1 に見えるのは 2 つの場合だけ。
     - 印を戻さずにコミットされた（`write` が自分でコミットした・生成の外の何かが立てた）。
@@ -124,14 +129,16 @@
 - 適用は、外部キーの検査を切った実行の接続（「実行の接続」）の 1 つの `BEGIN IMMEDIATE` のトランザクションで、適用中の印を立てて書く（トリガーが自分の書き込みを記録しない）。中では、全部の表の削除伝搬を書き込みの前に行い、行を書き、外部キーを確かめ、表ごとの再開点を保存する（全部か無しか）。
   - 削除伝搬を書き込みの前に置かないと、消える行が持つ一意な値を書き込みが取れず、同じ適用で収束しない。
   - 一意な値の重なりは、取得した集合の中で後回しと回転（削除して入れ直す）で解く。集合の外の行をキーで読みに行く仕組みは持たない。
-  - 外部キーの違反は、試行を巻き戻してから、適用の前からある違反（巻き戻した後の DB で読み直す）を除き、書いた子を保留にするか消した親を残す（主キーでない列への外部キーは、その列の値で親を引き直す）。どれにも当たらない違反が残れば説明できない違反として `InvalidOperationException`。試行の数には上限がある。
+  - 外部キーの違反は、試行を巻き戻してから、適用の前からある違反（巻き戻した後の DB で読み直す）を除き、書いた子を保留にするか消した親を残す（主キーでない列への外部キーは、その列の値で親を引き直す）。
+  - 違反の親（主キーで分かる親・列の値で引き直した親）の扱いは 1 か所の判定（`SpareParent`）で決める：その試行の削除伝搬が消した親なら残し（`keep`）、その試行で書いた親なら保留にする（`held`・打ち切りの `MissingParentTableName` は null）。後ろは、エンジンの知らない一意な列への外部キーで端末の行（同期しない表・その実行で除外した表・受信だけの実行の未送信の子）が古い値を参照しているのに、サーバーが値を変えた親を書いた形で、書かずに保留すれば違反が消える。子が参照を外した後の最初の実行で親が降りる（短所：それまで親はサーバーの内容に追いつかない。docs の既知の制限）。エンジンは子の行も同期しない表も書かない。外すと、この形の同期が "left foreign key violations it cannot explain" で毎回止まる。ガード：`table:SyncEngineFixed`（行 `unique-reference-*`）。どれにも当たらない違反が残れば説明できない違反として `InvalidOperationException`。試行の数には上限がある（200）。
+  - 保留と親を残すことは同じ試行の中で推移的に閉じる：違反で保留した行があれば、その試行で書いた行のうち、保留した行を記述子の外部キー（`SyncTable.ParentsOf`）で参照し、その親が端末に無い行も保留にする（`HoldRowsReferringToHeldAsync`・端末に在る親は古い内容のまま残るので子を保留しない）。親を残したら、残す親が参照する、その試行の削除伝搬が消した親も残す（`KeepParentsOfKeptAsync`）。閉じないと、自己参照の鎖を 1 試行で 1 段しか保留・残せず、深さが試行の上限（200）を超える鎖で "did not settle within 200 attempts" で毎回止まる。試行の数は internal の口 `ApplyAttemptsObserved` で数えられる。
   - 保留した行（外部キーと一意な値で保留した行）がある取得は打ち切りを報告し（`SyncDownloadTruncation`・親が無いときは `MissingParentTableName`）、打ち切りがあれば、上限を取り直して再開点からもう 1 回だけ取得・適用する（2 回目は捨てる記録を渡さない）。2 回目の打ち切りは結果に残る。
   - 再開点は保留した最初の行の手前までにする。保留の行を越えて進めると、その行が二度と降りない。
 - 適用はローカルの Save フックを呼ばない（`ILocalRowStore` で書く）。
 - 再開点は表ごとに状態の表（`quicker_sync_table`）に持ち、ローカルの行の版の列からは導かない。洗い替えも同期も再開点を書く。
 - 未送信の行で表の取得を打ち切らない。未送信の行はサーバーの行で上書きせずにローカルの内容を残す（ローカルの行が無く、サーバーがそのキーを知らないときだけサーバーの行が入る）。サーバーが知らないキーで端末が作った行は、その行の手前で表の再開点を止める（越えると、ローカルの行が消えた後にサーバーの行が二度と降りない）。
 - 差分 SQL の `@anchor` / `@ceiling` は NULL を取り得るため `(@anchor IS NULL OR ...)` で「制約なし」を明示し、比較相手は `CAST(@anchor AS binary(8))` へ明示キャストする（生 SQL のパラメータは型なしで、NULL が nvarchar と推論され `Implicit conversion from data type nvarchar to timestamp is not allowed.` で落ちる）。上限はサーバーの `MIN_ACTIVE_ROWVERSION()`（未コミットのトランザクションをまたいだ読み飛ばしを防ぐ）。
-- ガード：決定的なシナリオ（`SyncModelRuntimeTests.Scenario_FailsExactlyAsListed`。もう 1 回の取得は行 `fk-parent-created-between-table-fetches-arrives-in-same-sync`）・乱数の種（`SyncSupportAdoSqliteEngineRuntimeTests.RandomSeeds_ConvergeWithoutLoss`）・`SyncEngineFixedRows`（行 `refresh-and-sync-leave-nothing-to-fetch-again`・`unsent-insert-then-delete-of-unknown-key-takes-server-row-on-download`・適用が Save フックを呼ばないことは `download-does-not-run-local-save-hooks`＝行を飛ばすフックを登録しても降りた行が入り、フックの呼ばれた数が増えない）。
+- ガード：決定的なシナリオ（`SyncModelRuntimeTests.Scenario_FailsExactlyAsListed`。もう 1 回の取得は行 `fk-parent-created-between-table-fetches-arrives-in-same-sync`、深い鎖は `deep-*`＝根が一意な値で保留・端末の未送信の子の下の鎖をサーバーが消す・表をまたぐ鎖）・`table:SyncEngineFixed`（試行の数が鎖の深さに依らないことは `apply-attempts-held-chain-in-chunk-depth-50-stay-constant`・`apply-attempts-held-chain-in-chunk-depth-250-stay-constant`・`apply-attempts-kept-chain-deleted-under-unsent-child-depth-50-stay-constant`・`apply-attempts-kept-chain-deleted-under-unsent-child-depth-250-stay-constant`、塊の中の深い鎖は `chunk-deep-selfref-chain-root-in-later-chunk-settles`）・乱数の種（`SyncSupportAdoSqliteEngineRuntimeTests.RandomSeeds_ConvergeWithoutLoss`）・`SyncEngineFixedRows`（行 `refresh-and-sync-leave-nothing-to-fetch-again`・`unsent-insert-then-delete-of-unknown-key-takes-server-row-on-download`・適用が Save フックを呼ばないことは `download-does-not-run-local-save-hooks`＝行を飛ばすフックを登録しても降りた行が入り、フックの呼ばれた数が増えない）。
 
 ## 削除伝搬
 
@@ -150,11 +157,14 @@
 - 巡に分けて送り、外部キーか一意制約で断られた書き込みは、その巡でどれか 1 件でも送れていれば次の巡へ回す。進展が無くなった残りを報告・決着させる（`UploadCoreAsync`）。
   - 理由：表の中だけで回すと、同じ表の後の行の更新が空ける一意な値・後回しの段の付け替えを待つ削除・一時的な失敗を次のランまで持ち越し、後勝ち＋ServerWins は利用者の変更を捨てる。
 - サーバーが断った理由は、書き込みが例外になったときだけサーバーの状態で確かめる（`ExplainRefusalAsync`。成功経路の呼び出しは増えない）。
+  - 確かめる処理の取り消しで素通しするのは呼び出し側の取り消し（渡された `CancellationToken` が取り消されている）だけ。HttpClient の時間切れのような頼んでいない取り消しは、確かめる処理の失敗として元の例外と一緒に `AggregateException` にする（素通しすると、書き込みの失敗が取り消しに化けて消える）。ガード：`table:SyncEngineFixed`（行 `refused-write-explanation-lookup-timeout-is-aggregated-with-write-failure`）。
   - 挿入・更新で親がサーバーに無ければ `SyncConflictReason.ParentMissingOnServer`。ローカルの行でサーバーの一意性を確かめ、別の行が値を持っていれば `UniqueValueTakenOnServer`。
   - 削除で行がサーバーに残り、エンジンのどれかの表のサーバーの行がその行を参照していれば `DeleteRefusedOnServer`。
   - どれにも当たらなければ元の例外を `ExceptionDispatchInfo` で投げ直す（通信の失敗を競合に化けさせない）。確かめる処理自体の失敗は、元の例外と確かめの失敗をまとめた `AggregateException`（取り消しは除く）。
   - 後勝ち＋ServerWins の実行は、断られた残りを報告せずに捨てて、サーバーの行で戻す（版なしの表のその状態の行を決着させる道は、これと、捨てる印を付けた後の後勝ちの実行＝印は `ReadCarriedDecisionsAsync` がモードに依らず読む）。
 - 決着は、書き手が受け入れた行に書き戻した版を基準の版にする。サーバーを読み直すのは、書き手が版を書き戻さなかったときと、無制限バイナリ列を送った後（列の書き込みも版を進める）だけ。書き込みの後に読み直した版は、後から書いたほかの書き手の版でありうるので、基準にすると、その書き手の内容を競合なしに上書きする。
+  - 読み直した行がサーバーに無ければ（書いた直後にほかの書き手が消した）、投げずに決着させず未送信のまま残す。次の実行が MissingOnServer として扱う。ガード：`table:SyncEngineFixed`（行 `blob-upload-then-row-deleted-on-server-leaves-change-unsent-and-next-sync-reports-missing`）。
+  - 送った削除の決着（未送信を外す・基準の版と `known` を戻す）も、ほかの決着と同じく 1 つの短い `BEGIN IMMEDIATE` で行う（受け入れは読み：2 つの文の間で落とす口が無い）。
 - 行の変わる印（連番）が送る前に読んだものと同じときだけ未送信を外し、ローカルの行の版の列を基準の版に合わせる（適用中の印を立てて書く。行の内容と除外した無制限バイナリ列には触らない）。送る間にアプリが書いた変更は未送信のまま残る。
 - ServerWins が戻した行の版の列は、戻したサーバーの行の版になる。
 - ServerWins の実行が戻せなかった行の決定は、行の状態に印（`sw_seq`）を残して後の実行へ持ち越す（印の後に編集が無ければ、後の実行がその行を送らずにサーバーの行で戻す）。
@@ -168,13 +178,13 @@
 - 行の状態の表のエンジンの列 `applied_version` は、エンジンがその行へ最後に入れた他者の内容の版。
   - 書くのは `SyncState.WriteAppliedRowAsync` の 1 か所（取得の適用・ServerWins が戻した行・洗い替え）。その時の `base_version` と同じ版の書き直し（洗い替えが全行を書き直す・ServerWins がサーバーで変わっていない行を戻す）では進めない。
   - 強制の上書き（LocalWins・後勝ち）の決着で NULL にする（`SyncState.SettleSentAsync`）。
-  - トリガーの `ON CONFLICT` は名指ししない（「ローカルの変更の記録（SyncLocalTracking）」）。
+  - トリガーの `ON CONFLICT` は名指ししない（「ローカルの変更の記録（SyncLocalTracking）」）。主キーの変更だけは、トリガーが古いキーの値を新しいキーへ写す（移った行の版は古いキーの内容のもので、比べる相手も古いキーの値）。
 - 版で守る送信の段（`SyncTable<,>.SendAsync` の、サーバーが知っている行の更新の枝）は、端末の行が持つ版が `applied_version` より古ければ、`base_version` でなく行が持つ版を元の版にして送る。サーバーの版の照合が `ModifiedOnServer` を返す。
   - 比べ方は `SyncState.IsOlderVersion`（先頭の 0 のバイトを除いた長さ → バイトの辞書式＝big-endian の符号なし整数として比べる）。
 - 見分けない形：削除・後勝ちの実行・版なしの表・版を持たない実体での保存（端末で作って持ち続けた実体・キーだけで組んだ実体。行が持つ版が空で、競合なしに上がる）。
 - 残る形：サーバーへの書き込みの後・決着の前に落ちた実行の後に ServerWins が戻した行の、その前の実体の保存は、サーバーの内容が端末自身のものでも `ModifiedOnServer` になる。
 - 壊すと：見分けないと、他者の内容を競合なしに上書きする。同じ版の書き直しで `applied_version` を進めると、編集 → 同期 → 同じ実体の再保存や、洗い替えの後の保存が偽の競合になる。
-- ガード：`table:SyncEngineFixed`（行 `stale-entity-saved-after-download-collect-reports-modified-on-server`・`stale-entity-saved-after-download-serverwins-restores-server-content`・`stale-entity-saved-after-download-localwins-uploads-then-resave-is-not-a-conflict`・`stale-entity-saved-after-download-last-write-wins-uploads-without-conflict`・`stale-entity-saved-after-download-value-object-version-collect-reports-modified-on-server`・`stale-entity-saved-after-own-upload-is-not-a-conflict`・`stale-entity-saved-after-refresh-rewrote-own-upload-is-not-a-conflict`・`stale-entity-saved-after-serverwins-put-back-own-upload-is-not-a-conflict`・`stale-entity-read-between-own-uploads-is-not-a-conflict`・`stale-entity-saved-after-failed-settle-and-serverwins-put-back-collect-reports-modified-on-server`・`stale-entity-without-version-saved-after-download-is-not-distinguished-and-uploads`・`stale-entity-delete-after-download-is-not-distinguished-and-deletes-server-row`・`stale-entity-version-order-reads-versions-as-big-endian-numbers` ほか `stale-entity-*` の行）・`table:SyncTriggerRecording`（行 `engine-columns-kept-by-update`・`engine-columns-kept-by-delete-then-reinsert`）。
+- ガード：`table:SyncEngineFixed`（行 `stale-entity-saved-after-download-collect-reports-modified-on-server`・`stale-entity-saved-after-download-serverwins-restores-server-content`・`stale-entity-saved-after-download-localwins-uploads-then-resave-is-not-a-conflict`・`stale-entity-saved-after-download-last-write-wins-uploads-without-conflict`・`stale-entity-saved-after-download-value-object-version-collect-reports-modified-on-server`・`stale-entity-saved-after-own-upload-is-not-a-conflict`・`stale-entity-saved-after-refresh-rewrote-own-upload-is-not-a-conflict`・`stale-entity-saved-after-serverwins-put-back-own-upload-is-not-a-conflict`・`stale-entity-read-between-own-uploads-is-not-a-conflict`・`stale-entity-saved-after-failed-settle-and-serverwins-put-back-collect-reports-modified-on-server`・`stale-entity-without-version-saved-after-download-is-not-distinguished-and-uploads`・`stale-entity-delete-after-download-is-not-distinguished-and-deletes-server-row`・`stale-entity-version-order-reads-versions-as-big-endian-numbers`・主キーを付け替えた行の `stale-entity-saved-after-download-then-key-moved-onto-locally-deleted-key-collect-reports-modified-on-server`・`stale-entity-fresh-read-saved-then-key-moved-onto-locally-deleted-key-is-not-a-conflict` ほか `stale-entity-*` の行）・同期のモデルのシナリオ `rekey-*`・`table:SyncTriggerRecording`（行 `engine-columns-kept-by-update`・`engine-columns-kept-by-delete-then-reinsert`）。
 
 ## 未送信の一覧と捨てる口
 
@@ -200,6 +210,7 @@
 - 送る列は、サーバーが挿入として受けた行なら全列、それ以外は端末が書いた列（`blob_columns`）。列を送る前に行の書き込みの版を仮に記録し、列の送信が失敗しても次の実行が自分の書き込みを競合と取り違えない。列は一時ファイルを通して 1 本ずつ送る。
 - 版のガードを外した上書き（LocalWins・後勝ち）は、サーバーの送らなかった列に触れないので、その行の列を写し待ちにする。
 - 降ろした行の列は写し待ち（`blob_owed`）に記録し、列を運ぶ実行（`IncludeUnboundedBinary`）が、取得の前（前の実行の残り）と適用の後に、一時ファイルを通して行ごとに短いトランザクションで写す（内容をメモリに持たない）。その後に端末が書いた未送信の列は写さず、サーバーで NULL の列はローカルの列も空にし、サーバーかローカルに行が無ければ写し待ちだけを外す。列を運ばない実行は写し待ちを残す。
+  - 一時ファイルは作った直後から後始末の一覧に載せる（読み取りが投げても閉じて消える＝閉じれば消える一時ファイル）。置き場所は internal の `TemporaryFileFolder`（既定はシステムの一時フォルダー）。ガード：`table:SyncEngineFixed`（行 `owed-blob-copy-read-failure-closes-temporary-file`）。
 - 記述子の `FillUnsetUnboundedBinaries`（NOT NULL の除外列だけ・VO は `Create([])`・非 VO は `[]`）を、ローカルへ入れる行とサーバーへ挿入する行に当てる。
 - 一意な値の回転で入れ直した行は、端末の blob を保つ。
 - ガード：決定的なシナリオの `blob-*` の行（写さない列は `blob-owed-copy-keeps-unsent-local-blob`）・`SyncEngineFixedRows`（行 `primary-key-changed-row-sends-its-blob`・`unique-value-rotation-keeps-local-blobs`・`sync-vo-new-row-with-excluded-not-null-blob-downloads`・`sync-fixture-blob-cleared-on-server-is-cleared-locally`）・`SyncModelRuntimeTests.EmptyBlobWithoutConflict_IsStillAViolation`。
@@ -209,7 +220,7 @@
 - 拒否の順は、引数（取得の大きさ・降ろす行の上限・除外の型）→ blob の損失（`SyncUnboundedBinaryLossException`。記述子だけを見て DB を読まない）→ 範囲の外からの参照（`SyncRefreshScopeException`）→ 未送信（`SyncPendingChangesException`。`Force` で捨てる。捨てる印が今の連番と同じ行は未送信に数えず、`Force` で捨てる行と同じ扱いで置き換える＝「未送信の一覧と捨てる口」）。`Force` で抜けられない拒否を先に出し、どれも何も変えない。同期の外で空にされた表は断らない（洗い替えがそれを作り直す）。
 - 範囲の外は `Mode`（Versioned は版なしを外す。既定は `LastWriteWins`＝全テーブル）・`ExcludedEntityTypes`・構築時の除外・エンジンが同期しない表。範囲の外の表の行が範囲の表の行を参照していれば断る（記述子の `LocalReferences` で行を照会する。載らない外部キー＝`UnlistedReferencingTableNames` の表はローカルに在れば行を見ずに断る）。
 - 表を空にせず、上限までのサーバーの行で置き換える（同じ適用でサーバーに無い行を消す）。件数（`SyncRefreshTableResult`）は、消した行（サーバーに無かった行）と書いた行を数える。表どうしの外部キーの循環も、外部キーの検査を切った 1 つの適用なので順に依らず置き換わる。
-- **`SyncRefreshResult.DiscardedChanges` は、適用が実際に捨てた行の数**（サーバーの行で置き換えた行と、サーバーに無くて変更だけを捨てた行）。数えるのは `ApplyAttempt.NoteDiscarded` の 1 か所。
+- **`SyncRefreshResult.DiscardedChanges` は、適用が実際に捨てた行の数**（サーバーの行で置き換えた行と、サーバーに無くて変更だけを捨てた行）。数えるのは `ApplyAttempt.NoteDiscarded` の 1 か所。捨てる行のうち、状態が無い行（塊の洗い替えの削除の段が、行を取った後・キーを取る前にサーバーで消えた行として決着させた行）は、もう一度は捨てない（数えない）。保留を取り直す 2 回目の取得は、1 回目の捨てる行を未送信の数え方からだけ外す（`DownloadOnceAsync` の `uncountedDiscards`。再開点・適用・削除の段は 1 回目が残したまま）。外さないと、1 回目に置けなかった捨てる行を未送信に数え、塊の道に入らず、降ろす行の上限を超えると確定の後に断る。ガード：`table:SyncEngineFixed`（行 `refresh-force-second-fetch-does-not-count-unplaced-discard-as-unsent`）。ガード：`table:SyncEngineFixed`（行 `chunk-refresh-force-discard-gone-between-rows-and-keys-counted-once-keep-blobs`・`chunk-refresh-force-discard-gone-between-rows-and-keys-counted-once-discard-blobs`）。
   - 取得の前に捨てると決めても、途中に端末で書き直されて残った行（連番が進んだ行）は数えない。
   - 1 回で全部の道と塊の道で同じ数え方（塊の道は、最後の段が未送信を外した行も数える）。
   - 捨てると決めた数を返すと、途中に書かれて残った変更を捨てたと報告する。
@@ -330,8 +341,9 @@
 - 日時の主キーは Kind を落とした往復書式：`BuildFormatKey` が `DateTime.SpecifyKind(…, Unspecified).ToString("o")`、`BuildParseKey` が `SyncKeyText.WithoutDateTimeKind` を通してから読む（公開の静的クラス `SyncKeyText`）。どちらの DB も Kind を持たず読み戻した行は Unspecified なので、Kind つきのテキストは同じ行のテキストと一致しない。`DateTimeOffset` はオフセットが値の一部なのでそのまま。
 - decimal の主キーは指数表記を使わない：整形・読み取りは `SyncKeyText.FormatDecimal`（`0.############################`）/ `ParseDecimal`（`NumberStyles.Float`）の 1 か所で、生成物の記述子はそれを呼ぶだけ（書式の写しを生成側に持たない）。`G29` は絶対値 1e-5 未満を `1E-06` と書き、`decimal.Parse`（`NumberStyles.Number`）が `FormatException` で止まる。
 - 版なしの表のキー順ページング：`@afterKey` は型なし（文字列は nvarchar）で束縛されるので、文字列の主キーは `BuildServerAfterKey` が列と同じ型へ CAST する（SQL Server の型マッパーが渡す `SqlDbTypeName` と `SqlDeclaredLength`）。varchar を nvarchar と比べると SQL_* 照合順序で ORDER BY と比較の規則が食い違い、ページの境目で行を読み飛ばす。
+  - datetime2・date の主キーは、`@afterKey` を主キーのテキスト形（`FormatKey`＝Kind を落とした往復書式）で束縛し（記述子の `ServerAfterKeyValue`）、SQL で `CAST(@afterKey AS datetime2(7))` にする（判定は `CSharpGenerationModelBuilder.BindsServerAfterKeyAsText`）。型なしの `DateTime` は SqlClient が datetime と推定してクライアントで 1/300 秒へ丸め（CAST では戻らない）、1753 年より前を送れない。datetime・smalldatetime の主キーはそのまま（読み戻した値は丸まらず、7 桁の小数秒の文字列は datetime へキャストできない）。ほかの型（int・bigint・Guid・DateTimeOffset・decimal）は推定が列の型に合う（`table:SyncKeyPaging` で実 SQL Server に流して確かめた）。
 - 固定長の文字列の主キーは生成時に警告する（「生成の条件と診断」）。
-- ガード：`SyncSupportAdoSqliteKeyTextRuntimeTests`（Kind ごとの整形・decimal の往復）・`CodegenCaseTests` の行 `probe-sync-key-text-decimal-key`（decimal の主キーの図を生成→実コンパイル→記述子を実行）・`probe-sync-key-text-decimal-order-key-scale`・`probe-sync-key-text-timespan-key`、シナリオ `25-datetime-key-utc`・`25-datetime-key-local`・`19-varchar-key-paging-skips-rows`（`SyncModelSqlServerRuntimeTests`）（mutation 実証済み）。
+- ガード：`SyncSupportAdoSqliteKeyTextRuntimeTests`（Kind ごとの整形・decimal の往復）・`CodegenCaseTests` の行 `probe-sync-key-text-decimal-key`（decimal の主キーの図を生成→実コンパイル→記述子を実行）・`probe-sync-key-text-decimal-order-key-scale`・`probe-sync-key-text-timespan-key`、シナリオ `25-datetime-key-utc`・`25-datetime-key-local`・`19-varchar-key-paging-skips-rows`（`SyncModelSqlServerRuntimeTests`）（mutation 実証済み）。版なしの表のキーの型ごとのページングは `SyncSupportAdoSqlServerKeyPagingRuntimeTests`（行の表 `table:SyncKeyPaging`・図 `SyncKeyFixture`・実 SQL Server。行 `datetime2-ticks-between-legacy-datetime-steps`・`datetime2-ticks-between-legacy-datetime-steps-in-pairs`・`datetime2-sub-millisecond-neighbors`・`datetime2-before-1753`・`date-before-1753` と、ほかの型の行）。
 
 ## 実行が変えた行の一覧
 
