@@ -88,6 +88,14 @@
       Exclude="..\QuickER.Tests.Integration\bin\**;..\QuickER.Tests.Integration\obj\**"
       LinkBase="IntegrationDeclarations"
     />
+    <!--
+      分岐の軸の台帳と領域の標準の軸の一覧（実体は Integration の直下）。作らない形の宣言と同じ理由で逆向きにリンクし、結び済みの
+      判定役の実在と、インターセプターの表の札が指す台帳の項目の Id をこのプロジェクトで照合する（純粋なデータ）
+    -->
+    <Compile
+      Include="..\QuickER.Tests.Integration\BranchAxisLedgerEntries.cs"
+      LinkBase="IntegrationDeclarations"
+    />
   </ItemGroup>
 
   <!--

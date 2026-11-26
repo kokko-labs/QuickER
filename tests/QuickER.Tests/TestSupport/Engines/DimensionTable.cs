@@ -54,7 +54,13 @@ public sealed record AxisMember(Type DeclaringType, string Member)
 /// <summary>因子の水準</summary>
 /// <param name="Name">水準の名前（因子の中で一意）</param>
 /// <param name="Source">この水準が表す製品の仕様の軸の項目（無ければ null）</param>
-public sealed record Level(string Name, AxisMember? Source = null);
+public sealed record Level(string Name, AxisMember? Source = null)
+{
+    /// <summary>
+    /// 新しい水準の札（減るだけの写し <see cref="ScenarioRowBaseline"/> に無い水準は札を持つ。写しにある水準は null のまま）
+    /// </summary>
+    public RowTag? Tag { get; init; }
+}
 
 /// <summary>次元表の因子（エンジンが組み合わせて流す入力の 1 つの観点）</summary>
 /// <param name="Name">因子の名前（表の中で一意）</param>

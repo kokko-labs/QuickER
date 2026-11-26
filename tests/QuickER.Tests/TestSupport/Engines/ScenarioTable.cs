@@ -17,7 +17,14 @@ public sealed record ScenarioRow<TInput>(
     string? Finding,
     string Description,
     TInput Input
-);
+)
+{
+    /// <summary>
+    /// 新しい行の札（札の対象の表で減るだけの写し <see cref="ScenarioRowBaseline"/> に無い行は札を持つ。写しにある行は null のまま）
+    /// </summary>
+    /// <remarks><see cref="Finding"/>（由来の指摘の番号の文）とは別物で、照合は札だけを読む。</remarks>
+    public RowTag? Tag { get; init; }
+}
 
 /// <summary>
 /// エンジンの決定的なシナリオの表（Id で引き、Theory のデータにする）

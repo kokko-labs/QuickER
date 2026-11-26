@@ -29,7 +29,8 @@ namespace QuickER.Tests.Docs;
 /// 現れることで照合する（メソッド名が <c>_</c> で終わるか直後が <c>*</c> なら前方一致）。
 /// (3) 期待の行・シナリオの Id は、ハイフンを含みハイフンで終わらないバッククォートの小文字の語のうち、
 /// 最初のハイフンまでの語が行 Id の接頭辞の集合（<see cref="RowIdPrefixesOf"/>）にあるものを拾い、tests/ の
-/// C# ソースに現れることで照合する（このファイルと、作らない形の宣言のファイル <c>*NotGenerated.cs</c> は照合の本文に入れない＝
+/// C# ソースに現れることで照合する（このファイルと、作らない形の宣言のファイル <c>*NotGenerated.cs</c> と、分岐の軸の台帳の宣言
+/// <c>BranchAxisLedgerEntries.cs</c> は照合の本文に入れない＝
 /// 書いた Id がそのファイル自身に当たって実在に見えるため）。接頭辞の集合は手で持たず、tests/ の C# ソースの文字列リテラル
 /// （補間・連結の先頭を含む）の先頭の、最初のハイフンまでの語から作る（表に新しい接頭辞の行を足せば、
 /// そのまま照合の対象に入る）。接頭辞が当たる行 Id でない語は、理由つきの既知の一覧
@@ -344,10 +345,12 @@ public class ClaudeMdReferenceTests
 
             // このファイル自身は Id の照合の本文に入れない（行 Id でない語の一覧と自己検査の架空の Id が写り込み、
             // 一覧の語や架空の Id が tests/ に実在するように見えてしまう）。作らない形の宣言のファイルも同じ理由で入れない
-            // （受け持つ守りに書いた行 Id が宣言そのものに当たり、架空の Id が実在に見える）。宣言とファイル名の照合には入れる
+            // （受け持つ守りに書いた行 Id が宣言そのものに当たり、架空の Id が実在に見える）。分岐の軸の台帳の宣言も、判定役と
+            // 指摘のセルに行 Id を書くので同じ理由で入れない。宣言とファイル名の照合には入れる
             if (
                 Path.GetFileName(path) != nameof(ClaudeMdReferenceTests) + ".cs"
                 && !NotGeneratedGuard.IsDeclarationFileName(Path.GetFileName(path))
+                && !BranchAxisLedgerChecks.IsDeclarationFileName(Path.GetFileName(path))
             )
             {
                 all.Add(source);

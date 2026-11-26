@@ -119,3 +119,6 @@ tests/QuickER.Tests.Integration/protection-registry.json text eol=lf
 tests/QuickER.Tests/TestSupport/impact-map.md text eol=lf
 tests/QuickER.Tests.Integration/GeneratedRuntime/runtime-matrix.md text eol=lf
 tests/QuickER.Tests.Integration/GeneratedRuntime/sync-current-engine-scenario-ledger.md text eol=lf
+
+# 札の対象の表の減るだけの写し（GeneratedTextFile が LF で書く）
+tests/**/row-baseline.json text eol=lf

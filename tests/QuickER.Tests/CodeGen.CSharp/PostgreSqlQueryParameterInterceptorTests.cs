@@ -15,6 +15,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Npgsql;
 using QuickER.Runtime.EntityFrameworkCore;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 using Xunit;
 
 namespace QuickER.Tests.CodeGen.CSharp;
@@ -46,9 +47,11 @@ public class PostgreSqlQueryParameterInterceptorTests
     /// <summary>表の行（DbContext への操作と、記録したコマンドの値を持つパラメータの期待）</summary>
     /// <param name="Act">DbContext への操作</param>
     /// <param name="Expected">値が null でないパラメータの「値 DbType Npgsql の型の名前」（コマンドの並び順）</param>
+    /// <param name="Tag">新しい行の札（減るだけの写し row-baseline.json に無い行だけ。tests/QuickER.Tests/TestSupport/CLAUDE.md「分岐の軸の台帳と新しい行の札」）</param>
     private sealed record InterceptRow(
         Func<ProbeContext, CancellationToken, Task> Act,
-        string[] Expected
+        string[] Expected,
+        RowTag? Tag = null
     );
 
     private static readonly DateTime Midnight = new(2026, 1, 2);
@@ -56,6 +59,10 @@ public class PostgreSqlQueryParameterInterceptorTests
     private static readonly DateTime Noon = new(2026, 1, 2, 12, 0, 0);
 
     private static readonly TimeSpan BeyondDay = new(1, 1, 0, 0);
+
+    /// <summary>札の対象の表の Id と札（減るだけの写しと照合する＝<see cref="RowBaselineTables"/>）</summary>
+    internal static IReadOnlyList<BaselineEntry> BaselineEntries =>
+        [.. Rows.Select(pair => new BaselineEntry(pair.Key, pair.Value.Tag))];
 
     /// <summary>行（Id → 行）</summary>
     /// <remarks>
