@@ -13,7 +13,9 @@ namespace QuickER.Provider;
 /// </para>
 /// <para>
 /// ビューが読めるかは、表の列の名前の集合と表の有無だけで決まる（型・主キー・NOT NULL・列順・制約の変化ではビューは壊れない）ので、
-/// 入力は表ごとの同期後の列名だけにする。トリガーも、作り直しで壊れるのは同じ変化だけ（型の変更では壊れない）。索引を壊すのは、
+/// 入力は表ごとの同期後の列名と、どの表を作り直すかにする（作り直しは図に無い列の属性〔照合順序〕を落とすので、照合順序つきの
+/// キーを的にする <c>ON CONFLICT</c> のトリガーは作り直しでだけ壊れる。列の追加だけなら作り直さない）。トリガーも、作り直しで壊れるのは
+/// 同じ変化だけ（型の変更では壊れない）。索引を壊すのは、
 /// 索引が読む列（列の並び・式・部分索引の <c>WHERE</c>）を消す変化だけ。ただしトリガーは表のキーにも頼る（<c>ON CONFLICT</c> の的）ので、
 /// 実装は残る列でできたキーを置き換えの表へ写す。同じ同期が主キー・一意制約を変える形は試さない（実行器の同期の前後の比較が巻き戻して
 /// 名指しする）。
@@ -27,12 +29,17 @@ public interface ILiveDependentCheck
     /// <param name="tablesAfterSync">
     /// 列の名前の集合が変わる live の表 → 同期後の列名（<c>null</c> は表の削除）。ここに無い表は同期の前後で変わらないとみなす
     /// </param>
+    /// <param name="rebuiltTables">
+    /// この同期で作り直す live の表（製品の再構築の合成と同じ判定。<see cref="QuickER.Model.SchemaNames.Comparer"/> で引く）。
+    /// 作り直す表は作り直しの形（図に無い列の属性を落とす）で、作り直さない表は列の追加・表の削除の文そのもので試す
+    /// </param>
     /// <returns>
     /// 読めなくなるビュー・発火できなくなるトリガー・作り直せなくなる索引の名前（それぞれ序数の昇順）。試せなかった表・ビュー・トリガー・
     /// 索引（同期の前から写しで作れない物）は数えない（実行器が最後に拾う）。消した表のトリガー・索引は表と一緒に消えるので数えない
     /// </returns>
     LiveDependentBreaks DependentsBrokenBy(
-        IReadOnlyDictionary<string, IReadOnlyList<string>?> tablesAfterSync
+        IReadOnlyDictionary<string, IReadOnlyList<string>?> tablesAfterSync,
+        IReadOnlySet<string> rebuiltTables
     );
 }
 

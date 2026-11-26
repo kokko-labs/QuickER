@@ -2108,7 +2108,8 @@ internal static class SyncPlanFuzzRunner
 
         foreach (var entity in schema.Entities)
         {
-            var columns = entity.Columns.Select(c => c.Name).ToList();
+            var columns = await DatabaseSpellingsAsync(connection, dialect, entity, ct)
+                .ConfigureAwait(false);
             await using var command = connection.CreateCommand();
             // NULL は IS NULL で数える（SQL Server の COUNT(列) は text・ntext・image を受けない）。行が 0 なら SUM は NULL
             command.CommandText =
@@ -2135,6 +2136,43 @@ internal static class SyncPlanFuzzRunner
         }
 
         return profiles;
+    }
+
+    /// <summary>
+    /// 取り込んだ表の列名を DB の綴りへ戻す（モデルは前後の空白を除いた名前を持つので、前後に空白のある列名をそのまま引くと
+    /// DB に無い列になる）。DB の列を <c>SELECT * … WHERE 1 = 0</c> の列名で読み、綴りまで同じ列、無ければ前後の空白を除くと
+    /// 同じ列を選ぶ（どちらも無ければ図の名前のまま）
+    /// </summary>
+    private static async Task<List<string>> DatabaseSpellingsAsync(
+        DbConnection connection,
+        SyncPlanFuzzDialect dialect,
+        Entity entity,
+        CancellationToken ct
+    )
+    {
+        var names = new List<string>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText =
+                $"SELECT * FROM {dialect.QuoteTable(entity.TableName)} WHERE 1 = 0";
+            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                names.Add(reader.GetName(i));
+            }
+        }
+
+        return
+        [
+            .. entity.Columns.Select(c =>
+                names.FirstOrDefault(n => string.Equals(n, c.Name, StringComparison.Ordinal))
+                ?? names.FirstOrDefault(n =>
+                    string.Equals(n.Trim(), c.Name, StringComparison.Ordinal)
+                )
+                ?? c.Name
+            ),
+        ];
     }
 
     /// <summary>取り込んだ図を新しい Guid 空間へ写す（リレーションの列ペアも張り替える）</summary>

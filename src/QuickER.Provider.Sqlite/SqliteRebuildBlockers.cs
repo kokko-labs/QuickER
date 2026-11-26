@@ -23,6 +23,8 @@ namespace QuickER.Provider.Sqlite;
 /// <item>
 /// 作り直しで作れない索引（照合順序・関数）は、その表の作り直しで断られる（局所）。表と索引の原文を素のメモリの DB へ写し、表を置けたのに
 /// 索引を作れなければ数える（索引は自分の表しか読まないので、原因は DB の外の照合順序か関数に限られる。照合順序が使えるなら関数）。
+/// 原文で置けない表（列の COLLATE・CHECK・生成列が DB の外の照合順序・関数を使う）は、名前だけの表で置く（<see cref="SqliteReplay"/>）。
+/// 作り直しもそれらの属性を落とすので、名前だけの表で作れない索引が作り直しで作れない索引になる。
 /// </item>
 /// <item>
 /// 読めない仮想の生成列（<c>PRAGMA table_xinfo</c> の hidden 2）は、作り直しの写しで断られる（局所）。その列を読む文の準備で確かめる
@@ -37,15 +39,15 @@ internal static class SqliteRebuildBlockers
 {
     /// <summary>作り直しを止める物を集める</summary>
     /// <param name="conn">取込の接続（利用者の DB）</param>
-    /// <param name="tableSql">表・仮想表の <c>CREATE</c> 文の原文（判定の写しと同じ）</param>
+    /// <param name="tableSql">写しの DB に置く表（判定の写しと同じ）</param>
     /// <param name="indexes">索引（sql のあるもの）</param>
-    /// <param name="tables">取り込んだ表（DB の綴り・図の名前）</param>
+    /// <param name="tables">取り込んだ表の DB の名前（綴りのまま）</param>
     /// <param name="commandTimeoutSeconds">カタログ照会 1 本ごとの実行タイムアウト（秒）</param>
     public static IReadOnlyList<TableRebuildBlocker> Collect(
         SqliteConnection conn,
-        IReadOnlyList<string> tableSql,
+        IReadOnlyList<SqliteReplayTable> tableSql,
         IReadOnlyList<SqliteIndexSql> indexes,
-        IReadOnlyList<(string Key, string TableName)> tables,
+        IReadOnlyList<string> tables,
         int commandTimeoutSeconds
     )
     {
@@ -86,7 +88,9 @@ internal static class SqliteRebuildBlockers
             );
         }
 
-        foreach (var (key, tableName) in tables)
+        // 表名は DB の綴り（TableRebuildBlocker の契約）。計画は SchemaNames の規則で表と照らすので、図の名前（前後の空白を除いた名前）と
+        // 答えは変わらない（前後に空白のある表名は、同期スクリプトが図の名前で表を引くのでそもそも同期に届かない）
+        foreach (var key in tables)
         {
             foreach (var column in VirtualGeneratedColumns(conn, key, commandTimeoutSeconds))
             {
@@ -94,7 +98,7 @@ internal static class SqliteRebuildBlockers
                 {
                     blockers.Add(
                         new TableRebuildBlocker(
-                            tableName,
+                            key,
                             $"GENERATED {column} FUNCTION",
                             BlocksOtherTables: false
                         )
@@ -152,20 +156,16 @@ internal static class SqliteRebuildBlockers
         return collations;
     }
 
-    /// <summary>素のメモリの DB に表を置けたのに作れない索引</summary>
+    /// <summary>素のメモリの DB に表（原文で置けなければ名前だけの表）を置けたのに作れない索引</summary>
     private static List<SqliteIndexSql> UnreplayableIndexes(
-        IReadOnlyList<string> tableSql,
+        IReadOnlyList<SqliteReplayTable> tableSql,
         IReadOnlyList<SqliteIndexSql> indexes
     )
     {
         var result = new List<SqliteIndexSql>();
         using var conn = SqliteFileConnections.Create(SqliteLiveDependentCheck.InMemory);
         conn.Open();
-
-        foreach (var sql in tableSql)
-        {
-            SqliteLiveDependentCheck.TryRun(conn, sql);
-        }
+        SqliteReplay.CreateStandIns(conn, SqliteReplay.CreateOriginals(conn, tableSql));
 
         foreach (var index in indexes)
         {

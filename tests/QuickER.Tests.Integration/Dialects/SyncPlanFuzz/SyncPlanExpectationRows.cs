@@ -392,6 +392,7 @@ internal static partial class SyncPlanExpectationRows
             .. TreatmentRows(),
             .. RealSqlServerRows(),
             .. RealSqliteRows(),
+            .. RealSqliteDependentsGridRows(),
             .. RealMySqlRows(),
             .. RealPostgreSqlRows(),
             .. RealOracleRows(),
