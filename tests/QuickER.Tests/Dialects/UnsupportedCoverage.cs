@@ -1178,7 +1178,7 @@ public static class UnsupportedCoverage
                 "SyncPlanExpectationRows:plan-set-default-on-not-null-child-warns-only-where-declared",
                 "SyncPlanExpectationRows:plan-set-default-on-nullable-child-does-not-warn",
                 "SyncPlanExpectationRows:plan-alter-foreign-key-to-set-default-on-not-null-child-warns-only-where-declared",
-                "SyncPlanExpectationRows:realdb-fk-set-default-on-not-null-warns-*",
+                "SyncPlanExpectationRows:realdb-fk-set-default-on-not-null-*",
             ]
         ),
         (

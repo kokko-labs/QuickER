@@ -222,7 +222,9 @@ internal static class SyncPlanExpectationRunner
                     world.Live.Relationships,
                     [.. items.Where(i => i.IsSelected)],
                     plan,
-                    world.Capabilities
+                    world.Capabilities,
+                    columnDefaults: context?.ColumnDefaults,
+                    columnByteLengths: context?.ColumnByteLengths
                 );
                 problems.AddRange(verdict.Violations.Select(v => $"[{key}] static rules: {v}"));
             }

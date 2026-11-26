@@ -9,7 +9,7 @@ internal static partial class AssessmentRules
     /// <summary>
     /// 選んだ列の変更のうち、取込で既定値の分かった列の型の種類（方言の正規化を通した、括弧より前の基本の名前）を
     /// 変えるものを <see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/> で名指しする
-    /// （<see cref="QuickER.Dialects.SyncDialectCapabilities.ChecksDefaultOnColumnTypeChange"/> が <c>true</c> の方言のみ）。
+    /// （<see cref="SyncDialectCapabilities.ChecksDefaultOnColumnTypeChange"/> が <c>true</c> の方言のみ）。
     /// </summary>
     /// <param name="facts">
     /// 計画の事実（<see cref="AssessmentFacts.PostSync"/> の項目の並び＝選んだ項目の最終形・<see cref="AssessmentFacts.Capabilities"/>・

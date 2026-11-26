@@ -82,7 +82,9 @@ internal static partial class SyncPlanExpectationRows
                     }
                 })
                 .Expect(e =>
-                    e.Warnings.Exact("UniqueConstraintDropMayBreakForeignKey(wo_tp): fk_wo_tc_tp")
+                    e.Warnings.Exact(
+                            "UniqueConstraintDropMayBreakForeignKey(wo_tp): wo_tc.fk_wo_tc_tp"
+                        )
                         .Excluded.Empty()
                 ),
             // 主キーが置き換える一意制約の警告（持てない方言＝Oracle）は、DB にある SET NULL の外部キーの子の列の NOT NULL 化の
@@ -134,7 +136,7 @@ internal static partial class SyncPlanExpectationRows
                 .Expect(e =>
                     e.Warnings.Exact(
                             "SetNullOnNotNullColumn(wo_sc): fk_wo_sc_sp (p_id)",
-                            "UniqueConstraintDropMayBreakForeignKey(wo_up): fk_wo_uc_up"
+                            "UniqueConstraintDropMayBreakForeignKey(wo_up): wo_uc.fk_wo_uc_up"
                         )
                         .Excluded.Empty()
                 ),

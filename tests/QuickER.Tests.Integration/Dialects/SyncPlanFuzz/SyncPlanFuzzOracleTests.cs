@@ -1346,6 +1346,14 @@ public sealed class SyncPlanFuzzOracleTests
                 "varchar(20)",
                 "varchar(30)",
                 false
+            ),
+            // 列ごとの文字集合の指定は比べない（同期は列の照合順序を保ち、取込は型に文字集合を持ち帰らない）
+            new ForeignKeyTypeFactCase(
+                "mysql-character-set-clause-is-not-compared",
+                DialectNames.MySql,
+                "varchar(70)",
+                "varchar(40) CHARACTER SET latin1",
+                false
             )
         );
 
@@ -1363,6 +1371,259 @@ public sealed class SyncPlanFuzzOracleTests
             )
             .Should()
             .Be(c.Refused, c.Name);
+
+    [Theory(
+        DisplayName = "[Integration] 同期計画の静的な規則 R2: 外し直しの方言の DB が外部キーを張ったまま受ける列の型の変更だけを予言から外す（測った事実）"
+    )]
+    // MySQL：可変長の型を伸ばし、長さの頭のバイト数が変わらない変更だけを受ける（utf8mb4 は 1 文字 4 バイト）
+    [InlineData(
+        "mysql-varchar-widened-within-one-byte-prefix",
+        "mysql",
+        "varchar(20)",
+        "varchar(30)",
+        true
+    )]
+    [InlineData(
+        "mysql-varchar-widened-to-last-one-byte-prefix",
+        "mysql",
+        "varchar(20)",
+        "varchar(63)",
+        true
+    )]
+    [InlineData(
+        "mysql-varchar-widened-across-prefix",
+        "mysql",
+        "varchar(20)",
+        "varchar(64)",
+        false
+    )]
+    [InlineData(
+        "mysql-varchar-widened-within-two-byte-prefix",
+        "mysql",
+        "varchar(100)",
+        "varchar(200)",
+        true
+    )]
+    [InlineData(
+        "mysql-varbinary-widened-by-bytes",
+        "mysql",
+        "varbinary(20)",
+        "varbinary(30)",
+        true
+    )]
+    [InlineData("mysql-varchar-shortened", "mysql", "varchar(20)", "varchar(10)", false)]
+    [InlineData("mysql-char-widened", "mysql", "char(20)", "char(30)", false)]
+    [InlineData("mysql-binary-widened", "mysql", "binary(20)", "binary(30)", false)]
+    [InlineData("mysql-varchar-to-char", "mysql", "varchar(20)", "char(20)", false)]
+    [InlineData("mysql-integer-widened", "mysql", "int", "bigint", false)]
+    [InlineData(
+        "mysql-varchar-widened-within-two-byte-prefix-band",
+        "mysql",
+        "varchar(64)",
+        "varchar(100)",
+        true
+    )]
+    [InlineData(
+        "mysql-latin1-widened-by-bytes",
+        "mysql",
+        "varchar(40) CHARACTER SET latin1",
+        "varchar(70)",
+        true
+    )]
+    [InlineData(
+        "mysql-latin1-widened-across-prefix",
+        "mysql",
+        "varchar(200) CHARACTER SET latin1",
+        "varchar(300)",
+        false
+    )]
+    [InlineData(
+        "mysql-latin1-to-utf8mb4-is-a-charset-change",
+        "mysql",
+        "varchar(40) CHARACTER SET latin1",
+        "varchar(70) CHARACTER SET utf8mb4",
+        false
+    )]
+    [InlineData(
+        "mysql-same-charset-written-again",
+        "mysql",
+        "varchar(40) CHARACTER SET latin1",
+        "varchar(70) CHARACTER SET latin1",
+        true
+    )]
+    // SQL Server：外部キーを張ったままの列の型の変更をどれも断る（Msg 5074）
+    [InlineData("sqlserver-varchar-widened", "sqlserver", "varchar(20)", "varchar(30)", false)]
+    public void AcceptsForeignKeyColumnChangeInPlace_FollowsMeasuredFacts(
+        string name,
+        string dialect,
+        string oldType,
+        string newType,
+        bool accepted
+    ) =>
+        SyncPlanFuzzDialect
+            .AcceptsForeignKeyColumnChangeInPlace(dialect, oldType, newType)
+            .Should()
+            .Be(accepted, name);
+
+    [Theory(
+        DisplayName = "[Integration] 網の MySQL の列のバイト数の事実：文字集合の最大バイト数を長さに掛け、binary 系は長さそのもの・ほかの方言は空"
+    )]
+    [InlineData("mysql", "varchar(20)", "utf8mb4", 80)]
+    [InlineData("mysql", "varchar(40) CHARACTER SET latin1", "latin1", 40)]
+    [InlineData("mysql", "char(10) CHARACTER SET utf8mb3", "utf8mb3", 30)]
+    [InlineData("mysql", "varbinary(30)", "utf8mb4", 30)]
+    [InlineData("mysql", "int", null, null)]
+    [InlineData("postgresql", "varchar(20)", null, null)]
+    public void ColumnByteLengths_FollowCharacterSets(
+        string dialect,
+        string dataType,
+        string? characterSet,
+        int? octetLength
+    )
+    {
+        var facts = SyncPlanFuzzDialect.ColumnByteLengths(
+            dialect,
+            [
+                new Entity
+                {
+                    TableName = "t",
+                    Columns = [new Column { Name = "c", DataType = dataType }],
+                },
+            ]
+        );
+
+        if (octetLength is null)
+        {
+            facts.Should().BeEmpty();
+        }
+        else
+        {
+            facts
+                .Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be(new SchemaColumnByteLength("t", "c", characterSet!, octetLength.Value));
+        }
+    }
+
+    [Theory(
+        DisplayName = "[Integration] 同期計画の静的な規則 R13: NOT NULL で既定値の無い子の列への SET DEFAULT の外部キーを断る方言（測った事実）"
+    )]
+    [InlineData("sqlserver", true)]
+    [InlineData("postgresql", false)]
+    [InlineData("mysql", false)]
+    [InlineData("oracle", false)]
+    [InlineData("sqlite", false)]
+    public void RefusesSetDefaultOnNotNullColumnWithoutDefault_FollowsMeasuredFacts(
+        string dialect,
+        bool refused
+    ) =>
+        SyncPlanFuzzDialect
+            .RefusesSetDefaultOnNotNullColumnWithoutDefault(dialect)
+            .Should()
+            .Be(refused, dialect);
+
+    [Fact(
+        DisplayName = "[Integration] 同期計画の能力の組の網の空振りの検査: 計画器が足す文の理由の方言ごとの宣言の和は、理由の列挙の全値と一致する"
+    )]
+    public void ImplicitStepReasonsPlannedFor_CoverEveryReason() =>
+        DialectNames
+            .All.SelectMany(SyncPlanFuzzDialect.ImplicitStepReasonsPlannedFor)
+            .Distinct()
+            .Order()
+            .Should()
+            .Equal(Enum.GetValues<ImplicitStepReason>().Order());
+
+    [Theory(
+        DisplayName = "[Integration] 同期計画の総当たりの表明 1c: 失敗を予告する警告が型の食い違いだけなら、選んだ列の変更の列の型は同期の前のまま"
+    )]
+    [InlineData(
+        "only-type-mismatch-and-column-changed-is-a-violation",
+        "ForeignKeyColumnTypeMismatch",
+        "varchar(30)",
+        1
+    )]
+    [InlineData(
+        "only-type-mismatch-and-column-kept-is-fine",
+        "ForeignKeyColumnTypeMismatch",
+        "varchar(20)",
+        0
+    )]
+    [InlineData(
+        "other-predicting-warning-is-not-judged",
+        "ForeignKeyColumnTypeMismatch,ConstraintRebuildAroundRowDependentChange",
+        "varchar(30)",
+        0
+    )]
+    [InlineData(
+        "only-non-predicting-warnings-is-not-judged",
+        "SelectedItemRequiresUnselectedItem",
+        "varchar(30)",
+        0
+    )]
+    [InlineData(
+        "type-mismatch-with-non-predicting-warning-is-judged",
+        "ForeignKeyColumnTypeMismatch,SelectedItemRequiresUnselectedItem",
+        "varchar(30)",
+        1
+    )]
+    public void TypeMismatchPromiseBroken_JudgesOnlyTypeMismatchPromises(
+        string name,
+        string warningKinds,
+        string afterType,
+        int violations
+    )
+    {
+        static SchemaImportResult State(string type) =>
+            new()
+            {
+                Entities =
+                [
+                    new Entity
+                    {
+                        TableName = "c",
+                        Columns = [new Column { Name = "p_ref", DataType = type }],
+                    },
+                ],
+            };
+
+        var plan = new SyncPlan
+        {
+            Warnings =
+            [
+                .. warningKinds
+                    .Split(',')
+                    .Select(kind => new SyncPlanWarning(
+                        Enum.Parse<SyncPlanWarningKind>(kind),
+                        "c",
+                        "fk_c"
+                    )),
+            ],
+        };
+        var selected = new List<SchemaDiffItem>
+        {
+            new()
+            {
+                Kind = SchemaDiffKind.AlterColumn,
+                TableName = "c",
+                ColumnName = "p_ref",
+            },
+        };
+
+        SyncPlanFuzzRunner
+            .TypeMismatchPromiseBroken(
+                State("varchar(20)"),
+                State(afterType),
+                selected,
+                plan,
+                SyncPlanExpectationCapabilities.Get(DialectNames.MySql)
+            )
+            .Should()
+            .HaveCount(violations, name)
+            .And.OnlyContain(v =>
+                v.StartsWith(SyncPlanFuzzRunner.TypeMismatchPromisePrefix, StringComparison.Ordinal)
+            );
+    }
 
     /// <summary>
     /// 読み取り用の形の複製（<see cref="SyncPlanSections.WithForeignKeyColumnPairs"/>）が、列の組のほかの設定できるプロパティ（internal の

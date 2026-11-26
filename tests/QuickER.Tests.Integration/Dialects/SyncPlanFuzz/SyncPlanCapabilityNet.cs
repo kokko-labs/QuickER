@@ -22,7 +22,7 @@ namespace QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
 /// ケースは、網の種 1 つ（同期計画の総当たりと同じ生成器・同じ番号の種）と、その種が目標の図へ加えた変更 1 つの組。
 /// <b>網の種 N と実 DB の総当たりの種 N は別のケース</b>：実 DB は取り込んだ図（表・制約の並びが DB の返す順）の並びで変更の乱数を
 /// 引くので、生成器が作った図の並びで引く網とは変更が変わる（種の番号を書くときは「網の種」「実 DB の種」を添える）。因子は総当たりと同じ
-/// 差分の選び方・変更の種類に、方言の能力（<see cref="SyncDialectCapabilities"/> のうち同期計画の形を変える 26 項目）を足したもの。
+/// 差分の選び方・変更の種類に、方言の能力（<see cref="SyncDialectCapabilities"/> のうち同期計画の形を変える 28 項目）を足したもの。
 /// </para>
 /// <para>
 /// 能力は方言ごとに固定の値なので、派生ごとの固定の水準（<c>fixedLevels</c>）として数える。固定の水準はここに書き下ろした表
@@ -59,6 +59,8 @@ internal static class SyncPlanCapabilityNetDimensions
         nameof(SyncDialectCapabilities.ReferencedKeyRequiresSameColumnOrder),
         nameof(SyncDialectCapabilities.ForeignKeyAllowsStringLengthDifference),
         nameof(SyncDialectCapabilities.ForeignKeyAllowsIntegerWidthDifference),
+        nameof(SyncDialectCapabilities.ForeignKeyColumnWidening),
+        nameof(SyncDialectCapabilities.UniqueConstraintComparesPartiallyNullKeys),
         nameof(SyncDialectCapabilities.TransactionalDdl),
         nameof(SyncDialectCapabilities.ConstraintNameScope),
         nameof(SyncDialectCapabilities.AllowsDuplicateForeignKeyDefinitions),
@@ -93,6 +95,11 @@ internal static class SyncPlanCapabilityNetDimensions
         ("ReferencedKeyRequiresSameColumnOrder", ["True", "False", "True", "False", "False"]),
         ("ForeignKeyAllowsStringLengthDifference", ["False", "True", "True", "True", "True"]),
         ("ForeignKeyAllowsIntegerWidthDifference", ["False", "True", "False", "True", "True"]),
+        (
+            "ForeignKeyColumnWidening",
+            ["Refused", "Accepted", "WithinLengthPrefix", "Accepted", "Accepted"]
+        ),
+        ("UniqueConstraintComparesPartiallyNullKeys", ["False", "False", "False", "True", "False"]),
         ("TransactionalDdl", ["True", "True", "False", "False", "True"]),
         (
             "ConstraintNameScope",
@@ -216,6 +223,10 @@ internal static class SyncPlanCapabilityNetDimensions
                                 .ToList(),
                         nameof(SyncDialectCapabilities.ConstraintNameScope) =>
                             Enum.GetValues<ConstraintNameScope>()
+                                .Select(value => new Level(value.ToString()))
+                                .ToList(),
+                        nameof(SyncDialectCapabilities.ForeignKeyColumnWidening) =>
+                            Enum.GetValues<ForeignKeyColumnWidening>()
                                 .Select(value => new Level(value.ToString()))
                                 .ToList(),
                         _ => [new Level("True"), new Level("False")],
@@ -453,6 +464,9 @@ internal static class SyncPlanCapabilityNetKnownFailures
     [
         // synthesized-unique-name-collision（mysql-386・postgresql-386 の行）は 2026-11-01 の修正 E で直して一覧から消した
         // （名前の無い一意制約の名前を図全体で決め、ぶつかれば番号を足す）。行は回帰の網として残る
+        //
+        // 3 回目の効果測定の直し残し（分岐の軸の台帳の項目 pa1・pe1・pe3）は、区切り c で形の行の水準に結んでから製品を直して
+        // 一覧から消した（台帳は結び済み・修正済み）。指摘のセルの行は回帰の網として残る
     ];
 
     /// <summary>一覧</summary>
@@ -487,6 +501,10 @@ internal static class SyncPlanCapabilityNetRunner
             Entities = [.. live.Diagram.Entities],
             Relationships = [.. live.Diagram.Relationships],
             ColumnDefaults = [.. live.ColumnDefaults],
+            ColumnByteLengths = SyncPlanFuzzDialect.ColumnByteLengths(
+                dialect.Name,
+                live.Diagram.Entities
+            ),
             Warnings = [.. live.ImportWarnings],
         };
         var (targetEntities, targetRelationships) = SyncPlanFuzzRunner.CloneWithFreshIds(before);
@@ -511,13 +529,8 @@ internal static class SyncPlanCapabilityNetRunner
         );
 
         SyncPlan plan;
-        var context = new SyncPlanContext
-        {
-            LiveEntities = before.Entities,
-            LiveRelationships = before.Relationships,
-            ColumnDefaults = before.ColumnDefaults,
-            ImportWarnings = before.Warnings,
-        };
+        // 同期の画面・実 DB のランナーと同じ写し方で取込の結果から計画の入力を作る
+        var context = SyncPlanContext.FromImport(before);
 
         try
         {
@@ -539,7 +552,9 @@ internal static class SyncPlanCapabilityNetRunner
             selected,
             plan,
             capabilities,
-            live.DataFailures
+            live.DataFailures,
+            live.ColumnDefaults,
+            before.ColumnByteLengths
         );
         outcome.Violations.AddRange(verdict.Violations);
         outcome.Violations.AddRange(
@@ -674,6 +689,7 @@ internal static class SyncPlanCapabilityNetRunner
                     LiveEntities = before.Entities,
                     LiveRelationships = before.Relationships,
                     ColumnDefaults = before.ColumnDefaults,
+                    ColumnByteLengths = before.ColumnByteLengths,
                     ImportWarnings = before.Warnings,
                 }
             );
@@ -948,6 +964,7 @@ internal static class SyncPlanCapabilityNetRunner
     /// <param name="PairedPrimaryKey">
     /// 製品の計画が、対になった主キーの解除と付与（同じ <see cref="ReaddPair"/> を持つ主キーを外す文と付ける文）を持つか
     /// </param>
+    /// <param name="ImplicitReasons">製品の計画の、計画器が足した文の理由（<see cref="ImplicitOrigin.Reason"/>）の集合</param>
     internal sealed record StepPlanResult(
         IReadOnlyList<string> Problems,
         string? Unrepresentable,
@@ -959,7 +976,8 @@ internal static class SyncPlanCapabilityNetRunner
         bool CreateOnlyRebuild = false,
         bool RebuildWithSections = false,
         bool? TableRebuildDialect = null,
-        bool PairedPrimaryKey = false
+        bool PairedPrimaryKey = false,
+        IReadOnlySet<ImplicitStepReason>? ImplicitReasons = null
     );
 
     /// <summary>
@@ -1088,7 +1106,11 @@ internal static class SyncPlanCapabilityNetRunner
             plan.Rebuilds.Any(r => r.CreateOnly),
             plan.Rebuilds.Count > 0 && plan.Sections.Count > 0,
             rebuildDialect,
-            HasPairedPrimaryKey(plan)
+            HasPairedPrimaryKey(plan),
+            plan.Steps.Select(s => s.Origin)
+                .OfType<ImplicitOrigin>()
+                .Select(o => o.Reason)
+                .ToHashSet()
         );
 
         // 計画器が文で表せない計画は、製品が項目の種類と無いメンバーを名指しした InvalidOperationException で断る
@@ -1323,7 +1345,15 @@ internal static class SyncPlanCapabilityNetRunner
             + $"; rebuilds: existing {applied.Count(r => r.ExistingTableRebuild)}"
             + $", create-only {applied.Count(r => r.CreateOnlyRebuild)}"
             + $", with sections {applied.Count(r => r.RebuildWithSections)}"
-            + $"; paired primary keys on {applied.Count(r => r.PairedPrimaryKey)}";
+            + $"; paired primary keys on {applied.Count(r => r.PairedPrimaryKey)}"
+            + "; implicit steps: "
+            + string.Join(
+                ", ",
+                Enum.GetValues<ImplicitStepReason>()
+                    .Select(reason =>
+                        $"{reason}={applied.Count(r => r.ImplicitReasons?.Contains(reason) == true)}"
+                    )
+            );
     }
 
     /// <summary>2 つの行の並びの最初の違い（「: [写し] &lt;&gt; [元] at line n」）</summary>
@@ -1766,7 +1796,8 @@ internal static class SyncPlanCapabilityNetRunner
         IReadOnlyCollection<StepPlanResult> results,
         bool assertsBehaviours,
         bool expectsWithdrawal,
-        bool plansTableRebuilds
+        bool plansTableRebuilds,
+        IReadOnlySet<ImplicitStepReason>? declaredImplicitReasons = null
     )
     {
         // 種・決定的な行・網羅の行は、どの方言でも全部が文で表せる（掛けなかった理由は文で表せないことだけで、ここには出ない）
@@ -1861,6 +1892,25 @@ internal static class SyncPlanCapabilityNetRunner
         {
             yield return $"{dialect}: relation N4 checked no case with a withdrawal";
         }
+
+        // 計画器が足す文の理由：方言の宣言（SyncPlanFuzzDialect.ImplicitStepReasonsPlannedFor）の理由ごとに、その理由の文を持つ計画が
+        // 1 つ以上あり（出ないなら、その理由の文に掛かる照合と、その理由の文を読む規則が空振りしている）、宣言に無い理由の文を持つ計画が無い
+        if (assertsBehaviours && declaredImplicitReasons is not null)
+        {
+            var observed = applied
+                .SelectMany(r => r.ImplicitReasons ?? new HashSet<ImplicitStepReason>())
+                .ToHashSet();
+
+            foreach (var missing in declaredImplicitReasons.Where(r => !observed.Contains(r)))
+            {
+                yield return $"{dialect}: relation N4 checked no plan with an implicit step for {missing}";
+            }
+
+            foreach (var undeclared in observed.Where(r => !declaredImplicitReasons.Contains(r)))
+            {
+                yield return $"{dialect}: relation N4 checked a plan with an implicit step for {undeclared}, which the net does not declare for the dialect";
+            }
+        }
     }
 
     /// <summary>関係 N2 の違反の頭</summary>
@@ -1941,6 +1991,16 @@ internal static class SyncPlanCapabilityNetRunner
                             Fold(d.ColumnName),
                             d.Expression
                         )),
+                    ],
+                    ColumnByteLengths =
+                    [
+                        .. before.ColumnByteLengths.Select(b =>
+                            b with
+                            {
+                                TableName = Fold(b.TableName),
+                                ColumnName = Fold(b.ColumnName),
+                            }
+                        ),
                     ],
                     ImportWarnings =
                     [
@@ -2472,7 +2532,8 @@ public abstract class SyncPlanCapabilityNetTestsBase
                 stepPlanResults,
                 assertsRequiredShapes,
                 !plan.IsSingle && dialect.ScenarioRowsWithdrawUniqueRebuild,
-                dialect.PlansTableRebuilds
+                dialect.PlansTableRebuilds,
+                SyncPlanFuzzDialect.ImplicitStepReasonsPlannedFor(dialect.Name)
             )
         );
 

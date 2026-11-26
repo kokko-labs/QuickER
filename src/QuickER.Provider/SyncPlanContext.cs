@@ -13,7 +13,7 @@ public sealed class SyncPlanContext
 {
     /// <summary>取込の結果から、計画の入力（live のスキーマと図の外の情報）を作る</summary>
     /// <remarks>
-    /// 取込の結果から計画へ渡す項目（表・リレーション・補助オブジェクト・<c>CREATE TABLE</c> の原文・列の既定値・取込の警告・ビューの判定）は
+    /// 取込の結果から計画へ渡す項目（表・リレーション・補助オブジェクト・<c>CREATE TABLE</c> の原文・列の既定値・列の最大バイト数・取込の警告・ビューの判定）は
     /// ここで 1 回だけ写す。呼び出し側（同期の画面・同期計画の総当たり）ごとに写すと、項目を足したときに写し忘れた側だけが
     /// 黙ってその入力の無い計画を作る（警告・除外が画面とテストで割れる）。
     /// </remarks>
@@ -29,6 +29,7 @@ public sealed class SyncPlanContext
             AuxiliaryObjects = live.AuxiliaryObjects,
             TableCreateSql = live.TableCreateSql,
             ColumnDefaults = live.ColumnDefaults,
+            ColumnByteLengths = live.ColumnByteLengths,
             ImportWarnings = live.Warnings,
             LiveDependentCheck = live.LiveDependentCheck,
             RebuildBlockers = live.RebuildBlockers,
@@ -65,6 +66,15 @@ public sealed class SyncPlanContext
     /// （<see cref="SyncPlanWarningKind.DefaultOnColumnTypeKindChange"/>）。
     /// </remarks>
     public IReadOnlyList<SchemaColumnDefault> ColumnDefaults { get; init; } = [];
+
+    /// <summary>
+    /// DB から取得した文字列・バイト列の列の最大バイト数と文字集合（取込の結果＝<see cref="SchemaImportResult.ColumnByteLengths"/>）。
+    /// </summary>
+    /// <remarks>
+    /// 合成には使わない。外部キーを張ったまま列を伸ばす変更を DB が受けるかを判定するためだけに参照する
+    /// （<see cref="ForeignKeyColumnWidening.WithinLengthPrefix"/>。事実の無い列は受けると数えない）。
+    /// </remarks>
+    public IReadOnlyList<SchemaColumnByteLength> ColumnByteLengths { get; init; } = [];
 
     /// <summary>DB の取込の警告（取込の結果＝<see cref="SchemaImportResult.Warnings"/>）。</summary>
     /// <remarks>

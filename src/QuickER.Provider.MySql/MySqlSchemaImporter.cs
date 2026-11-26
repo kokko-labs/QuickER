@@ -80,7 +80,7 @@ public class MySqlSchemaImporter : ISchemaImporter
                 ct
             )
             .ConfigureAwait(false);
-        var defaults = await LoadColumnAttributesAsync(
+        var (defaults, byteLengths) = await LoadColumnAttributesAsync(
                 conn,
                 tables,
                 commandTimeoutSeconds,
@@ -116,6 +116,7 @@ public class MySqlSchemaImporter : ISchemaImporter
             Relationships = rels,
             Warnings = warnings,
             ColumnDefaults = defaults,
+            ColumnByteLengths = byteLengths,
         };
     }
 
@@ -210,25 +211,29 @@ ORDER BY s.TABLE_NAME, s.INDEX_NAME, s.SEQ_IN_INDEX;";
 
     /// <summary>図が持たない列の属性（既定値・自動採番・照合順序・INVISIBLE・ON UPDATE・SRID）を名指しするクエリ</summary>
     /// <remarks>
-    /// 取込の列の読み込み（<see cref="ColumnsSql"/>）は変えず、告げるためだけに読む。照合順序はテーブルの既定
+    /// 取込の列の読み込み（<see cref="ColumnsSql"/>）は変えず、告げるためと、同期の計画の材料（既定値・文字列とバイト列の列の最大バイト数と
+    /// 文字集合）のために読む。照合順序はテーブルの既定
     /// （<c>TABLES.TABLE_COLLATION</c>）と違う列だけを告げる。<c>SRS_ID</c> は MySQL 8.0 の列。
     /// </remarks>
     private const string ColumnAttributesSql =
         @"
 SELECT c.TABLE_NAME, c.COLUMN_NAME, c.COLUMN_DEFAULT, c.EXTRA, c.COLLATION_NAME,
-       t.TABLE_COLLATION, c.SRS_ID, c.GENERATION_EXPRESSION
+       t.TABLE_COLLATION, c.SRS_ID, c.GENERATION_EXPRESSION, c.CHARACTER_SET_NAME, c.CHARACTER_OCTET_LENGTH
 FROM information_schema.COLUMNS c
 JOIN information_schema.TABLES t ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
 WHERE c.TABLE_SCHEMA = DATABASE() AND t.TABLE_TYPE = 'BASE TABLE'
 ORDER BY BINARY c.TABLE_NAME, c.ORDINAL_POSITION;";
 
-    /// <summary>図が持たない列の属性を、列ごとの取込警告（段 1）で名指しし、既定値の事実を返す</summary>
+    /// <summary>図が持たない列の属性を、列ごとの取込警告（段 1）で名指しし、既定値の事実と文字列・バイト列の列の最大バイト数の事実を返す</summary>
     /// <remarks>
     /// 自動採番の列は既定値を持たない（MySQL が断る）ので、既定値として二重に告げることはない。
     /// 値が NULL の既定値と生成列は既定値に数えない（MySQL は <c>DEFAULT NULL</c> を DB の NULL で返し、文字列の <c>NULL</c> は
     /// <c>DEFAULT 'NULL'</c> の値なので、文字列の表記で NULL とみなすものは無い）。
     /// </remarks>
-    private static async Task<List<SchemaColumnDefault>> LoadColumnAttributesAsync(
+    private static async Task<(
+        List<SchemaColumnDefault> Defaults,
+        List<SchemaColumnByteLength> ByteLengths
+    )> LoadColumnAttributesAsync(
         MySqlConnection conn,
         Dictionary<string, SchemaTableEntry> tables,
         int commandTimeoutSeconds,
@@ -237,6 +242,7 @@ ORDER BY BINARY c.TABLE_NAME, c.ORDINAL_POSITION;";
     )
     {
         var defaults = new List<SchemaColumnDefault>();
+        var byteLengths = new List<SchemaColumnByteLength>();
         await using var cmd = DbCommands.Create(conn, ColumnAttributesSql, commandTimeoutSeconds);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
@@ -258,6 +264,19 @@ ORDER BY BINARY c.TABLE_NAME, c.ORDINAL_POSITION;";
             var collation = reader.IsDBNull(4) ? null : reader.GetString(4);
             var tableCollation = reader.IsDBNull(5) ? null : reader.GetString(5);
             var generated = !reader.IsDBNull(7) && reader.GetString(7).Length > 0;
+
+            // 文字列・バイト列の列の最大バイト数（外部キーを張ったまま列を伸ばす変更を DB が受けるかの判定の材料。バイト列は文字集合が NULL）
+            if (!reader.IsDBNull(9))
+            {
+                byteLengths.Add(
+                    new SchemaColumnByteLength(
+                        table,
+                        column.Name,
+                        reader.IsDBNull(8) ? null : reader.GetString(8),
+                        Convert.ToInt64(reader.GetValue(9), CultureInfo.InvariantCulture)
+                    )
+                );
+            }
 
             if (extra.Contains("auto_increment", StringComparison.OrdinalIgnoreCase))
             {
@@ -340,7 +359,7 @@ ORDER BY BINARY c.TABLE_NAME, c.ORDINAL_POSITION;";
             }
         }
 
-        return defaults;
+        return (defaults, byteLengths);
     }
 
     /// <summary><c>EXTRA</c> の「on update 式」から式を取り出す</summary>

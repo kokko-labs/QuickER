@@ -36,7 +36,9 @@ internal sealed record SyncPlanStaticVerdict(
 ///   <item>R2：SQL Server（<see cref="SyncDialectCapabilities.AlterColumnRequiresKeyConstraintRebuild"/>）の型の変更の
 ///   ALTER COLUMN の前に、その列を含む一意制約・主キーがすべて外れている（Msg 5074）。外部キー（両端）は
 ///   <see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/> の方言（SQL Server・MySQL）で同じく外れている。
-///   NULL 許容だけの変更は数えない（SQL Server は外部キーを張ったまま子の列を NOT NULL にできる＝製品の宣言どおり）。</item>
+///   NULL 許容だけの変更は数えない（SQL Server は外部キーを張ったまま子の列を NOT NULL にできる＝製品の宣言どおり）。MySQL が外部キーを
+///   張ったまま受ける変更（可変長の型を長さの頭のバイト数を変えずに伸ばす＝測った事実
+///   <see cref="SyncPlanFuzzDialect.AcceptsForeignKeyColumnChangeInPlace"/>）も外部キーの枝では数えない（相手の端との型の組は R7 が見る）。</item>
 ///   <item>R3：MySQL の索引の削除（一意制約の削除・主キーの解除）の前に、子の列がその索引の先頭に並ぶ外部キーが外れているか、
 ///   同じ先頭の列を持つ別の索引（主キー・一意制約・外部キーが作った索引）が残っている（MySQL 1553）。</item>
 ///   <item>R4：方言の名前の範囲で、足す制約の名前が残っている制約と重ならない（SQL Server・Oracle＝スキーマの全制約、
@@ -63,6 +65,9 @@ internal sealed record SyncPlanStaticVerdict(
 ///   制約を D9 が数える。</item>
 ///   <item>R12：同じ定義の外部キー（子の表・親の表・列の組の集合）を 2 本持てない Oracle（ORA-02275）で、外部キーを足すとき、その時点で残る
 ///   外部キーと定義が同じでない。名前だけを変えた外部キーの追加を、元の外部キーの削除を選ばずに流す形。</item>
+///   <item>R13：SQL Server（測った事実 <see cref="SyncPlanFuzzDialect.RefusesSetDefaultOnNotNullColumnWithoutDefault"/>）で、参照アクション
+///   SET DEFAULT の外部キーを足すとき、子の列がその時点で NOT NULL で既定値（DB 側の図の取込の既定値）を持たないことはない（Msg 1760）。
+///   選んだ追加と、計画が外して付け直す外部キーの両方に掛かる。</item>
 /// </list>
 /// <para>
 /// 違反になるのは、断られる文があるのに次のどちらでもないとき：(a) 失敗を予告する警告がある（<see cref="NonPredictingWarnings"/> 以外）
@@ -126,6 +131,8 @@ internal static class SyncPlanStaticRules
     /// ケースが宣言した、既存の行（とモデルの外の依存）で断られる文（<see cref="FuzzLiveSchema.DataFailures"/>）。規則 R10 がその文を
     /// 断られる文として予言する（無ければ予言しない）
     /// </param>
+    /// <param name="columnDefaults">DB 側の図の列の既定値（取込の既定値。規則 R13 が既定値のある子の列を数えない。無ければ既定値なし）</param>
+    /// <param name="columnByteLengths">DB 側の図の MySQL の文字列の列の最大バイト数と文字集合（規則 R2 の MySQL の枝が読む。無ければ型の表記とコンテナの既定 utf8mb4 から求める）</param>
     public static SyncPlanStaticVerdict Evaluate(
         string dialect,
         IReadOnlyList<Entity> liveEntities,
@@ -133,7 +140,9 @@ internal static class SyncPlanStaticRules
         IReadOnlyCollection<SchemaDiffItem> selected,
         SyncPlan plan,
         SyncDialectCapabilities capabilities,
-        IReadOnlyCollection<FuzzDataFailure>? dataFailures = null
+        IReadOnlyCollection<FuzzDataFailure>? dataFailures = null,
+        IReadOnlyCollection<SchemaColumnDefault>? columnDefaults = null,
+        IReadOnlyCollection<SchemaColumnByteLength>? columnByteLengths = null
     )
     {
         if (!capabilities.SupportsAlterColumn || !capabilities.SupportsForeignKeyAlter)
@@ -154,7 +163,7 @@ internal static class SyncPlanStaticRules
             .Sections.SelectMany(section => section.Items.Select(item => new Step(section, item)))
             .ToList();
         var state = new State(dialect, capabilities);
-        state.Load(liveEntities, liveRelationships);
+        state.Load(liveEntities, liveRelationships, columnDefaults ?? [], columnByteLengths ?? []);
         var doomedAt = -1;
         string? reason = null;
 
@@ -718,7 +727,7 @@ internal static class SyncPlanStaticRules
 
         // 既存の行で断られうる文・列が空でないと通らない変更の前後で外して付け直すと計画が名指しした制約（製品の契約＝名指しして
         // 部分適用を受け入れる。実 DB の表明 1b の例外と同じ）。警告は表と名前だけを持つので、外部キーと一意制約の両方の身元を作る。
-        // 受け入れるのは、予言した失敗がデータで断られる文（R10）のときだけ。構造の規則（R1〜R9・R11・R12）が予言した失敗はデータに依らず
+        // 受け入れるのは、予言した失敗がデータで断られる文（R10）のときだけ。構造の規則（R1〜R9・R11〜R13）が予言した失敗はデータに依らず
         // 必ず断られるので、計画はその文を先頭へ移すか外し直さないで済ませるべきで、名指しでは足りない
         var namedAroundRefusable = plan
             .Warnings.Where(w =>
@@ -977,8 +986,16 @@ internal static class SyncPlanStaticRules
         [];
         private readonly Dictionary<string, string> _types = new(StringComparer.Ordinal);
 
-        /// <summary>今 NULL を許す列（R11）</summary>
+        /// <summary>今 NULL を許す列（R11・R13）</summary>
         private readonly HashSet<string> _nullable = new(StringComparer.Ordinal);
+
+        /// <summary>DB 側の図で既定値を持つ列（取込の既定値・R13）</summary>
+        private readonly HashSet<string> _defaults = new(StringComparer.Ordinal);
+
+        /// <summary>DB 側の図の MySQL の文字列の列の最大バイト数と文字集合（取込の事実の代わり・R2）</summary>
+        private readonly Dictionary<string, SchemaColumnByteLength> _byteLengths = new(
+            StringComparer.Ordinal
+        );
 
         /// <summary>
         /// DB 側の図の外部キーが持っていた組と、その時の両端の型（子の列・親の列・子の型・親の型。R8 で DB が受け入れた組を見分ける）
@@ -994,8 +1011,24 @@ internal static class SyncPlanStaticRules
 
         private bool IsMySql => dialect == DialectNames.MySql;
 
-        public void Load(IReadOnlyList<Entity> entities, IReadOnlyList<Relationship> relationships)
+        public void Load(
+            IReadOnlyList<Entity> entities,
+            IReadOnlyList<Relationship> relationships,
+            IReadOnlyCollection<SchemaColumnDefault> columnDefaults,
+            IReadOnlyCollection<SchemaColumnByteLength> columnByteLengths
+        )
         {
+            foreach (var byteLength in columnByteLengths)
+            {
+                _byteLengths[ColumnKey(Lower(byteLength.TableName), byteLength.ColumnName)] =
+                    byteLength;
+            }
+
+            foreach (var columnDefault in columnDefaults)
+            {
+                _defaults.Add(ColumnKey(Lower(columnDefault.TableName), columnDefault.ColumnName));
+            }
+
             var uniqueNames = ConstraintNames.ResolveUniqueConstraintNames(
                 entities,
                 relationships,
@@ -1336,8 +1369,16 @@ internal static class SyncPlanStaticRules
                 return $"R2: {step.Table}.{column} is altered while {Describe(key)} contains it";
             }
 
+            // MySQL は外部キーを張ったまま、可変長の型を長さの頭のバイト数を変えずに伸ばす変更を受ける（測った事実。相手の端との
+            // 型の組は R7 が見る）
             if (
                 capabilities.AlterColumnRequiresForeignKeyRebuild
+                && !SyncPlanFuzzDialect.AcceptsForeignKeyColumnChangeInPlace(
+                    dialect,
+                    oldType,
+                    newType,
+                    _byteLengths.GetValueOrDefault(ColumnKey(step.Table, column))
+                )
                 && _foreignKeys.FirstOrDefault(f =>
                     (f.Child == step.Table && f.ChildColumns.Contains(column))
                     || (f.Parent == step.Table && f.ParentColumns.Contains(column))
@@ -1449,6 +1490,30 @@ internal static class SyncPlanStaticRules
                 {
                     return $"R12: {SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, Limit)} has the same definition as {duplicate.Name}";
                 }
+            }
+
+            // R13：参照アクション SET DEFAULT の外部キーを、子の列がその時点で NOT NULL で既定値を持たないのに足す（SQL Server の
+            // Msg 1760。測った事実＝SyncPlanFuzzDialect.RefusesSetDefaultOnNotNullColumnWithoutDefault）。選んだ追加と付け直しの両方
+            if (
+                SyncPlanFuzzDialect.RefusesSetDefaultOnNotNullColumnWithoutDefault(dialect)
+                && item.Relationship is { } relationship
+                && (
+                    capabilities.EffectiveOnDelete(relationship.OnDelete)
+                        == ForeignKeyReferentialAction.SetDefault
+                    || capabilities.EffectiveOnUpdate(relationship.OnUpdate)
+                        == ForeignKeyReferentialAction.SetDefault
+                )
+                && item
+                    .ForeignKeyColumnPairs.Select(p => ColumnKey(child, p.ChildColumn))
+                    .FirstOrDefault(key =>
+                        _types.ContainsKey(key)
+                        && !_nullable.Contains(key)
+                        && !_defaults.Contains(key)
+                    )
+                    is { } notNullWithoutDefault
+            )
+            {
+                return $"R13: {SyncScriptBuilderHelper.ForeignKeyNameToAdd(item, Limit)} sets {notNullWithoutDefault.Replace('|', '.')} to its default, which is NOT NULL without a default";
             }
 
             return CheckName(

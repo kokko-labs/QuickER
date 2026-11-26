@@ -190,7 +190,7 @@ internal static class ColumnReorders
     }
 
     /// <summary>
-    /// 数列の最長増加部分列（厳密増加）に含まれる値の集合を返す（O(n log n)・パ―シェンスソート＋前駆復元）。
+    /// 数列の最長増加部分列（厳密増加）に含まれる値の集合を返す（O(n log n)・ペイシェンスソート＋前駆復元）。
     /// </summary>
     /// <remarks>値は目標インデックス（distinct）。ここに残った値の列は移動不要（不動）とみなす。</remarks>
     private static HashSet<int> LongestIncreasingSubsequence(IReadOnlyList<int> sequence)

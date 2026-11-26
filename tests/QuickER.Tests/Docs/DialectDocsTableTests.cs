@@ -381,6 +381,8 @@ public sealed class DialectDocsTableTests
             c.ForeignKeyAllowsStringLengthDifference,
         ["Integer types differing only in width are allowed on the two ends"] = c =>
             c.ForeignKeyAllowsIntegerWidthDifference,
+        ["A variable-length column can be lengthened with its foreign key in place"] = c =>
+            c.ForeignKeyColumnWidening != ForeignKeyColumnWidening.Refused,
         ["A failed re-add can leave the foreign key dropped"] = c => !c.TransactionalDdl,
         ["Changing the type kind of a column needs the column to be empty"] = c =>
             c.TypeKindChangeRequiresEmptyColumn,
@@ -391,6 +393,9 @@ public sealed class DialectDocsTableTests
             c.AddNotNullColumnRequiresEmptyTable,
         ["Changing a column that a computed column uses is refused"] = c =>
             c.AlterColumnBlockedByComputedColumn,
+        [
+            "A wider unique constraint can be refused by rows that are NULL in an existing unique constraint"
+        ] = c => c.UniqueConstraintComparesPartiallyNullKeys,
     };
 
     /// <summary>T-Q の「数える単位」の語（英語・日本語）</summary>

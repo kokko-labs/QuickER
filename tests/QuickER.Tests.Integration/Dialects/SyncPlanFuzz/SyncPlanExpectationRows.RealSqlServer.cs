@@ -377,11 +377,15 @@ internal static partial class SyncPlanExpectationRows
                 ),
         ];
 
-    /// <summary>NOT NULL の子の列への SET DEFAULT の外部キーの追加（DB 側の列の DEFAULT 制約の有無）</summary>
-    private static ExpectationRow SetDefaultOnNotNullRow(bool hasDefault) =>
-        Row(
-                $"realdb-fk-set-default-on-not-null-warns-{(hasDefault ? "with-default-commits" : "without-default-fails")}",
-                "[Integration] SQL Server 同期: NOT NULL の子の列への SET DEFAULT の追加は警告し、DEFAULT 制約があれば通る",
+    /// <summary>
+    /// NOT NULL の子の列への SET DEFAULT の外部キーの追加（DB 側の列の DEFAULT 制約の有無。DEFAULT 制約があれば DB が受けるので警告しない＝
+    /// 台帳の項目 pe3 で直した過剰な警告）
+    /// </summary>
+    private static ExpectationRow SetDefaultOnNotNullRow(bool hasDefault)
+    {
+        var row = Row(
+                $"realdb-fk-set-default-on-not-null-{(hasDefault ? "with-default-commits-without-warning" : "warns-without-default-fails")}",
+                "[Integration] SQL Server 同期: NOT NULL の子の列への SET DEFAULT の追加は、DEFAULT 制約が無ければ警告して断られ、あれば警告せずに通る",
                 DialectNames.SqlServer
             )
             .TargetFromLive(s =>
@@ -409,23 +413,47 @@ internal static partial class SyncPlanExpectationRows
                     )
                     .Expect(e =>
                     {
-                        e.Warnings.Single(
-                            "SetDefaultOnNotNullColumn(*)*",
-                            "SetDefaultOnNotNullColumn(*): FK_sd_child_sd_parent (parent_id)"
-                        );
-
                         if (hasDefault)
                         {
+                            e.Warnings.Absent("SetDefaultOnNotNullColumn*");
                             e.Outcome.Exact("committed");
                             e.After.Count("fk *", 1);
                             e.After.Single("fk * del=SetDefault *");
                         }
                         else
                         {
+                            e.Warnings.Single(
+                                "SetDefaultOnNotNullColumn(*)*",
+                                "SetDefaultOnNotNullColumn(*): FK_sd_child_sd_parent (parent_id)"
+                            );
                             e.Outcome.Exact("failed: *default constraint*");
                         }
                     })
             );
+
+        return hasDefault
+            ? row.Tagged(
+                RowTag
+                    .Ledger("pe3")
+                    .Except(
+                        DialectNames.PostgreSql,
+                        "SetDefaultRequiresColumnDefault が偽で、PostgreSQL は既定値の無い NOT NULL の列への SET DEFAULT も作る（警告の門の外）"
+                    )
+                    .Except(
+                        DialectNames.Sqlite,
+                        "SetDefaultRequiresColumnDefault が偽で、SQLite は既定値の無い NOT NULL の列への SET DEFAULT も作る（警告の門の外）"
+                    )
+                    .Except(
+                        DialectNames.MySql,
+                        "SupportsSetDefaultAction が偽で、MySQL は SET DEFAULT の外部キーを作らない（製品は実効値へ畳む）"
+                    )
+                    .Except(
+                        DialectNames.Oracle,
+                        "SupportsSetDefaultAction が偽で、Oracle は SET DEFAULT の外部キーを作らない（製品は実効値へ畳む）"
+                    )
+            )
+            : row;
+    }
 
     /// <summary>主キーの型・主キーの変更と、表・列の削除に伴う外部キー</summary>
     private static IEnumerable<

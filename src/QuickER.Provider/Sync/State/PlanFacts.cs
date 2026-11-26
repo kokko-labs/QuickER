@@ -24,11 +24,22 @@ internal static class PlanFacts
     /// <param name="table">保存する形の表名</param>
     /// <param name="columns">新しい主キー・一意制約の構成列</param>
     /// <param name="typeDecidingColumns">この同期で型が決まる列（<see cref="PostSyncSchema.TypeDecidingColumns"/>）</param>
+    /// <param name="excludeAllNullableUniques">
+    /// 構成列が全部 NULL 許容の live の一意制約を証拠に使わないか（一意制約の追加で、方言が一部が NULL の行を比べる＝
+    /// <see cref="SyncDialectCapabilities.UniqueConstraintComparesPartiallyNullKeys"/> のとき。主キーの付与は新しい主キーの列を先に NOT NULL に
+    /// するので偽）
+    /// </param>
+    /// <remarks>
+    /// 一部が NULL の行を比べる方言（Oracle）は、全部が NULL の行だけを検査の外に置く。構成列が全部 NULL 許容の一意制約の下には、
+    /// その列が NULL で残りの列が同じ行が何行でもありうるので、上位集合の一意制約は既存の行で断られうる（ORA-02299）。一部の列が
+    /// NOT NULL の一意制約の下には一部が NULL の重複が入らないので、証拠のまま使う。主キーはどの列も NOT NULL なので常に証拠。
+    /// </remarks>
     internal static bool HoldsInLiveRows(
         Entity? liveTable,
         string table,
         IReadOnlyList<string> columns,
-        IReadOnlyDictionary<ColumnId, string> typeDecidingColumns
+        IReadOnlyDictionary<ColumnId, string> typeDecidingColumns,
+        bool excludeAllNullableUniques
     )
     {
         if (
@@ -44,11 +55,18 @@ internal static class PlanFacts
 
         var set = columns.Select(SchemaNames.Key).ToHashSet(StringComparer.Ordinal);
         var namesById = liveTable.Columns.ToDictionary(c => c.Id, c => SchemaNames.Key(c.Name));
+        var nullableById = liveTable
+            .Columns.Where(ColumnNullability.AllowsNull)
+            .Select(c => c.Id)
+            .ToHashSet();
         IEnumerable<IReadOnlyList<string>> keys =
         [
             [.. liveTable.GetPrimaryKeyColumnsInOrder().Select(c => SchemaNames.Key(c.Name))],
             .. liveTable
-                .UniqueConstraints.Where(u => u.ColumnIds.All(namesById.ContainsKey))
+                .UniqueConstraints.Where(u =>
+                    u.ColumnIds.All(namesById.ContainsKey)
+                    && !(excludeAllNullableUniques && u.ColumnIds.All(nullableById.Contains))
+                )
                 .Select(u => (IReadOnlyList<string>)[.. u.ColumnIds.Select(id => namesById[id])]),
         ];
 

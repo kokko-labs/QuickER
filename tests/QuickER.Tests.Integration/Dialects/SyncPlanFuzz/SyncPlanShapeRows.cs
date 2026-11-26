@@ -71,6 +71,12 @@ internal static class SyncPlanShapeRows
     /// <summary>目標の図で足す外部キー（live の表 e の列から親の主キーへ。両端の型が同じ・子が bigint・子が文字列）</summary>
     public const string AddedForeignKey = "AddedForeignKey";
 
+    /// <summary>親の列 u のデータ（値がどれも違う・NULL 許容で 2 行が NULL）</summary>
+    public const string UniqueColumnData = "UniqueColumnData";
+
+    /// <summary>最初の子の外部キーの ON DELETE（DB 側の図）</summary>
+    public const string ChildOnDelete = "ChildOnDelete";
+
     /// <summary>行の Id の頭</summary>
     public const string IdPrefix = "d4-";
 
@@ -94,31 +100,50 @@ internal static class SyncPlanShapeRows
                     "Remove"
                 ),
                 Levels(ReferencingFks, "親を参照する外部キーの数", "0", "1", "2"),
-                Levels(
+                new Factor(
                     TypeChange,
-                    "型の変更（子の列だけ・親の列だけ・親と最初の子だけ・親と全部の子・一意制約の列）と最初の子の NULL 許容だけの変更・最初の子の型の種類の変更・参照される親の列と全部の子の型の種類の変更・両端を別々の型へ（最初の子は互換の範囲で広げ、参照される親の列は互換でない型へ）",
-                    "None",
-                    "ChildOnly",
-                    "ParentOnly",
-                    "PartialBothEnds",
-                    "BothEnds",
-                    "UniqueColumn",
-                    "ChildNullability",
-                    "ChildKindChange",
-                    "BothEndsKindChange",
-                    "DivergentEnds"
+                    [
+                        .. new[]
+                        {
+                            "None",
+                            "ChildOnly",
+                            "ParentOnly",
+                            "PartialBothEnds",
+                            "BothEnds",
+                            "UniqueColumn",
+                            "ChildNullability",
+                            "ChildKindChange",
+                            "BothEndsKindChange",
+                            "DivergentEnds",
+                        }.Select(level => new Level(level)),
+                        new Level("DivergentEndsStringLength") { Tag = RowTag.Ledger("pe1") },
+                        new Level("DivergentEndsStringLengthAcrossPrefix")
+                        {
+                            Tag = RowTag.Ledger("pe1"),
+                        },
+                        new Level("DivergentEndsStringLengthInBand") { Tag = RowTag.Ledger("pe1") },
+                        new Level("DivergentEndsStringLengthLatin1") { Tag = RowTag.Ledger("pe1") },
+                        new Level("ChildNotNull") { Tag = RowTag.Ledger("pe3") },
+                    ],
+                    "型の変更（子の列だけ・親の列だけ・親と最初の子だけ・親と全部の子・一意制約の列）と最初の子の NULL 許容だけの変更・最初の子の型の種類の変更・参照される親の列と全部の子の型の種類の変更・両端を別々の型へ（最初の子は互換の範囲で広げ、参照される親の列は互換でない型へ。子の広げ方は整数の幅・可変長の文字列の長さ〔MySQL が外部キーを張ったまま受ける範囲〕・可変長の文字列の長さ〔長さの頭のバイト数が変わる＝MySQL が断る〕）・最初の子の NOT NULL 化（DB 側では NULL 許容）"
                 ),
-                Levels(
+                new Factor(
                     ExplicitOp,
-                    "明示の削除（外部キー・一意制約 1 つ・一意制約を全部）と、名前を保って一意制約の列を変え元の列へ名前の無い一意制約を足す変更・名前を保って一意制約の列を変え移した先の列へ名前の無い一意制約を足す変更・最初の一意制約の列を変えほかを外す変更",
-                    "None",
-                    "DropForeignKey",
-                    "DropUnique",
-                    "DropAllUniques",
-                    "RenameKeepAndAddUnnamedOnOld",
-                    "MoveOntoAddedUnique",
-                    "ChangeFirstDropOthers",
-                    "ChangeAllUniques"
+                    [
+                        .. new[]
+                        {
+                            "None",
+                            "DropForeignKey",
+                            "DropUnique",
+                            "DropAllUniques",
+                            "RenameKeepAndAddUnnamedOnOld",
+                            "MoveOntoAddedUnique",
+                            "ChangeFirstDropOthers",
+                            "ChangeAllUniques",
+                        }.Select(level => new Level(level)),
+                        new Level("WidenUnique") { Tag = RowTag.Ledger("pa1") },
+                    ],
+                    "明示の削除（外部キー・一意制約 1 つ・一意制約を全部）と、名前を保って一意制約の列を変え元の列へ名前の無い一意制約を足す変更・名前を保って一意制約の列を変え移した先の列へ名前の無い一意制約を足す変更・最初の一意制約の列を変えほかを外す変更・u と定数の列 x の一意制約を足す変更（u の一意制約の上位集合）"
                 ),
                 Levels(UniqueMultiplicity, "親の列 u に張る一意制約の数", "0", "1", "2"),
                 Levels(ReferencedKey, "子の外部キーが参照する親のキー", "PrimaryKey", "Unique"),
@@ -144,6 +169,26 @@ internal static class SyncPlanShapeRows
                     "BigIntChild",
                     "VarCharChild",
                     "OrphanChild"
+                ),
+                new Factor(
+                    UniqueColumnData,
+                    [
+                        new Level("Distinct") { Tag = RowTag.Ledger("pa1") },
+                        new Level("NullRepeats") { Tag = RowTag.Ledger("pa1") },
+                        new Level("CompositeNullRepeats") { Tag = RowTag.Ledger("pa1") },
+                        new Level("CompositePartialNull") { Tag = RowTag.Ledger("pa1") },
+                    ],
+                    "親の列 u のデータ（値がどれも違う・u を NULL 許容で作り、最初の 2 行を NULL にする＝定数の列 x と組むと一部が NULL の重複）"
+                ),
+                new Factor(
+                    ChildOnDelete,
+                    [
+                        new Level("NoAction") { Tag = RowTag.Ledger("pe3") },
+                        new Level("SetDefault") { Tag = RowTag.Ledger("pe3") },
+                        new Level("SetNull") { Tag = RowTag.Ledger("pe3") },
+                        new Level("Cascade") { Tag = RowTag.Ledger("pe3") },
+                    ],
+                    "最初の子 c1 の外部キーの ON DELETE（DB 側の図。SET DEFAULT・SET NULL の行は c1 の子の列を NULL 許容で作る）"
                 ),
             ],
             [
@@ -182,6 +227,8 @@ internal static class SyncPlanShapeRows
                 [CollateralFk] = "None",
                 [PrimaryKeyTwin] = "0",
                 [AddedForeignKey] = "None",
+                [UniqueColumnData] = "Distinct",
+                [ChildOnDelete] = "NoAction",
             }
         ),
         // L4（P5-2 の試運転・PostgreSQL）：DB が受け入れている型の違う外部キー（int → bigint）の親の主キーを並べ替え、子の列の
@@ -200,6 +247,8 @@ internal static class SyncPlanShapeRows
                 [CollateralFk] = "None",
                 [PrimaryKeyTwin] = "0",
                 [AddedForeignKey] = "None",
+                [UniqueColumnData] = "Distinct",
+                [ChildOnDelete] = "NoAction",
             }
         ),
         // V1（P5-2 の試運転の 2 回目・PostgreSQL）：複合外部キーの組 (k, p_ref_1) が DB の受け入れている型の違いを持ち、別の組
@@ -219,6 +268,8 @@ internal static class SyncPlanShapeRows
                 [CollateralFk] = "None",
                 [PrimaryKeyTwin] = "0",
                 [AddedForeignKey] = "None",
+                [UniqueColumnData] = "Distinct",
+                [ChildOnDelete] = "NoAction",
             }
         ),
         // V3（同・MySQL）：子の外部キーが参照する列の一意制約の双子を両方外し、表 d の外部キーを作り直す。互いを「外部キーを支える
@@ -237,6 +288,8 @@ internal static class SyncPlanShapeRows
                 [CollateralFk] = "AlterOtherForeignKey",
                 [PrimaryKeyTwin] = "0",
                 [AddedForeignKey] = "None",
+                [UniqueColumnData] = "Distinct",
+                [ChildOnDelete] = "NoAction",
             }
         ),
         // V4（同・Oracle・PostgreSQL）：残す外部キーの子の列を互換でない型（int → varchar）へ変え、表 d の外部キーを作り直す。
@@ -255,6 +308,8 @@ internal static class SyncPlanShapeRows
                 [CollateralFk] = "AlterOtherForeignKey",
                 [PrimaryKeyTwin] = "0",
                 [AddedForeignKey] = "None",
+                [UniqueColumnData] = "Distinct",
+                [ChildOnDelete] = "NoAction",
             }
         ),
         // V6（同・MySQL）：主キーと同じ列の一意制約がある親の主キーを広げ、子の列を両端が食い違う型へ変える。主キーの解除を誤って
@@ -273,6 +328,8 @@ internal static class SyncPlanShapeRows
                 [CollateralFk] = "None",
                 [PrimaryKeyTwin] = "1",
                 [AddedForeignKey] = "None",
+                [UniqueColumnData] = "Distinct",
+                [ChildOnDelete] = "NoAction",
             }
         ),
         // V8（修正 AC の実 DB の確かめ・PostgreSQL・Oracle）：外部キーの両端を同じ別の種類（int → varchar）へ変え、表 d の外部キーを
@@ -292,6 +349,8 @@ internal static class SyncPlanShapeRows
                 [CollateralFk] = "AlterOtherForeignKey",
                 [PrimaryKeyTwin] = "0",
                 [AddedForeignKey] = "None",
+                [UniqueColumnData] = "Distinct",
+                [ChildOnDelete] = "NoAction",
             }
         ),
         // 型の違う外部キーの追加（同・MySQL・SQL Server）：live の列どうし（親 int・子 bigint）に外部キーを足す。どちらの端の型も
@@ -310,6 +369,8 @@ internal static class SyncPlanShapeRows
                 [CollateralFk] = "None",
                 [PrimaryKeyTwin] = "0",
                 [AddedForeignKey] = "BigIntChild",
+                [UniqueColumnData] = "Distinct",
+                [ChildOnDelete] = "NoAction",
             }
         ),
         // 前寄せの型の判定（P5-2 の本番 PA1・Oracle）：外部キーの両端を別々の型へ変え（子は互換の範囲で広げ、親は互換でない型へ）、
@@ -329,6 +390,8 @@ internal static class SyncPlanShapeRows
                 [CollateralFk] = "AlterOtherForeignKey",
                 [PrimaryKeyTwin] = "0",
                 [AddedForeignKey] = "None",
+                [UniqueColumnData] = "Distinct",
+                [ChildOnDelete] = "NoAction",
             }
         ),
         // 付け直しの並び（P5-2 の本番 PB1・MySQL・Oracle）：親の主キーを並べ替え（子の外部キーを外して付け直す）、親の無い値を持つ
@@ -348,6 +411,8 @@ internal static class SyncPlanShapeRows
                 [CollateralFk] = "None",
                 [PrimaryKeyTwin] = "0",
                 [AddedForeignKey] = "OrphanChild",
+                [UniqueColumnData] = "Distinct",
+                [ChildOnDelete] = "NoAction",
             }
         ),
         // 型の違う外部キーの追加（修正 AC2・4 方言）：live の列どうし（親 int・子 varchar）に外部キーを足す
@@ -365,6 +430,8 @@ internal static class SyncPlanShapeRows
                 [CollateralFk] = "None",
                 [PrimaryKeyTwin] = "0",
                 [AddedForeignKey] = "VarCharChild",
+                [UniqueColumnData] = "Distinct",
+                [ChildOnDelete] = "NoAction",
             }
         ),
         // 前寄せの組の並び（夜間 CI の網の MySQL の種 8169）：外部キーが参照する列の一意制約の双子のうち、片方の列を変え（作り直し）、
@@ -384,6 +451,8 @@ internal static class SyncPlanShapeRows
                 [CollateralFk] = "None",
                 [PrimaryKeyTwin] = "0",
                 [AddedForeignKey] = "None",
+                [UniqueColumnData] = "Distinct",
+                [ChildOnDelete] = "NoAction",
             }
         ),
         // 前寄せの組に付け直すキーが 2 つ（修正 AH2 の残り）：外部キーが参照する列の一意制約の双子を両方作り直す。組をどう並べても
@@ -403,8 +472,148 @@ internal static class SyncPlanShapeRows
                 [CollateralFk] = "None",
                 [PrimaryKeyTwin] = "0",
                 [AddedForeignKey] = "None",
+                [UniqueColumnData] = "Distinct",
+                [ChildOnDelete] = "NoAction",
             }
         ),
+        // 一部が NULL の重複（3 回目の効果測定の PA1・Oracle）：NULL 許容の列 u の一意制約を持つ表へ、u と定数の列 x の一意制約を
+        // 足し、表 d の外部キーを作り直す。u が NULL で x が同じ 2 行を Oracle は (u, x) の重複とみなすのに、計画は u の一意制約を
+        // 根拠に「既存の行で断られない」と証明し、追加が断られたとき先に外した d の外部キーが名指しされずに消えたまま残った
+        new RequiredRow(
+            "pa1-widen-unique-over-null-rows",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "None",
+                [ReferencingFks] = "0",
+                [TypeChange] = "None",
+                [ExplicitOp] = "WidenUnique",
+                [UniqueMultiplicity] = "1",
+                [ReferencedKey] = "PrimaryKey",
+                [ForeignKeyTypes] = "Same",
+                [CollateralFk] = "AlterOtherForeignKey",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "None",
+                [UniqueColumnData] = "NullRepeats",
+                [ChildOnDelete] = "NoAction",
+            }
+        )
+        {
+            Tag = RowTag.Ledger("pa1"),
+        },
+        // 同じ形の文の由来の隣（PA1）：巻き添えの作り直しの代わりに、親の主キーの並べ替えで子の外部キーと主キーを外して付け直す
+        new RequiredRow(
+            "pa1-widen-unique-over-null-rows-pk-reorder",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "Reorder",
+                [ReferencingFks] = "1",
+                [TypeChange] = "None",
+                [ExplicitOp] = "WidenUnique",
+                [UniqueMultiplicity] = "1",
+                [ReferencedKey] = "PrimaryKey",
+                [ForeignKeyTypes] = "Same",
+                [CollateralFk] = "None",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "None",
+                [UniqueColumnData] = "NullRepeats",
+                [ChildOnDelete] = "NoAction",
+            }
+        )
+        {
+            Tag = RowTag.Ledger("pa1"),
+        },
+        // 同じ形の複合のキーの隣（PA1）：live の一意制約が複合 (u, y) で、構成列が全部 NULL 許容なら証拠にならず（Oracle は
+        // (NULL, NULL) の 2 行を持てて、(u, y, x) を断る）、一部だけ NULL 許容なら証拠になる（(10, NULL) の 2 行目は Oracle も
+        // INSERT で断るので、重複が入らない）
+        new RequiredRow(
+            "pa1-widen-unique-over-null-composite-key",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "None",
+                [ReferencingFks] = "0",
+                [TypeChange] = "None",
+                [ExplicitOp] = "WidenUnique",
+                [UniqueMultiplicity] = "1",
+                [ReferencedKey] = "PrimaryKey",
+                [ForeignKeyTypes] = "Same",
+                [CollateralFk] = "AlterOtherForeignKey",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "None",
+                [UniqueColumnData] = "CompositeNullRepeats",
+                [ChildOnDelete] = "NoAction",
+            }
+        )
+        {
+            Tag = RowTag.Ledger("pa1"),
+        },
+        new RequiredRow(
+            "pa1-widen-unique-over-partly-nullable-composite-key",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "None",
+                [ReferencingFks] = "0",
+                [TypeChange] = "None",
+                [ExplicitOp] = "WidenUnique",
+                [UniqueMultiplicity] = "1",
+                [ReferencedKey] = "PrimaryKey",
+                [ForeignKeyTypes] = "Same",
+                [CollateralFk] = "AlterOtherForeignKey",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "None",
+                [UniqueColumnData] = "CompositePartialNull",
+                [ChildOnDelete] = "NoAction",
+            }
+        )
+        {
+            Tag = RowTag.Ledger("pa1"),
+        },
+        // 外し直しの方言の前寄せ（3 回目の効果測定の PE1・MySQL）：外部キーの両端を別々の型へ変え（子は可変長の文字列の長さだけを
+        // 伸ばし、親は互換でない型へ）、表 d の外部キーを作り直す。外部キー単位の同期後の両端で「必ず断られる」と判定して、MySQL が
+        // 外部キーを張ったまま受ける子の変更を前寄せし、断られる親の変更が元の位置に残って、先に外した d の外部キーが消えたまま残った
+        new RequiredRow(
+            "pe1-divergent-ends-string-length",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "None",
+                [ReferencingFks] = "1",
+                [TypeChange] = "DivergentEndsStringLength",
+                [ExplicitOp] = "None",
+                [UniqueMultiplicity] = "0",
+                [ReferencedKey] = "PrimaryKey",
+                [ForeignKeyTypes] = "Same",
+                [CollateralFk] = "AlterOtherForeignKey",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "None",
+                [UniqueColumnData] = "Distinct",
+                [ChildOnDelete] = "NoAction",
+            }
+        )
+        {
+            Tag = RowTag.Ledger("pe1"),
+        },
+        // 暗黙の付け直しの SET DEFAULT（3 回目の効果測定の PE3・SQL Server）：DB の SET DEFAULT の外部キーの子の列（NULL 許容・
+        // 既定値なし）を NOT NULL にする。計画は外部キーを外して列を変えて付け直すが、付け直しが Msg 1760 で断られるのに警告が無かった
+        new RequiredRow(
+            "pe3-live-set-default-child-not-null",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "None",
+                [ReferencingFks] = "1",
+                [TypeChange] = "ChildNotNull",
+                [ExplicitOp] = "None",
+                [UniqueMultiplicity] = "0",
+                [ReferencedKey] = "PrimaryKey",
+                [ForeignKeyTypes] = "Same",
+                [CollateralFk] = "None",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "None",
+                [UniqueColumnData] = "Distinct",
+                [ChildOnDelete] = "SetDefault",
+            }
+        )
+        {
+            Tag = RowTag.Ledger("pe3"),
+        },
     ];
 
     /// <summary>網羅の配列（全行）。配列に含まれない必ず含む行は後ろへ足す</summary>
@@ -494,6 +703,29 @@ internal static class SyncPlanShapeRows
             .Where(shape => !AllRows.Any(row => shape.All(pair => row[pair.Key] == pair.Value)))
             .Select(shape => string.Join(" × ", shape.Select(p => $"{p.Key}={p.Value}")));
 
+    /// <summary>形の行の Id の水準の割り当て（形の行の Id でなければ null）</summary>
+    /// <param name="scenarioId">決定的な行の Id</param>
+    public static IReadOnlyDictionary<string, string>? AssignmentOf(string? scenarioId)
+    {
+        if (scenarioId is null || !scenarioId.StartsWith(IdPrefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var separator = scenarioId.LastIndexOf('-');
+
+        return
+            int.TryParse(
+                scenarioId.AsSpan(separator + 1),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var index
+            )
+            && index < AllRows.Count
+            ? AllRows[index]
+            : null;
+    }
+
     /// <summary>行の Id（方言・全行の中の番号）</summary>
     public static string IdOf(string dialect, int index) =>
         $"{IdPrefix}{dialect}-{index.ToString("00", CultureInfo.InvariantCulture)}";
@@ -548,6 +780,32 @@ internal static class SyncPlanShapeRows
             return false;
         }
 
+        // SQL Server は一意制約の列の NULL どうしを重なりとみなす（2 行目の NULL を INSERT で断る＝DB の事実）ので、u の一意制約の
+        // 下に NULL を 2 行持てない
+        if (
+            row[UniqueColumnData] is "NullRepeats" or "CompositeNullRepeats"
+            && row[UniqueMultiplicity] != "0"
+            && dialect == DialectNames.SqlServer
+        )
+        {
+            return false;
+        }
+
+        // 列ごとの文字集合（CHARACTER SET latin1）は MySQL の型の表記だけが書ける（ほかの方言は文字集合を列の型に書かない）
+        if (row[TypeChange] == "DivergentEndsStringLengthLatin1" && dialect != DialectNames.MySql)
+        {
+            return false;
+        }
+
+        // SET DEFAULT は、DB が作らない方言（SupportsSetDefaultAction が偽＝MySQL・Oracle）で作らない
+        if (
+            row[ChildOnDelete] == "SetDefault"
+            && !SyncPlanExpectationCapabilities.Get(dialect).SupportsSetDefaultAction
+        )
+        {
+            return false;
+        }
+
         // 主キーと同じ列の一意制約は、持てない宣言の方言（Oracle＝ORA-02261・SQLite）で作らない
         return row[PrimaryKeyTwin] != "1"
             || SyncPlanExpectationCapabilities.Get(dialect).SupportsUniqueConstraintOnPrimaryKey;
@@ -590,16 +848,61 @@ internal static class SyncPlanShapeRows
     {
         // 参照される親の列と全部の子の型の種類を変える行は、親・子・d を行 0 で作る（Oracle は行のある列の型の種類を変えられない＝
         // ORA-01439）
-        var kindChangesBothEnds = row[TypeChange] is "BothEndsKindChange" or "DivergentEnds";
+        var kindChangesBothEnds =
+            row[TypeChange] is "BothEndsKindChange" or "DivergentEnds"
+            || StringEndsOf(row) is not null;
         var p = kindChangesBothEnds ? live.Table("p", 0) : live.Table("p");
-        var id = live.Int(p, "id", pk: true);
+        var referencesUnique = row[ReferencedKey] == "Unique";
+
+        // 可変長の文字列の長さを変える水準は、参照される親の列を水準の長さと文字集合の varchar で作る（子の列は親の列の型を写す）
+        var stringEnds = StringEndsOf(row);
+        var id =
+            stringEnds is { } idEnds && !referencesUnique
+                ? live.VarChar(p, "id", idEnds.Length, pk: true, characterSet: idEnds.CharacterSet)
+                : live.Int(p, "id", pk: true);
         var k = live.Int(p, "k", pk: true);
-        var u = live.Int(p, "u", value: r => (r * 10).ToString(CultureInfo.InvariantCulture));
+
+        // NULL の重複の水準は、u を NULL 許容で作って最初の 2 行を NULL にする（x と組むと一部が NULL の重複）。複合のキーの水準は
+        // u と y の一意制約を張り、全部が NULL 許容（CompositeNullRepeats＝最初の 2 行の u と y が NULL）か、y だけが NULL 許容
+        // （CompositePartialNull＝u は NOT NULL で値がどれも違い、最初の 2 行の y が NULL）にする
+        var composite = IsComposite(row);
+        var nullRepeats = row[UniqueColumnData] is "NullRepeats" or "CompositeNullRepeats";
+        Func<int, string?> uValue = r =>
+            nullRepeats && r <= 2 ? null : (r * 10).ToString(CultureInfo.InvariantCulture);
+        var u =
+            stringEnds is { } uEnds && referencesUnique
+                ? live.VarChar(
+                    p,
+                    "u",
+                    uEnds.Length,
+                    nullable: nullRepeats,
+                    characterSet: uEnds.CharacterSet
+                )
+                : live.Int(p, "u", nullable: nullRepeats, value: uValue);
         live.Int(p, "w", value: r => (r * 100).ToString(CultureInfo.InvariantCulture));
+
+        // 一意制約を広げる操作の相手の定数の列（u の値がどれも違えば (u, x) も一意）
+        live.Int(p, "x", value: _ => "7");
+
+        // 複合のキーの水準の 2 列目（NULL 許容）
+        var y = live.Int(
+            p,
+            "y",
+            nullable: true,
+            value: r =>
+                composite && r <= 2 ? null : (r * 1000).ToString(CultureInfo.InvariantCulture)
+        );
 
         foreach (var name in UniqueNames(row))
         {
-            live.Unique(p, name, u);
+            if (composite)
+            {
+                live.Unique(p, name, u, y);
+            }
+            else
+            {
+                live.Unique(p, name, u);
+            }
         }
 
         // 主キーと同じ列の一意制約（主キーを外しても外部キーを支えうる）
@@ -607,8 +910,6 @@ internal static class SyncPlanShapeRows
         {
             live.Unique(p, "uq_p_pk", id, k);
         }
-
-        var referencesUnique = row[ReferencedKey] == "Unique";
 
         for (var i = 1; i <= Count(row[ReferencingFks]); i++)
         {
@@ -618,7 +919,54 @@ internal static class SyncPlanShapeRows
                     ? live.Table($"c{i}", 0)
                     : live.Table($"c{i}");
             live.Int(child, "id", pk: true);
-            live.Ref(child, p, "p_ref", $"fk_c{i}_p", referenced: referencesUnique ? [u] : null);
+
+            // 最初の子の外部キーの ON DELETE。SET DEFAULT・SET NULL と NOT NULL 化の水準は子の列を NULL 許容で作る（SQL Server は
+            // NOT NULL で既定値の無い列に SET DEFAULT を作れず＝Msg 1760、SET NULL は NULL 許容の列が要る）
+            var onDelete =
+                i == 1
+                    ? row[ChildOnDelete] switch
+                    {
+                        "SetDefault" => ForeignKeyReferentialAction.SetDefault,
+                        "SetNull" => ForeignKeyReferentialAction.SetNull,
+                        "Cascade" => ForeignKeyReferentialAction.Cascade,
+                        _ => ForeignKeyReferentialAction.NoAction,
+                    }
+                    : ForeignKeyReferentialAction.NoAction;
+            var nullableChild =
+                i == 1
+                && (
+                    row[ChildOnDelete] is "SetDefault" or "SetNull"
+                    || row[TypeChange] == "ChildNotNull"
+                );
+            live.Ref(
+                child,
+                p,
+                "p_ref",
+                $"fk_c{i}_p",
+                onDelete: onDelete,
+                nullable: nullableChild,
+                referenced: referencesUnique ? [u] : null
+            );
+        }
+
+        // u と x の一意制約を足す操作は、一部が NULL の重複を重なりとみなす DB（Oracle は全部が NULL の行だけを検査の外に置き、
+        // SQL Server は NULL どうしを等しいとみなす）で既存の行に断られる（測った事実＝SyncPlanFuzzDialect の宣言）
+        if (
+            nullRepeats
+            && row[ExplicitOp] == "WidenUnique"
+            && !kindChangesBothEnds
+            && (
+                live.Dialect.UniqueComparesPartiallyNullKeys
+                || !live.Dialect.UniqueAllowsRepeatedNull
+            )
+        )
+        {
+            live.ExpectDataFailure(
+                FuzzDataFailureKind.AddUniqueConstraint,
+                "p",
+                composite ? "uq_p_uyx" : "uq_p_ux",
+                "u"
+            );
         }
 
         // 巻き添えで作り直す外部キー（親の主キーを参照する表 d）
@@ -760,6 +1108,20 @@ internal static class SyncPlanShapeRows
                     10
                 );
                 break;
+            case "DivergentEndsStringLength":
+            case "DivergentEndsStringLengthAcrossPrefix":
+            case "DivergentEndsStringLengthInBand":
+            case "DivergentEndsStringLengthLatin1":
+                // 外部キーの両端を別々の型へ：最初の子は可変長の文字列の長さだけを伸ばし（水準の長さ。DB の今の型の表記の括弧の後ろ＝
+                // 文字集合の指定はそのまま保つ。網の DB 側の図は書き、実 DB の取込は書かない。同期は列の照合順序を読み直して保つ）、参照される
+                // 親の列は互換でない型へ（int）。子の表を先頭へ移す（DivergentEnds と同じ）
+                target.MoveTableFirst("c1");
+                target.SetStringLength("c1", childColumn, StringEndsOf(row)!.Value.NewLength);
+                target.SetType("p", row[ReferencedKey] == "Unique" ? "u" : "id", FuzzTypeKind.Int);
+                break;
+            case "ChildNotNull":
+                target.SetNullable("c1", childColumn, false);
+                break;
         }
 
         switch (row[PkChange])
@@ -830,6 +1192,19 @@ internal static class SyncPlanShapeRows
                 target.ChangeUniqueOn("p", UniqueNames(row)[0], ["u"], "w");
                 target.ChangeUnique("p", UniqueNames(row)[1], "u", "w");
                 break;
+            case "WidenUnique":
+                // u と定数の列 x の一意制約を足す（u の一意制約の上位集合。u の値がどれも違えば通り、u が NULL の 2 行は一部が NULL の
+                // 重複になる）
+                if (IsComposite(row))
+                {
+                    target.AddUnique("p", "uq_p_uyx", "u", "y", "x");
+                }
+                else
+                {
+                    target.AddUnique("p", "uq_p_ux", "u", "x");
+                }
+
+                break;
         }
 
         if (row[CollateralFk] == "AlterOtherForeignKey")
@@ -865,10 +1240,72 @@ internal static class SyncPlanShapeRows
                     "ChildNullability",
                     "ChildKindChange",
                     "BothEndsKindChange",
-                    "DivergentEnds"
+                    "DivergentEnds",
+                    "DivergentEndsStringLength",
+                    "DivergentEndsStringLengthAcrossPrefix",
+                    "DivergentEndsStringLengthInBand",
+                    "DivergentEndsStringLengthLatin1",
+                    "ChildNotNull"
                 )
                 || Has(ExplicitOp, "DropForeignKey")
                 || Has(ForeignKeyTypes, "Wider", "DecimalOtherKeyColumn")
+                || Has(ChildOnDelete, "SetDefault", "SetNull", "Cascade")
+            )
+        )
+        {
+            return false;
+        }
+
+        // SET DEFAULT・SET NULL の子の列は DB 側で NULL 許容なので、NULL 許容だけの変更の相手が無い
+        if (Has(ChildOnDelete, "SetDefault", "SetNull") && Has(TypeChange, "ChildNullability"))
+        {
+            return false;
+        }
+
+        // u が NULL の行は、u の一意制約を参照する子（外部キーの列は NOT NULL）が指せず、u へ移す主キーは NOT NULL 化がデータで
+        // 断られる（どちらもこの水準と別の形を持ち込む）
+        if (
+            Has(UniqueColumnData, "NullRepeats", "CompositeNullRepeats")
+            && (Has(ReferencedKey, "Unique") || Has(PkChange, "MoveToUniqueColumn"))
+        )
+        {
+            return false;
+        }
+
+        // 複合のキーの水準は u の一意制約を (u, y) に張るので、u だけの一意制約を参照する子と、u の一意制約を名前か列集合 (u) で
+        // 引いて外す・変える操作の相手が無い
+        if (
+            Has(UniqueColumnData, "CompositeNullRepeats", "CompositePartialNull")
+            && (
+                Has(ReferencedKey, "Unique")
+                || Has(
+                    ExplicitOp,
+                    "DropUnique",
+                    "DropAllUniques",
+                    "RenameKeepAndAddUnnamedOnOld",
+                    "MoveOntoAddedUnique",
+                    "ChangeFirstDropOthers",
+                    "ChangeAllUniques"
+                )
+            )
+        )
+        {
+            return false;
+        }
+
+        // 可変長の文字列の長さを変える水準は参照される親の列を varchar で作るので、親の列だけを bigint にする両端の型と、p.id を
+        // 整数とみなす足す外部キーの子の型の水準（int・bigint・文字列）が成り立たない
+        if (
+            Has(
+                TypeChange,
+                "DivergentEndsStringLength",
+                "DivergentEndsStringLengthAcrossPrefix",
+                "DivergentEndsStringLengthInBand",
+                "DivergentEndsStringLengthLatin1"
+            )
+            && (
+                Has(ForeignKeyTypes, "Wider")
+                || Has(AddedForeignKey, "IntChild", "BigIntChild", "VarCharChild", "OrphanChild")
             )
         )
         {
@@ -1033,6 +1470,35 @@ internal static class SyncPlanShapeRows
         };
 
     private static int Count(string level) => int.Parse(level, CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// 可変長の文字列の長さを変える型の変更の水準の、参照される親の列と子の列の長さ・最初の子の変えた後の長さ・文字集合（水準でなければ null）
+    /// </summary>
+    /// <remarks>
+    /// 長さの頭のバイト数（255 バイト以下は 1 バイト・256 バイト以上は 2 バイト）を変えずに伸ばす変更だけを、MySQL は外部キーを張ったまま受ける。
+    /// utf8mb4 は 1 文字 4 バイト、latin1 は 1 バイト：
+    /// <list type="bullet">
+    ///   <item>DivergentEndsStringLength：20 → 30 文字（80 → 120 バイト・受ける）</item>
+    ///   <item>DivergentEndsStringLengthAcrossPrefix：20 → 64 文字（80 → 256 バイト・断る）</item>
+    ///   <item>DivergentEndsStringLengthInBand：64 → 100 文字（256 → 400 バイト・受ける。文字数だけでは 64〜255 の帯で判定できない）</item>
+    ///   <item>DivergentEndsStringLengthLatin1：latin1 の 40 → 70 文字（40 → 70 バイト・受ける。utf8mb4 なら 160 → 280 で断る）</item>
+    /// </list>
+    /// </remarks>
+    private static (int Length, int NewLength, string? CharacterSet)? StringEndsOf(
+        IReadOnlyDictionary<string, string> row
+    ) =>
+        row[TypeChange] switch
+        {
+            "DivergentEndsStringLength" => (20, 30, null),
+            "DivergentEndsStringLengthAcrossPrefix" => (20, 64, null),
+            "DivergentEndsStringLengthInBand" => (64, 100, null),
+            "DivergentEndsStringLengthLatin1" => (40, 70, "latin1"),
+            _ => null,
+        };
+
+    /// <summary>親の列 u のデータが複合のキー（u と y の一意制約）の水準か</summary>
+    private static bool IsComposite(IReadOnlyDictionary<string, string> row) =>
+        row[UniqueColumnData] is "CompositeNullRepeats" or "CompositePartialNull";
 
     private static Factor Levels(string name, string description, params string[] levels) =>
         new(name, [.. levels.Select(level => new Level(level))], description);

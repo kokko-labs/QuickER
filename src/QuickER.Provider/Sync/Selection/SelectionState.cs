@@ -10,7 +10,7 @@ namespace QuickER.Provider.Sync.Selection;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 1 つの状態は 1 つの並びに対応する。除外の周（<see cref="SyncPlanner"/>）が、最初の並びから 1 つ作り、規則の取り下げを当てて並びが
+/// 1 つの状態は 1 つの並びに対応する。除外の周（<see cref="PlanSelection.ExcludeUntilStable"/>）が、最初の並びから 1 つ作り、規則の取り下げを当てて並びが
 /// 変わるたびに、変わった後の並びから作り直す。取り下げを返さなかった規則の次の規則は、同じ状態を読む。
 /// </para>
 /// <para>

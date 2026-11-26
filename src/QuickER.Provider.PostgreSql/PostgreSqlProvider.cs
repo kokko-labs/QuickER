@@ -62,6 +62,8 @@ public sealed class PostgreSqlProvider : IDatabaseProvider
             ReferencedKeyRequiresSameColumnOrder = false,
             ForeignKeyAllowsStringLengthDifference = true,
             ForeignKeyAllowsIntegerWidthDifference = true,
+            ForeignKeyColumnWidening = ForeignKeyColumnWidening.Accepted,
+            UniqueConstraintComparesPartiallyNullKeys = false,
             ConstraintNameScope = ConstraintNameScope.KeysInSchemaForeignKeysInTable,
             AllowsDuplicateForeignKeyDefinitions = true,
             TransactionalDdl = true,

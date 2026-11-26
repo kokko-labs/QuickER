@@ -346,6 +346,81 @@ internal static partial class SyncPlanExpectationRows
                         DuplicateKeyErrors("ORA-02299")
                     )
                 ),
+            // 一部だけ NULL 許容の複合のキーの一意制約の上位集合は、どの方言でも既存の行で断られない（NOT NULL の列がある一意制約は
+            // NULL の行も比べるので、Oracle でも一部が NULL の重複が入らない＝2026-11-26 の実測）。証拠に使い、作り直しの外部キーを
+            // 名指ししない（全部 NULL 許容のキーだけを証拠から外す規則の対照。台帳の項目 pa1）
+            Row(
+                    "plan-row-dependent-change-widen-unique-over-partly-nullable-key-is-not-named",
+                    "[Integration] 一部だけ NULL 許容の複合のキーの一意制約を含む一意制約を足し、別の外部キーを作り直す：どの方言でも名指ししない",
+                    AllDialects
+                )
+                .LiveWith(w =>
+                {
+                    RowDependentParentChild(w.Live, w.Capability, "rd_wp", nullable: false);
+                    var type = RealCrossDialectScenarios.IntType(w.Capability);
+                    w.Live["rd_wp_child"].Columns.Add(ExpectationSchema.NotNull("a", type));
+                    w.Live["rd_wp_child"].Columns.Add(ExpectationSchema.Nullable("b", type));
+                    w.Live["rd_wp_child"].Columns.Add(ExpectationSchema.NotNull("c", type));
+                    w.Live.Unique("rd_wp_child", "uq_rd_wp_ab", "a", "b");
+                })
+                .TargetWith(w =>
+                {
+                    RowDependentParentChild(
+                        w.Target,
+                        w.Capability,
+                        "rd_wp",
+                        nullable: false,
+                        onDelete: ForeignKeyReferentialAction.Cascade
+                    );
+                    var type = RealCrossDialectScenarios.IntType(w.Capability);
+                    w.Target["rd_wp_child"].Columns.Add(ExpectationSchema.NotNull("a", type));
+                    w.Target["rd_wp_child"].Columns.Add(ExpectationSchema.Nullable("b", type));
+                    w.Target["rd_wp_child"].Columns.Add(ExpectationSchema.NotNull("c", type));
+                    w.Target.Unique("rd_wp_child", "uq_rd_wp_ab", "a", "b");
+                    w.Target.Unique("rd_wp_child", "uq_rd_wp_abc", "a", "b", "c");
+                })
+                .Select(RealScenarios.SelectAll)
+                .Expect(e => e.Warnings.Absent("ConstraintRebuildAround*"))
+                .Tagged(RowTag.Ledger("pa1")),
+            // 主キーの付与の証明は、全部 NULL 許容の一意制約も証拠に使う（新しい主キーの列は先に NOT NULL にするので、NULL の行があれば
+            // NOT NULL 化が先に断られて名指しされる）。名指しの文面は NOT NULL 化だけで、主キーの付与を数えない（台帳の項目 pa1 の主キーの腕）
+            Row(
+                    "plan-row-dependent-change-pk-onto-all-nullable-unique-names-only-not-null",
+                    "[Integration] 全部 NULL 許容の一意制約の列を含む主キーへ移す：暗黙コミットの方言は主キーを名指しし、断られうる文は NOT NULL 化だけ（主キーの付与は一意制約で証明する）",
+                    AllDialects
+                )
+                .LiveWith(w =>
+                {
+                    var type = RealCrossDialectScenarios.IntType(w.Capability);
+                    w.Live.Table(
+                        "rd_pku",
+                        ExpectationSchema.Pk("id", type),
+                        ExpectationSchema.Nullable("u", type),
+                        ExpectationSchema.NotNull("x", type)
+                    );
+                    w.Live.Unique("rd_pku", "uq_rd_pku_u", "u");
+                })
+                .TargetWith(w =>
+                {
+                    var type = RealCrossDialectScenarios.IntType(w.Capability);
+                    w.Target.Table(
+                        "rd_pku",
+                        ExpectationSchema.NotNull("id", type),
+                        ExpectationSchema.Pk("u", type),
+                        ExpectationSchema.Pk("x", type)
+                    );
+                    w.Target.Unique("rd_pku", "uq_rd_pku_u", "u");
+                })
+                .Select(RealScenarios.SelectAll)
+                .Expect(e =>
+                    ExpectRowDependentWarnings(
+                        e,
+                        [
+                            "ConstraintRebuildAroundRowDependentChange(rd_pku): PRIMARY KEY (rd_pku.u: NOT NULL)",
+                        ]
+                    )
+                )
+                .Tagged(RowTag.Ledger("pa1")),
             Row(
                     "plan-row-dependent-change-add-not-null-column-names-collateral-fk",
                     "[Integration] 行のある表へ NOT NULL の列を足し、別の外部キーを作り直す：表が空でないと足せない暗黙コミットの方言だけ、作り直しの外部キーを名指しする",

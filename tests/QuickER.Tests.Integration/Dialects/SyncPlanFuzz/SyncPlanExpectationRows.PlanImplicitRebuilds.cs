@@ -386,7 +386,7 @@ internal static partial class SyncPlanExpectationRows
                             d =>
                                 d.Warnings.Count("UniqueConstraintDropMayBreakForeignKey*", 1)
                                     .Warnings.Single(
-                                        "UniqueConstraintDropMayBreakForeignKey(p): FK_c_p"
+                                        "UniqueConstraintDropMayBreakForeignKey(p): c.FK_c_p"
                                     )
                                     .Items.Absent("DropForeignKey > *")
                         )

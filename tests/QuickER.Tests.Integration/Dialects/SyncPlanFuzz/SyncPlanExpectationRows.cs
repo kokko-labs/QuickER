@@ -388,6 +388,7 @@ internal static partial class SyncPlanExpectationRows
             .. PlanNameCollisionRows(),
             .. PlanSelectionOrderRows(),
             .. PlanWarningOrderRows(),
+            .. ReviewFindingRows(),
             .. TreatmentRows(),
             .. RealSqlServerRows(),
             .. RealSqliteRows(),
@@ -424,6 +425,7 @@ internal sealed class ExpectationRow(string id, string description, string[] cap
     private Func<ExpectationWorld, SyncPlanContext?> _context = w => w.LiveContext();
     private readonly ExpectationBuilder _expect = new();
     private bool _plans;
+    private RowTag? _tag;
 
     /// <summary>DB 側の図を組む</summary>
     public ExpectationRow Live(Action<ExpectationSchema> build)
@@ -514,6 +516,13 @@ internal sealed class ExpectationRow(string id, string description, string[] cap
         return this;
     }
 
+    /// <summary>新しい行の札を付ける（減るだけの写しに無い行は札を持つ＝tests/QuickER.Tests/TestSupport/CLAUDE.md「分岐の軸の台帳と新しい行の札」）</summary>
+    public ExpectationRow Tagged(RowTag tag)
+    {
+        _tag = tag;
+        return this;
+    }
+
     /// <summary>表の行にする</summary>
     public static implicit operator ScenarioRow<SyncPlanExpectationInput>(ExpectationRow row) =>
         new(
@@ -532,7 +541,10 @@ internal sealed class ExpectationRow(string id, string description, string[] cap
                 row._liveIsModel || row._real is null,
                 row._real
             )
-        );
+        )
+        {
+            Tag = row._tag,
+        };
 
     private string Id { get; } = id;
 

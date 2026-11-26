@@ -10,7 +10,7 @@ internal static partial class RebuildDeclarations
 {
     /// <summary>
     /// 主キー・一意制約を外す間、子の列がその索引の先頭に乗る外部キーは外れていなければならない（外部キーが子の列を先頭に持つ索引を
-    /// 要する方言＝<see cref="QuickER.Dialects.SyncDialectCapabilities.ForeignKeyRequiresLeadingIndex"/>）
+    /// 要する方言＝<see cref="SyncDialectCapabilities.ForeignKeyRequiresLeadingIndex"/>）
     /// </summary>
     /// <remarks>
     /// 外す索引は、主キーを変える表の DB の今の主キーと、同じ計画が外す一意制約（選んだ削除・作り直しの展開・同期後の状態の差として

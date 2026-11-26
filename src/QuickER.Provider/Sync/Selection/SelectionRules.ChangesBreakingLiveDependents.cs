@@ -25,7 +25,9 @@ internal static partial class SelectionRules
     /// <para>
     /// 判定は DB 自身に試させる（<see cref="ILiveDependentCheck"/>。SQL を解析しない）。まず計画全体の同期後の列名で試し、壊れるビュー・トリガーが
     /// 無ければ何も外さない（<c>SELECT *</c> のビューの列の削除・列の数が変わらない名前の変更・トリガーが読まない列の削除などに偽の警告を
-    /// 出さない）。壊れるときだけ、表ごとに試して原因の表を決め、その表の名前を変える項目を外す。表どうしの組み合わせでだけ壊れるときは、
+    /// 出さない）。壊れるときだけ、表ごとに試して原因の表を決め、その表の名前を変える項目を外す。表ごとの結果は計画全体で壊れる物に
+    /// 限る（単独では壊れるが計画全体では壊れない物＝ほかの表の変更が打ち消す形は、原因に数えず名指しもしない。数えると、全体で
+    /// 壊れる物とは別の表まで偽の警告つきで外す）。表どうしの組み合わせでだけ壊れるときは、
     /// 名前を変える表をすべて原因とする。外した後の計画は <see cref="PlanSelection.ExcludeUntilStable"/> の次の周でもう一度試す。
     /// </para>
     /// </remarks>
@@ -43,19 +45,26 @@ internal static partial class SelectionRules
 
         var changes = state.PostSync.ChangedTableColumnNames;
 
-        if (changes.Count == 0 || check.DependentsBrokenBy(ToTableChanges(changes)).IsEmpty)
+        if (changes.Count == 0)
         {
             return [];
         }
 
-        // 表ごとに試して原因の表を決める（表 → 壊れるビュー・トリガー）
+        var whole = check.DependentsBrokenBy(ToTableChanges(changes));
+
+        if (whole.IsEmpty)
+        {
+            return [];
+        }
+
+        // 表ごとに試して原因の表を決める（表 → 計画全体でも壊れるビュー・トリガー・索引）
         var culprits = new Dictionary<string, (string Table, LiveDependentBreaks Breaks)>(
             SchemaNames.Comparer
         );
 
         foreach (var change in changes)
         {
-            var breaks = check.DependentsBrokenBy(ToTableChanges([change]));
+            var breaks = WithinWhole(check.DependentsBrokenBy(ToTableChanges([change])));
 
             if (!breaks.IsEmpty)
             {
@@ -68,11 +77,9 @@ internal static partial class SelectionRules
         // 作れる形が見つかったら、同期計画の期待の行の実 SQLite の段へ行を足す
         if (culprits.Count == 0)
         {
-            var breaks = check.DependentsBrokenBy(ToTableChanges(changes));
-
             foreach (var change in changes)
             {
-                culprits[change.Table] = (change.Table, breaks);
+                culprits[change.Table] = (change.Table, whole);
             }
         }
 
@@ -133,6 +140,26 @@ internal static partial class SelectionRules
             (breaks.Views.Count > 0 || breaks.Triggers.Count > 0)
                 && PlanFacts.IsColumnNameSetChange(item.Kind)
             || breaks.Indexes.Count > 0 && item.Kind == SchemaDiffKind.DropColumn;
+
+        // 単独の変更の結果のうち、計画全体でも壊れる物だけ（DB の物の名前は判定器が同じ形で返すので序数で比べる）
+        LiveDependentBreaks WithinWhole(LiveDependentBreaks single) =>
+            new(
+                [
+                    .. single.Views.Where(name =>
+                        whole.Views.Contains(name, System.StringComparer.Ordinal)
+                    ),
+                ],
+                [
+                    .. single.Triggers.Where(name =>
+                        whole.Triggers.Contains(name, System.StringComparer.Ordinal)
+                    ),
+                ],
+                [
+                    .. single.Indexes.Where(name =>
+                        whole.Indexes.Contains(name, System.StringComparer.Ordinal)
+                    ),
+                ]
+            );
 
         static IReadOnlyDictionary<string, IReadOnlyList<string>?> ToTableChanges(
             IEnumerable<(string Table, IReadOnlyList<string>? Columns)> tables

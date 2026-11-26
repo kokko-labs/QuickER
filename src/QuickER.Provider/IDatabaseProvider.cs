@@ -51,6 +51,14 @@ public sealed class SchemaImportResult
     /// </remarks>
     public IReadOnlyList<SchemaColumnDefault> ColumnDefaults { get; init; } = [];
 
+    /// <summary>取り込んだ文字列・バイト列の列の最大バイト数と文字集合の事実（図には保存しない・MySQL だけが埋める）</summary>
+    /// <remarks>
+    /// 図の型の表記は文字数だけを持ち、列の文字集合（1 文字あたりのバイト数）を持たない。同期の計画が、外部キーを張ったまま列を伸ばす
+    /// 変更を MySQL が受けるか（長さの頭のバイト数が変わらないか）を判定するための材料として、ここにだけ持つ
+    /// （<see cref="ForeignKeyColumnWidening.WithinLengthPrefix"/>）。ほかの方言は空。
+    /// </remarks>
+    public IReadOnlyList<SchemaColumnByteLength> ColumnByteLengths { get; init; } = [];
+
     /// <summary>DB のビューとトリガー（図には入れない）が同期後の表の形でも読める・発火できるかを試す入口（図の外の情報）</summary>
     /// <remarks>
     /// 現状は SQLite だけが、ビューかトリガーがあるときに埋める（取込で読んだ表・索引・ビュー・トリガーの原文を持つ）。ほかの方言と、ビューも

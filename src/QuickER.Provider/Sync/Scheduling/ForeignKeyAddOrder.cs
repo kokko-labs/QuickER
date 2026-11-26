@@ -89,7 +89,8 @@ internal static class ForeignKeyAddOrder
             }
 
             return
-                PairSet(drop.Step.ColumnPairs) == PairSet(add.ColumnPairs)
+                PlanIdentity.ForeignKeyPairSet(drop.Step.ColumnPairs)
+                    == PlanIdentity.ForeignKeyPairSet(add.ColumnPairs)
                 && drop.Step.OnDelete == add.OnDelete
                 && drop.Step.OnUpdate == add.OnUpdate
                 ? 0
@@ -115,13 +116,4 @@ internal static class ForeignKeyAddOrder
                 );
         }
     }
-
-    /// <summary>列の組の対応の集合（並びは比べない）</summary>
-    private static string PairSet(IReadOnlyList<ForeignKeyColumnNamePair> pairs) =>
-        string.Join(
-            ",",
-            pairs
-                .Select(p => $"{SchemaNames.Key(p.ParentColumn)}>{SchemaNames.Key(p.ChildColumn)}")
-                .Order(StringComparer.Ordinal)
-        );
 }

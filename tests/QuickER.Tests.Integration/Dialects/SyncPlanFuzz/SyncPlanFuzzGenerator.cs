@@ -255,6 +255,12 @@ internal static class FuzzShape
     /// </summary>
     public const string ExclusionChainTypeMismatch = "exclusion-chain-type-mismatch-fk";
 
+    /// <summary>
+    /// NULL 許容の列の一意制約の下に一部が NULL の重複を持つ表へ、その上位集合の一意制約を足す（一部が NULL の重複の水準。一意制約の列の
+    /// NULL どうしを重なりとみなさない方言だけ）
+    /// </summary>
+    public const string NullDataWidenedUnique = "null-data-widened-unique";
+
     /// <summary>種の集合全体で必ず出ていなければならない形（方言が作れない形は除く＝<see cref="RequiredFor"/>）</summary>
     public static readonly IReadOnlyList<string> Required =
     [
@@ -329,6 +335,7 @@ internal static class FuzzShape
         ExclusionChainLastColumnUnique,
         ExclusionChainUnrebuiltPrimaryKey,
         ExclusionChainTypeMismatch,
+        NullDataWidenedUnique,
     ];
 
     /// <summary>
@@ -436,6 +443,8 @@ internal static class FuzzShape
                         ),
                     ExclusionChainTypeMismatch => !realDatabase
                         && !dialect.AllowDuplicateForeignKeys,
+                    // 一部が NULL の重複は網でだけ求める（実 DB は形の行の UniqueColumnData の NullRepeats が受け持つ）
+                    NullDataWidenedUnique => !realDatabase && dialect.UniqueAllowsRepeatedNull,
                     _ => true,
                 }
             )
@@ -672,6 +681,7 @@ internal sealed partial class SyncPlanFuzzGenerator(
     Random? tableShapeRng,
     Random? attributeShapeRng,
     Random? exclusionChainRng,
+    Random? nullWidenedUniqueRng,
     SyncPlanFuzzDialect dialect
 ) : ISyncPlanFuzzCase
 {
@@ -703,6 +713,7 @@ internal sealed partial class SyncPlanFuzzGenerator(
             levels ? new Random(TableShapeSeed(seed)) : null,
             levels ? new Random(AttributeShapeSeed(seed)) : null,
             levels ? new Random(ExclusionChainSeed(seed)) : null,
+            levels ? new Random(NullWidenedUniqueSeed(seed)) : null,
             dialect
         );
 
@@ -771,6 +782,14 @@ internal sealed partial class SyncPlanFuzzGenerator(
     /// <remarks>既存の 8 本の列と分けて、それらの引き方を変えない（種の指紋は、この列の水準が図を変えた種だけ変わる）。</remarks>
     private static int ExclusionChainSeed(int seed) =>
         (int)(unchecked((uint)AttributeShapeSeed(seed) * 374761393u) ^ 0xE8C1A5u) & int.MaxValue;
+
+    /// <summary>
+    /// 一部が NULL の重複の水準（NULL 許容の列の一意制約の下の一部が NULL の重複と、その上位集合の一意制約の追加）の乱数の列の種
+    /// （<see cref="ExclusionChainSeed"/> から決定的に作る）
+    /// </summary>
+    /// <remarks>既存の 9 本の列と分けて、それらの引き方を変えない（種の指紋は、この列の水準が図を変えた種だけ変わる）。</remarks>
+    private static int NullWidenedUniqueSeed(int seed) =>
+        (int)(unchecked((uint)ExclusionChainSeed(seed) * 2246822519u) ^ 0x4E7DE5u) & int.MaxValue;
 
     /// <summary>行の水準（<see cref="RowLevelSeed"/> の列で 1 回だけ引く）</summary>
     private enum RowLevel
@@ -859,6 +878,7 @@ internal sealed partial class SyncPlanFuzzGenerator(
         AddLiveDescriptions(live);
         AddColumnDefaults(live);
         AddExclusionChainLive(live);
+        AddNullWidenedUniqueLive(live);
         BuildInserts(live, dialect);
         AddComputedColumn(live);
 
@@ -1564,6 +1584,7 @@ internal sealed partial class SyncPlanFuzzGenerator(
         ApplyConstraintShapeLevel(entities, relationships, live);
         ApplyAttributeShapeLevel(entities, relationships, live);
         ApplyExclusionChainLevel(entities, relationships, live);
+        ApplyNullWidenedUniqueLevel(entities, relationships, live);
         DeclareEmptyColumnChanges(entities, live);
         CheckDeclaredTargetShapes(entities, live);
     }

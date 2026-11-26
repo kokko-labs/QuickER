@@ -13,10 +13,10 @@ namespace QuickER.Provider.Sync.Selection;
 /// 取り下げの並び（当てる順。外す項目が無ければ空）。警告の並びと外した項目の並びは、この並びで決まる
 /// </returns>
 /// <remarks>
-/// 規則は受け取った並びも警告・外した項目の一覧も書き換えない。取り下げを当てるのは周（<see cref="SyncPlanner"/> の除外の周）が
+/// 規則は受け取った並びも警告・外した項目の一覧も書き換えない。取り下げを当てるのは除外の周（<see cref="PlanSelection.ExcludeUntilStable"/>）が
 /// <see cref="SelectionWithdrawals.Apply"/> で行い、後ろの規則は当てた後の並びとその並びから作り直した状態を受ける。同期後の事実は
 /// 状態（<see cref="SelectionState"/>）から読み、規則が自分で求め直さない。規則は項目を外すだけで戻さず、外す項目は
-/// 必ず名指しの警告と一緒に返す（項目を外さずに警告だけを返さない）。規則の並びは <see cref="SyncPlanner"/> の規則の表が決める。
+/// 必ず名指しの警告と一緒に返す（項目を外さずに警告だけを返さない）。規則の並びは規則の表（<see cref="SelectionRules.BeforeRounds"/>・<see cref="SelectionRules.EachRound"/>）が決める。
 /// </remarks>
 internal delegate IReadOnlyList<Withdrawal> SelectionRule(
     SelectionState state,

@@ -7,7 +7,7 @@ namespace QuickER.Provider.Sync.Assessment;
 internal static partial class AssessmentRules
 {
     /// <summary>
-    /// <see cref="QuickER.Dialects.SyncDialectCapabilities.SetNullRequiresNullableChildColumn"/> が <c>false</c> の方言（SET NULL を作れる方言）で、
+    /// <see cref="SyncDialectCapabilities.SetNullRequiresNullableChildColumn"/> が <c>false</c> の方言（SET NULL を作れる方言）で、
     /// 選んだ外部キーの追加・作り直しのうち、参照アクション <c>SET NULL</c> を使い、子の列が同期後に NOT NULL になるものを、
     /// 外さずに <see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/> で名指しする。作れない方言では何もしない
     /// （外して名指しするのは <see cref="SelectionRules.ExcludeSetNullForeignKeysOnNotNullColumns"/>）。

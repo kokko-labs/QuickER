@@ -13,7 +13,7 @@ internal static partial class SelectionRules
     /// 選んだ外部キーの追加・作り直しのうち、参照アクション <c>SET NULL</c> を使い、子の列が同期後に NOT NULL になるものを
     /// 計画から外し、<see cref="SyncPlanWarningKind.SetNullOnNotNullColumn"/> で名指しする（作り直しは展開前の 1 項目として
     /// 外すので、削除だけが走って外部キーが消えたまま残らない）。ほかの方言では何も外さない
-    /// （外さずに名指しするのは <see cref="SyncPlanner.WarnSetNullForeignKeysOnNotNullColumns"/>）。
+    /// （外さずに名指しするのは <see cref="Assessment.AssessmentRules.WarnSetNullForeignKeysOnNotNullColumns"/>）。
     /// </summary>
     /// <param name="state">選択済みの項目（外部キーの作り直しは展開前）とその同期後の事実</param>
     /// <param name="context">

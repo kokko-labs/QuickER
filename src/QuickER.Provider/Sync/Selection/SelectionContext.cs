@@ -6,7 +6,7 @@ namespace QuickER.Provider.Sync.Selection;
 /// <summary>計画が選んだ項目を外す規則（<see cref="SelectionRule"/>）が読む、選んだ項目に依らない文脈</summary>
 /// <remarks>
 /// <para>
-/// 計画の組み立て（<see cref="SyncPlanner.BuildPlan"/>）が、選んだ項目を外す段の前に 1 回だけ作り、すべての規則へ同じものを渡す。
+/// 計画の選択の前半（<see cref="PlanSelection.PrepareSelection"/>）が、選んだ項目を外す段の前に 1 回だけ作り、すべての規則へ同じものを渡す。
 /// 中身は作った後に変わらない。
 /// </para>
 /// <para>

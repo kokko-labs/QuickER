@@ -95,7 +95,7 @@ internal static class PlanSelection
         // 主キーと同じ列集合の一意制約を持てない逐次 DDL の方言（Oracle）では、選んだ主キーの変更の新しい主キーと同じ列集合の
         // live の一意制約を、削除を選んでいなくても外す（名指しは評価の規則 AssessmentRules.WarnUniqueConstraintsReplacedByPrimaryKey。
         // 再構築の方言は合成がその一意制約を省く）
-        if (!isRebuildDialect && !capabilities.SupportsUniqueConstraintOnPrimaryKey)
+        if (PostSyncDifferenceItems.ReplacesUniqueConstraintsWithPrimaryKey(capabilities))
         {
             selected = PostSyncDifferenceItems.InjectUniqueConstraintsReplacedByPrimaryKey(
                 selected,

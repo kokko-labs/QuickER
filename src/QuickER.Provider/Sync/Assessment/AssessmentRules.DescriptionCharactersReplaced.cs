@@ -8,7 +8,7 @@ internal static partial class AssessmentRules
     /// <summary>
     /// 選んだ説明の項目のうち、方言が保存できない文字（BMP の外の文字）を書くものを
     /// <see cref="SyncPlanWarningKind.DescriptionCharactersReplaced"/> で表・列ごとに名指しする
-    /// （判定は <see cref="QuickER.Dialects.SyncDialectCapabilities.IdentifierLengthLimit"/> の宣言＝MySQL だけ置き換わる）。
+    /// （判定は <see cref="SyncDialectCapabilities.IdentifierLengthLimit"/> の宣言＝MySQL だけ置き換わる）。
     /// </summary>
     /// <param name="facts">計画の事実（<see cref="AssessmentFacts.PostSync"/> の項目の並び＝選んだ項目の最終形・<see cref="AssessmentFacts.Capabilities"/>）</param>
     /// <returns>名指しの警告</returns>

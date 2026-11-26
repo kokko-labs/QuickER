@@ -22,8 +22,11 @@ internal static class SyncPlanFuzzKnownFailures
     /// <summary>項目（<see cref="Entry"/> で作る）</summary>
     public static readonly IReadOnlyList<KnownEntry> Entries =
     [
-        // 空。受け入れの項目 nightly-sqlite-pk-nonunique（値が一意でない列への主キーの付け替えを DB がデータで断る）は、
+        // 受け入れの項目 nightly-sqlite-pk-nonunique（値が一意でない列への主キーの付け替えを DB がデータで断る）は、
         // 行 sqlite-pk-nonunique の既存の行で断られる文の宣言（FuzzLiveSchema.DataFailures の AddPrimaryKey）へ移した
+        //
+        // 3 回目の効果測定の直し残し（分岐の軸の台帳の項目 pa1・pe1・pe3）の形の行の普段の実 DB の失敗は、区切り c で製品を直して
+        // 一覧から消した
     ];
 
     /// <summary>一覧</summary>

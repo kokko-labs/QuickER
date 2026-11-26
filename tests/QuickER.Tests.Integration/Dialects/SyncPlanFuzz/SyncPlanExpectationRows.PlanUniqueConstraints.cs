@@ -202,7 +202,7 @@ internal static partial class SyncPlanExpectationRows
                 // 警告は実行を止めない（削除そのものは計画に残る）
                 .Expect(e =>
                     e.Warnings.Exact(
-                            "UniqueConstraintDropMayBreakForeignKey(customer): FK_orders_customer"
+                            "UniqueConstraintDropMayBreakForeignKey(customer): orders.FK_orders_customer"
                         )
                         .Sections.Exact("DropUniqueConstraint: *")
                 ),

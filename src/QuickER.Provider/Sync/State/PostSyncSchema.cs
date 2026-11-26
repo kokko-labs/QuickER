@@ -258,8 +258,8 @@ internal sealed class PostSyncSchema
     /// 選んだ項目で列の名前の集合が変わる live の表と、その同期後の列名（表の削除は <c>null</c>）を、項目に最初に現れた順に返す
     /// </summary>
     /// <remarks>
-    /// 同期後の列名は「live の列 − 選んだ列の削除 ＋ 選んだ列の追加」（<see cref="SyncPlanner.ExcludeDropsLeavingNoColumns"/> と同じ数え方）。
-    /// 列が 1 本も残らない表は数えない（その削除は <see cref="SyncPlanner.ExcludeDropsLeavingNoColumns"/> が外す）。live に無い表（追加する表）は
+    /// 同期後の列名は「live の列 − 選んだ列の削除 ＋ 選んだ列の追加」（<see cref="Selection.SelectionRules.ExcludeDropsLeavingNoColumns"/> と同じ数え方）。
+    /// 列が 1 本も残らない表は数えない（その削除は <see cref="Selection.SelectionRules.ExcludeDropsLeavingNoColumns"/> が外す）。live に無い表（追加する表）は
     /// ビューが読んでいないので数えない。表の名前は live の綴りで返す。
     /// </remarks>
     private static List<(string Table, IReadOnlyList<string>? Columns)> PostSyncColumnNames(
@@ -324,7 +324,7 @@ internal sealed class PostSyncSchema
     /// <param name="liveByName">live の表の索引</param>
     /// <param name="capabilities">型の比較に使う方言のケーパビリティ</param>
     /// <remarks>
-    /// 外部キーの両端の型の照合（<see cref="PlanFacts.HasPostSyncTypeMismatch"/>・<see cref="SyncPlanner.ExcludeForeignKeysWithPostSyncTypeMismatch"/>）は、
+    /// 外部キーの両端の型の照合（<see cref="PlanFacts.HasPostSyncTypeMismatch"/>・<see cref="Selection.SelectionRules.ExcludeForeignKeysWithPostSyncTypeMismatch"/>）は、
     /// この関数が返す列だけを「この同期で型が決まる」とみなす。NULL 許容だけを変える列の変更は型を決めない：DB はその外部キーを
     /// 今の両端の型のまま受け入れているので、型を変えずに外して付け直せば同じ組の型で通る。数えると、DB が受け入れている型の違う
     /// 外部キー（PostgreSQL の integer → bigint など）を「付け直せない」と名指しして外し直さず、その外部キーに阻まれる主キーの

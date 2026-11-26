@@ -8,7 +8,7 @@ internal static partial class RebuildDeclarations
 {
     /// <summary>
     /// 列を変える間、その列を端に持つ外部キーは外れていなければならない（列の変更で外部キーの外し直しを要する方言＝
-    /// <see cref="QuickER.Dialects.SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/>）
+    /// <see cref="SyncDialectCapabilities.AlterColumnRequiresForeignKeyRebuild"/>）
     /// </summary>
     /// <remarks>
     /// 子の列でも親の列でも、列の組のどれか 1 つでも変える列なら対象。型を変えない列の変更（NULL 許容だけ）も含む。

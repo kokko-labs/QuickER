@@ -82,7 +82,8 @@ internal static partial class SelectionRules
     /// </para>
     /// <list type="bullet">
     /// <item>その表の列・主キー・外部キー・一意制約・列順の変更（作り直しを含む）。列の追加だけは作り直さずに足せるので残す。</item>
-    /// <item>その表の外部キーの端（親の表・親の列）を消す表・列の削除。消すと、その外部キーを外すためにその表を作り直す。</item>
+    /// <item>その表の外部キーの端（親の表・親の列）を消す表・列の削除。消すと、その外部キーを外すためにその表を作り直す。
+    /// 端を外部キーに持つ守る表が 2 つ以上なら、その全部を名指しする（守る表ごとに 1 件）。</item>
     /// </list>
     /// <para>
     /// 依存の除外の後・暗黙の削除の注入の前に置く（外した削除を前提に、端の消える外部キーの暗黙の削除を足さない）。その表自身の削除は
@@ -123,25 +124,32 @@ internal static partial class SelectionRules
         foreach (var item in selected)
         {
             var table = SchemaNames.ToStoredForm(item.TableName);
-            var rebuilt = ProtectedTableRebuiltBy(item, table);
+            var rebuilt = ProtectedTablesRebuiltBy(item, table);
 
-            if (rebuilt is null)
+            if (rebuilt.Count == 0)
             {
                 continue;
             }
 
-            var warning = new SyncPlanWarning(
-                kind,
-                rebuilt,
-                string.Join(", ", protectedTables[rebuilt])
+            withdrawals.Add(
+                new Withdrawal(
+                    item,
+                    [
+                        .. rebuilt.Select(protectedTable => new SyncPlanWarning(
+                            kind,
+                            protectedTable,
+                            string.Join(", ", protectedTables[protectedTable])
+                        )),
+                    ]
+                )
             );
-            withdrawals.Add(new Withdrawal(item, [warning]));
         }
 
         return withdrawals;
 
-        // この項目が作り直させる、取込が捨てた物のある表（無ければ null）
-        string? ProtectedTableRebuiltBy(SchemaDiffItem item, string table)
+        // この項目が作り直させる守る表（取込が捨てた物がある表・DB の外の物で作り直せない表）。表・列の削除は、その端を外部キーに持つ
+        // 守る表をすべて返す（live の外部キーの並びの順・重なりなし）。作り直させなければ空
+        IReadOnlyList<string> ProtectedTablesRebuiltBy(SchemaDiffItem item, string table)
         {
             if (
                 protectedTables.ContainsKey(table)
@@ -154,21 +162,29 @@ internal static partial class SelectionRules
                 )
             )
             {
-                return protectedTables.Keys.First(k => SchemaNames.AreSame(k, table));
+                return [protectedTables.Keys.First(k => SchemaNames.AreSame(k, table))];
             }
 
             return item.Kind switch
             {
-                SchemaDiffKind.DropTable => protectedEnds
-                    .FirstOrDefault(end => SchemaNames.AreSame(end.Parent, table))
-                    .Child,
-                SchemaDiffKind.DropColumn when item.ColumnName is not null => protectedEnds
-                    .FirstOrDefault(end =>
-                        SchemaNames.AreSame(end.Parent, table)
-                        && end.ParentColumns.Any(c => SchemaNames.AreSame(c, item.ColumnName))
-                    )
-                    .Child,
-                _ => null,
+                SchemaDiffKind.DropTable =>
+                [
+                    .. protectedEnds
+                        .Where(end => SchemaNames.AreSame(end.Parent, table))
+                        .Select(end => end.Child)
+                        .Distinct(SchemaNames.Comparer),
+                ],
+                SchemaDiffKind.DropColumn when item.ColumnName is not null =>
+                [
+                    .. protectedEnds
+                        .Where(end =>
+                            SchemaNames.AreSame(end.Parent, table)
+                            && end.ParentColumns.Any(c => SchemaNames.AreSame(c, item.ColumnName))
+                        )
+                        .Select(end => end.Child)
+                        .Distinct(SchemaNames.Comparer),
+                ],
+                _ => [],
             };
         }
     }
