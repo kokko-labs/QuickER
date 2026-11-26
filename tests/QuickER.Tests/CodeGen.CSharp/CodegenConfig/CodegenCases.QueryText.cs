@@ -952,6 +952,27 @@ internal static partial class CodegenCases
                     NoType("HttpSyncServerSource"),
                     Text_NoTypeDeclaring("AddGeneratedHttpSyncSources"),
                     Text_NoTypeDeclaring("MapSyncEndpoints"),
+                    // リモートを生成しない構成の DI の説明は、直結の差分ソースだけを書き、HTTP との差し替えを書かない
+                    XmlDocFragment(
+                        "GeneratedSyncServiceCollectionExtensions",
+                        null,
+                        "remarks",
+                        "registers the differential sources: <c>AddGeneratedDirectSyncSources</c>"
+                    ),
+                    XmlDocFragment(
+                        "GeneratedSyncServiceCollectionExtensions",
+                        null,
+                        "remarks",
+                        "either",
+                        present: false
+                    ),
+                    XmlDocFragment(
+                        "GeneratedSyncServiceCollectionExtensions",
+                        null,
+                        "remarks",
+                        "Swapping direct for remote",
+                        present: false
+                    ),
                 ]
             ),
             QueryTextRow(
@@ -990,6 +1011,19 @@ internal static partial class CodegenCases
                     QueryText_NoTypeNamedLike("SyncJournal", "Journaling"),
                     NoType("ISyncTable"),
                     NoType("SyncGraphRecorder"),
+                    // リモートを生成する構成の DI の説明は、直結と HTTP の差分ソースと、その差し替えを書く
+                    XmlDocFragment(
+                        "GeneratedSyncServiceCollectionExtensions",
+                        null,
+                        "remarks",
+                        "registers the differential sources, either <c>AddGeneratedDirectSyncSources</c>"
+                    ),
+                    XmlDocFragment(
+                        "GeneratedSyncServiceCollectionExtensions",
+                        null,
+                        "remarks",
+                        "Swapping direct for remote is a change of that one line"
+                    ),
                 ]
             ),
             QueryTextRow(

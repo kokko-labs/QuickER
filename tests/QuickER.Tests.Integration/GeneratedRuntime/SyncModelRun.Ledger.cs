@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using QuickER.Model;
@@ -630,6 +631,24 @@ internal sealed partial class SyncModelRun
             if (succeeded is WritePayloadOp)
             {
                 held.Add((PayloadTable, succeeded.KeyText));
+            }
+
+            // 主キーの付け替えは、古いキーの行の削除と新しいキーの行の書き込み（新しいキーの行は全列＝blob も書いた行）。
+            // 入れ替えは両方のキーの行と blob を書く。内容が同じ blob を移した品目でも blob の持ち分を立てる
+            if (succeeded is RekeyItemOp rekey)
+            {
+                var from = rekey.From.ToString(CultureInfo.InvariantCulture);
+                held.Add((ModelTables.Items, from));
+                held.Add((PayloadTable, from));
+                held.Add((PayloadTable, rekey.KeyText));
+
+                // 入れ替えの仮のキーは手の中で入れて消した行（内容の差分に出ない）。持ち分は無いが、エンジンには削除の記録が残る
+                if (rekey.Temp is { } temp)
+                {
+                    _mayHoldRecord.Add(
+                        (actor, ModelTables.Items, temp.ToString(CultureInfo.InvariantCulture))
+                    );
+                }
             }
         }
 

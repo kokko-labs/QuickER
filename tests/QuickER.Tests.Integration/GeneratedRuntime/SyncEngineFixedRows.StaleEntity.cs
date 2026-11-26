@@ -137,6 +137,21 @@ internal static partial class SyncEngineFixedRows
                     + "ModifiedOnServer を報告し、サーバーの他者の内容を上書きしない",
                 StaleValueObjectVersionAsync
             ),
+            // 主キーの付け替えと古い読みの見分けの比較（後の区切りで A2 の直し方を選ぶための 2 行。どちらも直った後の期待で書く）
+            Row(
+                "stale-entity-saved-after-download-then-key-moved-onto-locally-deleted-key-collect-reports-modified-on-server",
+                "同期がサーバーの他者の品目 1・2 の更新を降ろした後に、降ろす前に読んだ品目 1 の古い実体を Repository で保存し、"
+                    + "続けて端末で品目 2 を消して品目 1 の主キーを生の SQL で 2（サーバーが知るキー）へ付け替えると、Collect の同期は"
+                    + "移した行が他者の内容より前の読みに基づくことを ModifiedOnServer で報告する",
+                (h, ct) => StaleKeyMovedOntoDeletedKeyAsync(h, readBeforeDownload: true, ct)
+            ),
+            Row(
+                "stale-entity-fresh-read-saved-then-key-moved-onto-locally-deleted-key-is-not-a-conflict",
+                "対照：同期がサーバーの他者の品目 1・2 の更新を降ろした後に読んだ品目 1 の実体を保存し、同じく品目 2 を消して品目 1 の"
+                    + "主キーを 2 へ付け替えると、Collect の同期は競合なしに上げる（移した行の版は付け替え先のキーの他者の内容の版と"
+                    + "比べるものでない）",
+                (h, ct) => StaleKeyMovedOntoDeletedKeyAsync(h, readBeforeDownload: false, ct)
+            ),
             Row(
                 "stale-entity-version-order-reads-versions-as-big-endian-numbers",
                 "古い読みの判定が使う版の新旧の比べ方は、版を big-endian の符号なし整数として読む：先頭の 0 のバイトは数えず、"
@@ -305,6 +320,67 @@ internal static partial class SyncEngineFixedRows
             .Be(serverName, "サーバーの他者の内容は上書きされない");
         (await LocalFolderNameAsync(h, 1, ct)).Should().Be("stale-1", "端末の編集は残る");
         (await PendingFolderKeysAsync(h, ct)).Should().Equal(["1"], "行は未送信のまま残る");
+    }
+
+    /// <summary>
+    /// 主キーの付け替えと古い読みの見分けの比較：端末とサーバーに品目 1・2 があり（品目 1 の版が古い）、端末のアプリが品目 1 を
+    /// 読む。サーバーの他者が品目 1・2 の題名をこの順に書き直し（品目 2 の版が最も新しい）、同期が降ろす。その後に品目 1 の実体
+    /// （<paramref name="readBeforeDownload"/> なら降ろす前に読んだ古い実体、偽なら降ろした後に読み直した実体）の題名を変えて
+    /// Repository で保存し、品目 2 を生の SQL で消して、品目 1 の主キーを生の SQL で 2 へ付け替え、blob を運ぶ Collect の同期を流す。
+    /// 古い読みなら移した行は他者の内容より前の読みに基づくので ModifiedOnServer を報告し、新しい読みなら競合なしに上げる。
+    /// 新しい読みの行の版も付け替え先の品目 2 の他者の内容の版より古いので、版を付け替え先のキーの記録と比べる今の製品
+    /// （A2）では、新しい読みの行も ModifiedOnServer になる
+    /// </summary>
+    private static async Task StaleKeyMovedOntoDeletedKeyAsync(
+        SyncEngineFixedHarness h,
+        bool readBeforeDownload,
+        CancellationToken ct
+    )
+    {
+        await SeedItemsAsync(h, ct);
+        await h.SyncAsync(WithBlobs, ct);
+        var early = (await h.Items.GetByIdAsync(1, ct))!;
+
+        foreach (var (key, title) in new[] { (1, "s1"), (2, "s2") })
+        {
+            var item = (await h.Server.Items.GetByIdAsync(key, ct))!;
+            item.Title = title;
+            (await h.Server.Items.UpdateAsync(item, cancellationToken: ct)).Should().BeTrue();
+        }
+
+        (await h.SyncAsync(WithBlobs, ct)).Conflicts.Should().BeEmpty("前提：他者の更新を降ろす");
+        var entity = readBeforeDownload ? early : (await h.Items.GetByIdAsync(1, ct))!;
+        entity.Title = "local";
+        (await h.Items.UpdateAsync(entity, cancellationToken: ct))
+            .Should()
+            .BeTrue("SQLite の Repository の UpdateAsync は版を照合せずに成功する");
+        await h.ExecuteLocalAsync("DELETE FROM model_items WHERE item_id = 2", ct);
+        await h.ExecuteLocalAsync("UPDATE model_items SET item_id = 2 WHERE item_id = 1", ct);
+
+        var result = await h.SyncAsync(WithBlobs, ct);
+        var reasons = Reasons(result).ToList();
+        var observed = string.Join(
+            ", ",
+            reasons.Select(reason => $"{reason.Table}/{reason.Key}/{reason.Reason}")
+        );
+
+        if (readBeforeDownload)
+        {
+            reasons
+                .Should()
+                .NotBeEmpty($"古い読みに基づく移した行は競合になる（報告：{observed}）")
+                .And.OnlyContain(
+                    reason =>
+                        reason.Table == ModelTables.Items
+                        && (reason.Key == "1" || reason.Key == "2")
+                        && reason.Reason == SyncConflictReason.ModifiedOnServer,
+                    $"競合は品目 1・2 の ModifiedOnServer だけ（報告：{observed}）"
+                );
+        }
+        else
+        {
+            reasons.Should().BeEmpty($"新しい読みの移した行は競合でない（報告：{observed}）");
+        }
     }
 
     /// <summary>

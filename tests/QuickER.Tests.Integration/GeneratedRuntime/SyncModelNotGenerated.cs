@@ -88,6 +88,13 @@ internal static class SyncModelNotGenerated
                     Random
                 ),
                 NotGenerated.Accepted(
+                    "rekey-rows-with-children",
+                    "子のある品目（参照するイベント・ピン留めするフォルダー）の主キーの付け替えと、フォルダー・ラベル・イベントの主キーの付け替え",
+                    "同期のモデルの図の外部キーはすべて NO ACTION（SyncModelFixture の図）で、SQLite も SQL Server も子のある行の主キーの変更を断る（書き手の DB で失敗する手になる）。主キーを変える更新を記録するトリガーは表に依らず同じ形（SyncLocalTracking.TriggersFor の更新のトリガー）で、除外した無制限バイナリ列を持つのは品目だけなので、生成器は子の無い品目の付け替えだけを作る。ほかの表の主キーの変更の記録はトリガーの記録の表が持つ",
+                    Random
+                        + " の行 `rekey-onto-locally-deleted-key-uploads-rows-and-blobs-collect`・`table:SyncTriggerRecording` の行 `primary-key-change-int` / `primary-key-change-text` / `primary-key-change-datetime`"
+                ),
+                NotGenerated.Accepted(
                     "copied-device-databases",
                     "別の端末やバックアップの DB の写し（行の状態の表・再開点の表ごと）で始める端末",
                     "docs に約束が無い。行の状態の表（未送信の印・基準の版）と表ごとの再開点は端末の DB の中の記録で、サーバーは端末ごとの状態を持たず、生成されるランタイムは端末の識別子を持たないので、複製した 2 台は同じ未送信の変更を二重に上げ、時間を戻した端末の基準の版と再開点は古い",

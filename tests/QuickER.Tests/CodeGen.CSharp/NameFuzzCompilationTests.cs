@@ -16,7 +16,7 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// <para>
 /// 図は MCP のツールで作る（<see cref="NameFuzzDiagrams.BuildAll"/>＝ツールが受け付けた名前だけが図に入る）。
 /// 黙ったコンパイル失敗（生成時の診断が無いのにコンパイルできない）と、生成コードの警告を失敗として数える。
-/// 名前ごとの生成・コンパイルは遅いので、名前は 1 つの図にまとめ、構成 2 つでだけ流す。
+/// 名前ごとの生成・コンパイルは遅いので、名前は 1 つの図にまとめ、構成 3 つでだけ流す。
 /// </para>
 /// <para>結果は既知の失敗の一覧（<see cref="NameFuzzKnownFailures"/>）と厳密に照合する。</para>
 /// </remarks>
@@ -30,6 +30,12 @@ public sealed class NameFuzzCompilationTests
 
         /// <summary>SQLite の QuickER 版 Repository・インメモリ・EditModel（値オブジェクトなし）</summary>
         SqlitePlain,
+
+        /// <summary>
+        /// sqlserver と sqlite のマルチターゲットの QuickER 版 Repository・双方向同期・インメモリ・値オブジェクト・EditModel・Mapper・リモートサービス
+        /// （同期の記述子の一覧 <c>GeneratedSyncTables</c> のメンバー名を名前に晒す）
+        /// </summary>
+        SyncBoth,
     }
 
     [Theory(
@@ -37,6 +43,7 @@ public sealed class NameFuzzCompilationTests
     )]
     [InlineData(Config.SqlServerFull)]
     [InlineData(Config.SqlitePlain)]
+    [InlineData(Config.SyncBoth)]
     [Trait(NightlyEngineTrait.Name, NightlyEngineTrait.Selected)]
     public void GeneratedCode_CompilesWithoutWarnings(Config config)
     {
@@ -48,6 +55,7 @@ public sealed class NameFuzzCompilationTests
             NameFuzzDiagrams
                 .NamesForRun(SeedSource.Resolve(NameFuzz.SeedSettings))
                 .Concat(CaseOnlyNames)
+                .Concat(FixedMemberNames)
         );
         AddQueries(diagram, names);
 
@@ -124,6 +132,16 @@ public sealed class NameFuzzCompilationTests
     /// （<see cref="RecordRuntimeProblems"/>）が JSON の設定の組み立ての失敗・エンドポイントの重なりとして記録する。
     /// </remarks>
     private static readonly string[] CaseOnlyNames = ["i_d", "rowstate", "case_route", "caseroute"];
+
+    /// <summary>
+    /// どの種でも必ず図へ置く、生成コードの固定のメンバーと同じ名前を作る名前
+    /// </summary>
+    /// <remarks>
+    /// <c>all</c> は、同期の記述子の一覧 <c>GeneratedSyncTables</c> で、表の記述子のプロパティ名（リポジトリ名 <c>All</c>）を固定の一覧
+    /// <c>All</c> と同じにする。構成 <see cref="Config.SyncBoth"/> で、生成時のエラーが表を名指しして外すのが正しく、止めないとコンパイルの
+    /// エラー（CS0102）として記録する。
+    /// </remarks>
+    private static readonly string[] FixedMemberNames = ["all"];
 
     /// <summary>
     /// 生成物を読み込み、全エンティティの JSON の設定（リモート・SQL Server の FOR JSON）の組み立てと、
@@ -255,6 +273,22 @@ public sealed class NameFuzzCompilationTests
                     GenerateRepositories = true,
                     RepositoryDialects = ["sqlserver"],
                     GenerateEfCoreRepositories = true,
+                    GenerateInMemoryRepositories = true,
+                    GenerateValueObjects = true,
+                    GenerateEditModels = true,
+                    GenerateMappers = true,
+                    GenerateRemoteServices = true,
+                }
+            ),
+            Config.SyncBoth => (
+                "sqlserver",
+                new SqlServerProvider(),
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Sample.Domain",
+                    GenerateRepositories = true,
+                    RepositoryDialects = ["sqlserver", "sqlite"],
+                    GenerateSyncSupport = true,
                     GenerateInMemoryRepositories = true,
                     GenerateValueObjects = true,
                     GenerateEditModels = true,

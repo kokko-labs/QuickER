@@ -126,6 +126,7 @@ internal static class SyncModelDimensions
     internal const string Rotation = SyncModelGenerator.RotationShape;
     internal const string Pin = "pin";
     internal const string MirrorImport = "mirror-import";
+    internal const string Rekey = "rekey";
 
     /// <summary>一意な値の付け替えの形（<see cref="SyncModelGenerator"/> の TryUniqueShape）</summary>
     private static readonly string[] UniqueShapeFamilies =
@@ -251,17 +252,19 @@ internal static class SyncModelDimensions
                         new Level(Rotation),
                         new Level(Pin),
                         new Level(MirrorImport),
+                        new Level(Rekey),
                     ],
-                    "操作の種類（exact-swap＝2 行の一意な値を仮の値を挟んで厳密に入れ替える／rotation＝3 行の一意な値を仮の値を挟んで回す（どちらも release-take の形を 4 本目の乱数で閉じる）／pin＝フォルダーのピン留め（表どうしの循環の列）を品目か null へ書く／mirror-import＝端末の行を、記録させずにサーバーの今の行の内容と版の列で書き換える／write＝行の追加・更新・削除 1 つ／unique-reuse＝一意な値を手放す削除と、同じ値の別のキーの挿入の組／reinsert＝同じキーで消して作り直す組／payload＝blob の書き込み／failing-write＝業務の書き込みが失敗する形／delete-stub・delete-held＝キーだけのスタブ・持っていた実体のグラフ保存での削除／sync・upload・download＝同期の呼び方／fault＝失敗の仕掛け／release-take＝更新で一意な値を空け、別の行がその値を更新で取る（4m-D3）／release-take-chain＝その 3 行の連鎖／delete-take＝行を消して値を空け、別の行がその値を更新で取る（4m-B3 の材料）／delete-take-reparent＝消す行の値を別の行が取って別の親へ付け替え、元の親を消す（4m-D4））"
+                    "操作の種類（rekey＝端末の品目の主キーを生の SQL で付け替える〔新しいキー・端末が消したキー・仮のキー経由の入れ替え。5 本目の乱数で品目の更新を置き換える〕／exact-swap＝2 行の一意な値を仮の値を挟んで厳密に入れ替える／rotation＝3 行の一意な値を仮の値を挟んで回す（どちらも release-take の形を 4 本目の乱数で閉じる）／pin＝フォルダーのピン留め（表どうしの循環の列）を品目か null へ書く／mirror-import＝端末の行を、記録させずにサーバーの今の行の内容と版の列で書き換える／write＝行の追加・更新・削除 1 つ／unique-reuse＝一意な値を手放す削除と、同じ値の別のキーの挿入の組／reinsert＝同じキーで消して作り直す組／payload＝blob の書き込み／failing-write＝業務の書き込みが失敗する形／delete-stub・delete-held＝キーだけのスタブ・持っていた実体のグラフ保存での削除／sync・upload・download＝同期の呼び方／fault＝失敗の仕掛け／release-take＝更新で一意な値を空け、別の行がその値を更新で取る（4m-D3）／release-take-chain＝その 3 行の連鎖／delete-take＝行を消して値を空け、別の行がその値を更新で取る（4m-B3 の材料）／delete-take-reparent＝消す行の値を別の行が取って別の親へ付け替え、元の親を消す（4m-D4））"
                 ),
                 new Factor(
                     Via,
                     [
                         new Level(nameof(ModelWriteVia.Direct)),
                         new Level(nameof(ModelWriteVia.Graph)),
+                        new Level(nameof(ModelWriteVia.Sql)),
                         new Level(NoVia),
                     ],
-                    "端末の書き込みの経路（直接の CRUD かグラフ保存か。経路を持たない操作とサーバーの他者の書き込みは None）"
+                    "端末の書き込みの経路（直接の CRUD かグラフ保存か、主キーの付け替えだけが通る生の SQL か。経路を持たない操作とサーバーの他者の書き込みは None）"
                 ),
                 new Factor(
                     UniqueTable,
@@ -624,6 +627,7 @@ internal static class SyncModelDimensions
             ModelSyncOp { Kind: ModelSyncKind.Download } => Download,
             ArmFaultOp => Fault,
             MirrorServerRowOp => MirrorImport,
+            RekeyItemOp { ExpectFailure: false } => Rekey,
             PinFolderOp { ExpectFailure: false } => Pin,
             DeleteStubOp => DeleteStub,
             DeleteHeldOp => DeleteHeld,
@@ -749,7 +753,7 @@ internal static class SyncModelDimensions
             return false;
         }
 
-        // 端末の書き込みは、必ず直接の CRUD かグラフ保存のどちらかを通る
+        // 端末の書き込みは、必ずどれかの経路（直接の CRUD・グラフ保存・主キーの付け替えの生の SQL）を通る
         if (
             family is not null
             && actor is not null
@@ -759,6 +763,40 @@ internal static class SyncModelDimensions
         )
         {
             return false;
+        }
+
+        // 主キーの付け替えは端末の生の SQL と定義した操作で、生の SQL の経路を通るのは主キーの付け替えだけ（サーバーの他者は
+        // 生の SQL の経路を持たない）
+        if (
+            family is not null
+            && via is not null
+            && (via == nameof(ModelWriteVia.Sql)) != (family == Rekey)
+        )
+        {
+            return false;
+        }
+
+        if (family == Rekey && actor == nameof(ModelActor.Server))
+        {
+            return false;
+        }
+
+        // 生の SQL の経路（主キーの付け替え）は、一意な値の形・挿入のキー・一意な値の新しい書き込み・blob の書き込みの手を持たない
+        // （付け替えは行の内容を変えずにキーだけを移す手と定義した）
+        if (via == nameof(ModelWriteVia.Sql))
+        {
+            if (
+                assignment.TryGetValue(UniqueTable, out var rekeyTable)
+                    && rekeyTable != NoUniqueTable
+                || assignment.TryGetValue(KeyOrigin, out var rekeyOrigin)
+                    && rekeyOrigin != NotInsert
+                || assignment.TryGetValue(Spelling, out var rekeySpelling)
+                    && rekeySpelling != NoSpelling
+                || assignment.TryGetValue(PayloadSize, out var rekeySize) && rekeySize != NoPayload
+            )
+            {
+                return false;
+            }
         }
 
         // blob の書き込み（Write{列}Async）にはグラフ保存の形が無い（グラフ保存は除外した blob を書かない）

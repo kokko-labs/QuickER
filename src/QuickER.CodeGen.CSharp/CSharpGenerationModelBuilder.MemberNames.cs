@@ -63,6 +63,50 @@ internal sealed partial class CSharpGenerationModelBuilder
                 diagnostics
             );
         }
+
+        // 同期の記述子の一覧は同期を生成するときだけ出る（SyncTables は同期を生成しないとき空）
+        foreach (var sync in model.SyncTables)
+        {
+            ReportDuplicateMemberNames(
+                SyncTablesClassName,
+                sync.TableName,
+                CollectSyncTablesMemberNames(sync),
+                diagnostics
+            );
+        }
+    }
+
+    /// <summary>同期の記述子の一覧のクラス名（<c>Templates/CSharpRuntime/_10_Sync.scriban</c>）</summary>
+    private const string SyncTablesClassName = "GeneratedSyncTables";
+
+    /// <summary>
+    /// 同期の記述子の一覧 <c>GeneratedSyncTables</c> で、表の記述子のプロパティ名とぶつかりうるメンバー名を列挙する（記述子の
+    /// プロパティ・一覧の固定メンバー・object から継ぐメンバー）
+    /// </summary>
+    /// <remarks>
+    /// 記述子のプロパティ名どうしは、同じリポジトリ名を作る表の組を型名の検査（<c>GeneratedTypeNames.Analyze</c>）が先に断るので数えない。
+    /// </remarks>
+    private static IEnumerable<GeneratedMemberName> CollectSyncTablesMemberNames(
+        CSharpSyncTableModel sync
+    )
+    {
+        yield return new GeneratedMemberName(
+            sync.DescriptorPropertyName,
+            string.Format(Strings.CodeGen_Origin_Table, sync.TableName)
+        );
+
+        foreach (var name in GeneratedFixedMemberNames.SyncTablesFixed)
+        {
+            yield return new GeneratedMemberName(name, FormatFixedMemberOrigin(name));
+        }
+
+        foreach (var name in GeneratedFixedMemberNames.SyncTablesInherited)
+        {
+            yield return new GeneratedMemberName(
+                name,
+                string.Format(Strings.CodeGen_Origin_InheritedMember, name)
+            );
+        }
     }
 
     /// <summary>

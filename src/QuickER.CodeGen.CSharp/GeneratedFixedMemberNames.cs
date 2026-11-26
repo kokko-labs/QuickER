@@ -153,6 +153,35 @@ public static class GeneratedFixedMemberNames
     public static IReadOnlySet<string> EntityJsonVisibleBase { get; } =
         Create("RowState", "IsAdded", "IsUpdated", "IsRemoved", "HasChanges", "DisplayName");
 
+    /// <summary>
+    /// 同期の記述子の一覧 <c>GeneratedSyncTables</c>（<c>Templates/CSharpRuntime/_10_Sync.scriban</c>）が表に依らず宣言する固定メンバー名。
+    /// </summary>
+    /// <remarks>
+    /// 表ごとの記述子のプロパティ名（リポジトリ名）が同じになると CS0102 でコンパイルできない（表 <c>all</c>・<c>alls</c>）。
+    /// 同期を生成するときだけシンボル表検証に登録する。宣言メンバーと一致し続けることは <c>GeneratedFixedMemberDriftTests</c> が固定する。
+    /// </remarks>
+    public static IReadOnlySet<string> SyncTablesFixed { get; } = Create("All");
+
+    /// <summary>
+    /// 同期の記述子の一覧 <c>GeneratedSyncTables</c>（静的クラス）が object から継ぐメンバー名。
+    /// </summary>
+    /// <remarks>
+    /// 「基底クラスにしかない名前は名簿へ入れない」方針（クラス remarks）の例外。記述子のプロパティ名は列でなく表の名前から決まり、
+    /// 同じ名前の静的プロパティは継いだメンバーを隠して CS0108 の警告になる（表 <c>to_string</c>・<c>finalize</c> ほか）。生成物は
+    /// 警告 0 でコンパイルできることを約束し、<c>GeneratedSyncTables</c> にはほかのメンバーが無いので、予約の範囲は狭い。
+    /// object のメンバーの名前と一致し続けることは <c>GeneratedFixedMemberDriftTests</c> が固定する。
+    /// </remarks>
+    public static IReadOnlySet<string> SyncTablesInherited { get; } =
+        Create(
+            "Equals",
+            "Finalize",
+            "GetHashCode",
+            "GetType",
+            "MemberwiseClone",
+            "ReferenceEquals",
+            "ToString"
+        );
+
     /// <summary>序数比較の読み取り専用集合を組み立てる（メンバー名は識別子なので大文字小文字を区別する）</summary>
     private static IReadOnlySet<string> Create(params string[] names) =>
         new HashSet<string>(names, StringComparer.Ordinal);

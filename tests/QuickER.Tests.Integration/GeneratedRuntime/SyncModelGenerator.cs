@@ -44,6 +44,12 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// フォルダー・品目の更新をミラー版の持ち込みへ（<see cref="MirrorRate"/>）。本流の乱数の引き方は変えないが、置き換えた手で
 /// 書き手の DB が変わるので、その後の手の対象・値は変わりうる。ピン留めされた品目は消す候補にしない（<see cref="IsDeletableItem"/>）。
 /// </para>
+/// <para>
+/// 5 本目の乱数（<see cref="RekeySeed"/>）は、本流の手が端末の品目の更新か削除 1 つのときだけ、本流が引き終えた後に引き、その手を
+/// 主キーの付け替え（<see cref="RekeyItemOp"/>・<see cref="RekeyRate"/>）へ置き換える。本流・2〜4 本目の乱数の引き方は変えない
+/// （割合を 0 にすると、ほかの乱数の列と種の指紋は付け替えを足す前と同じ）。付け替えの新しいキーと仮のキーは、本流の採番を
+/// 進めない別の帯（<see cref="RekeyKeyOffset"/>）から出す。
+/// </para>
 /// </remarks>
 internal sealed class SyncModelGenerator
 {
@@ -115,10 +121,35 @@ internal sealed class SyncModelGenerator
     /// </summary>
     public const double MirrorRate = 0.15;
 
+    /// <summary>
+    /// 本流が選んだ端末の品目の更新・削除を、主キーの付け替え（<see cref="RekeyItemOp"/>）へ置き換える 5 本目の乱数の種（本流の種から
+    /// 決定的に作る。本流・2 本目・最初の行・4 本目の乱数と混ぜない）
+    /// </summary>
+    /// <param name="seed">本流の種</param>
+    public static int RekeySeed(int seed) => unchecked(seed * 49979687 + 86028121);
+
+    /// <summary>本流が選んだ端末の品目の更新・削除を、主キーの付け替えにする割合（5 本目の乱数）</summary>
+    public const double RekeyRate = 0.3;
+
+    /// <summary>
+    /// 主キーの付け替えの新しいキーと仮のキーの帯：端末のキーの範囲の基点にこの値を足した先から使う（本流の新しいキーは基点の 1 から
+    /// 数えて 1 つの種でここまで届かず、追跡しない行の帯〔<see cref="SyncModelWorldShape.UntrackedKeyOffset"/>〕より手前）
+    /// </summary>
+    public const int RekeyKeyOffset = 600;
+
     private readonly Random _random;
     private readonly Random _side;
     private readonly Random _preload;
     private readonly Random _shapes;
+    private readonly Random _rekeys;
+
+    // 端末ごとに、主キーの付け替えの帯で最後に出したキー（本流の採番 _nextId を進めない）
+    private readonly Dictionary<ModelActor, int> _nextRekeyId = new()
+    {
+        [ModelActor.Device1] = 1000 + RekeyKeyOffset,
+        [ModelActor.Device2] = 2000 + RekeyKeyOffset,
+        [ModelActor.Device3] = 4000 + RekeyKeyOffset,
+    };
     private IReadOnlyDictionary<ModelActor, ModelDbState> _states =
         new Dictionary<ModelActor, ModelDbState>();
     private readonly Dictionary<ModelActor, int> _nextId = new()
@@ -156,6 +187,7 @@ internal sealed class SyncModelGenerator
         _side = new Random(SideSeed(seed));
         _preload = new Random(PreloadSeed(seed));
         _shapes = new Random(ShapeSeed(seed));
+        _rekeys = new Random(RekeySeed(seed));
         var modes = Enum.GetValues<SyncMode>();
         var policies = Enum.GetValues<SyncConflictPolicy>();
         var settings = seed / 4 % (modes.Length * policies.Length);
@@ -537,6 +569,7 @@ internal sealed class SyncModelGenerator
 
             if (ops is not null)
             {
+                ops = RekeyOr(actor, state, ops);
                 CheckWriterContract(actor, state, ops);
 
                 return ops;
@@ -1113,6 +1146,61 @@ internal sealed class SyncModelGenerator
         return fits ? [new MirrorServerRowOp(actor, table, id)] : [fallback];
     }
 
+    /// <summary>
+    /// 本流が引き終えた端末の品目の更新か削除 1 つを、5 本目の乱数で <see cref="RekeyRate"/> の割合で主キーの付け替え
+    /// （<see cref="RekeyItemOp"/>）へ置き換える。5 本目の乱数を引くのは、本流の手が端末の品目の更新か削除 1 つのときだけ（どの歩で引くかは
+    /// 本流の手だけで決まる）。動かす行・消す行・入れ替える行は子の無い品目（<see cref="IsDeletableItem"/>）で、追跡しない行の帯の
+    /// キーを除く。形は新しいキー（付け替えの帯）・端末が消したキー（端末の別の品目を同じ手で消してそのキーへ）・仮のキー経由の
+    /// 入れ替えを等分に選び、作れなければ本流の手のまま
+    /// </summary>
+    private IReadOnlyList<ModelOp> RekeyOr(
+        ModelActor actor,
+        ModelDbState state,
+        IReadOnlyList<ModelOp> ops
+    )
+    {
+        if (
+            actor == ModelActor.Server
+            || ops is not [ModelWriteOp { ExpectFailure: false } write]
+            || write is not (UpdateItemOp or DeleteItemOp)
+            || _rekeys.NextDouble() >= RekeyRate
+        )
+        {
+            return ops;
+        }
+
+        var shape = (RekeyShape)_rekeys.Next(3);
+        var movable = state
+            .Items.Keys.Order()
+            .Where(key => IsDeletableItem(state, key) && !SyncModelWorldShape.IsUntrackedKey(key))
+            .ToList();
+
+        var from = write is UpdateItemOp update ? update.Id : ((DeleteItemOp)write).Id;
+
+        if (!movable.Contains(from))
+        {
+            return ops;
+        }
+
+        if (shape == RekeyShape.Fresh)
+        {
+            return [new RekeyItemOp(actor, from, ++_nextRekeyId[actor], RekeyShape.Fresh)];
+        }
+
+        var others = movable.Where(key => key != from).ToList();
+
+        if (others.Count == 0)
+        {
+            return ops;
+        }
+
+        var other = others[_rekeys.Next(others.Count)];
+
+        return shape == RekeyShape.OntoDeleted
+            ? [new RekeyItemOp(actor, from, other, RekeyShape.OntoDeleted)]
+            : [new RekeyItemOp(actor, from, other, RekeyShape.Swap, ++_nextRekeyId[actor])];
+    }
+
     /// <summary>形：更新で一意な値を空け、別の行がその値を更新で取る（4m-D3）</summary>
     public const string ReleaseTakeShape = "release-take";
 
@@ -1577,6 +1665,43 @@ internal sealed class SyncModelGenerator
                 case DeleteItemOp delete:
                     items.Remove(delete.Id);
                     break;
+                case RekeyItemOp rekey
+                    when pins.ContainsValue(rekey.From)
+                        || rekey.Shape != RekeyShape.Fresh && pins.ContainsValue(rekey.To):
+                    // ピン留めされた品目のキーは変えられない（NO ACTION の外部キー）
+                    Fail(op, "pinned", ModelTables.Items);
+                    break;
+                case RekeyItemOp rekey:
+                {
+                    if (!items.TryGetValue(rekey.From, out var moved))
+                    {
+                        Fail(op, "missing", ModelTables.Items);
+                    }
+
+                    switch (rekey.Shape)
+                    {
+                        case RekeyShape.Swap:
+                            if (!items.TryGetValue(rekey.To, out var other))
+                            {
+                                Fail(op, "missing", ModelTables.Items);
+                            }
+
+                            items[rekey.From] = other!;
+                            items[rekey.To] = moved!;
+                            break;
+                        default:
+                            if (rekey.Shape == RekeyShape.OntoDeleted && !items.Remove(rekey.To))
+                            {
+                                Fail(op, "missing", ModelTables.Items);
+                            }
+
+                            items.Remove(rekey.From);
+                            Put(op, items, rekey.To, moved!, insert: true);
+                            break;
+                    }
+
+                    break;
+                }
                 case AddLabelOp add when !labels.Add(add.Code):
                     Fail(op, "key", op.Table);
                     break;

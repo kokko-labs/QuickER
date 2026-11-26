@@ -332,7 +332,8 @@ internal sealed partial class CSharpGenerationModelBuilder
                         + $"ORDER BY {serverRowVersion}"
                 ),
             // 版なしテーブルの全量走査はキー昇順のページング。@afterKey は型なしでバインドされる（文字列は nvarchar）ので、
-            // 文字列の主キーは列と同じ型へ明示的にキャストする（BuildServerAfterKey）
+            // 文字列の主キーは列と同じ型へ明示的にキャストし、datetime2・date の主キーはテキストで束縛して datetime2 へキャストする
+            // （BuildServerAfterKey・ServerAfterKeyValueExpression）
             ServerPageFirstSql = isVersionless
                 ? CSharpLiteral(
                     $"SELECT TOP (@batchSize) {serverSelectList} FROM {serverTable} ORDER BY {serverKey}"
@@ -344,6 +345,10 @@ internal sealed partial class CSharpGenerationModelBuilder
                         + $"WHERE {serverKey} > {BuildServerAfterKey(keyColumn)} ORDER BY {serverKey}"
                 )
                 : string.Empty,
+            ServerAfterKeyValueExpression =
+                isVersionless && BindsServerAfterKeyAsText(keyColumn)
+                    ? BuildFormatKey("key", keyColumn, keyValueObject)
+                    : string.Empty,
             ServerKeysSql = CSharpLiteral($"SELECT {serverKey} FROM {serverTable}"),
             // 版なしテーブルのミラー版は存在しない＝記述子は版アクセサを載せず、既定（常に null）が働く
             RowVersionReadExpression = rowVersionColumn is null
@@ -740,10 +745,17 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// 比べると列の側が nvarchar へ変換され、SQL_* 照合順序では比較の規則が ORDER BY の規則（列の型のまま）と
     /// 食い違う（例: <c>"a-c"</c> と <c>"ab"</c> の順が逆になる）。ページの境目で行を読み飛ばすので、文字列の主キーは
     /// 列と同じ型へ明示的にキャストする。型の名前と宣言長は SQL Server の型マッパーが渡すもの（<c>SqlDbTypeName</c>・
-    /// <c>SqlDeclaredLength</c>）を使い、それ以外の型はそのまま比べる。
+    /// <c>SqlDeclaredLength</c>）を使う。datetime2・date の主キーは、型なしの <c>DateTime</c> が SqlClient に datetime と推定されて
+    /// 1/300 秒へ丸まり、1753 年より前を送れないので、往復書式の文字列で束縛して（<see cref="BindsServerAfterKeyAsText"/>）
+    /// datetime2(7) へキャストする（date の列は datetime2 へ広げて比べる）。それ以外の型はそのまま比べる。
     /// </remarks>
     private string BuildServerAfterKey(Column keyColumn)
     {
+        if (BindsServerAfterKeyAsText(keyColumn))
+        {
+            return "CAST(@afterKey AS datetime2(7))";
+        }
+
         var typeInfo = _columnTypes[keyColumn.Id];
         var length = typeInfo.SqlDeclaredLength switch
         {
@@ -764,6 +776,17 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         return sqlType is null ? "@afterKey" : $"CAST(@afterKey AS {sqlType})";
     }
+
+    /// <summary>
+    /// キー順ページングの <c>@afterKey</c> を主キーのテキスト形（<c>FormatKey</c>＝日時は Kind を落とした往復書式）で束縛するか：
+    /// SQL Server の型が datetime2・date の主キー
+    /// </summary>
+    /// <remarks>
+    /// datetime・smalldatetime の主キーは束縛しない（読み戻した値は datetime の刻みに乗っていて丸まらず、7 桁の小数秒の文字列は
+    /// datetime へキャストできない）。
+    /// </remarks>
+    private bool BindsServerAfterKeyAsText(Column keyColumn) =>
+        _columnTypes[keyColumn.Id].SqlDbTypeName is "DateTime2" or "Date";
 
     /// <summary>主キーをキーのテキスト形へ変換する式を組み立てる</summary>
     /// <remarks>

@@ -162,6 +162,10 @@ internal sealed partial class SyncModelRun
                 );
                 return true;
 
+            case ServerChainOp chain:
+                await ServerChainAsync(chain);
+                return true;
+
             case RefreshWithOptionsOp refresh:
                 await RefreshAsync(
                     refresh,
@@ -440,6 +444,93 @@ internal sealed partial class SyncModelRun
         RecordChanges(actor, before, after);
 
         await CheckNewForeignKeyViolationsAsync(actor, foreignKeysBefore, $"bulk {mode}");
+    }
+
+    /// <summary>
+    /// サーバーの他者が深い鎖を書く（<see cref="ServerChainOp"/>）。サーバーの一括挿入と同じく、手の前後のサーバーの内容の差分を
+    /// サーバーの他者の書き込みとして履歴へ積む
+    /// </summary>
+    private async Task ServerChainAsync(ServerChainOp chain)
+    {
+        var before = await _world.ReadStateAsync(ModelActor.Server, _ct);
+        var foreignKeysBefore = await ReadForeignKeyViolationsAsync(ModelActor.Server);
+        var server = _world.Server;
+
+        switch (chain.Kind)
+        {
+            case ServerChainKind.Folders:
+                for (var k = 0; k < chain.Depth; k++)
+                {
+                    var id = chain.First + k;
+                    await server.Folders.InsertAsync(
+                        new ModelFolderEntity
+                        {
+                            FolderId = id,
+                            ParentId = k == 0 ? chain.Root : id - 1,
+                            Name = ServerChainOp.NameOf(id),
+                        },
+                        _ct
+                    );
+                }
+
+                break;
+
+            case ServerChainKind.FoldersAndItems:
+                for (var k = 0; k < chain.Depth; k++)
+                {
+                    var id = chain.First + k;
+                    await server.Items.InsertAsync(
+                        new ModelItemEntity
+                        {
+                            ItemId = id,
+                            FolderId = k == 0 ? chain.Root : id - 1,
+                            Code = ServerChainOp.NameOf(id),
+                            Title = ServerChainOp.NameOf(id),
+                            Payload = BulkPayload(id),
+                        },
+                        _ct
+                    );
+                    await server.Folders.InsertAsync(
+                        new ModelFolderEntity
+                        {
+                            FolderId = id,
+                            Name = ServerChainOp.NameOf(id),
+                            PinnedItemId = id,
+                        },
+                        _ct
+                    );
+                }
+
+                break;
+
+            case ServerChainKind.DeleteFolders:
+                for (var id = chain.First + chain.Depth - 1; id >= chain.First; id--)
+                {
+                    if (!await server.Folders.DeleteAsync(id, _ct))
+                    {
+                        throw new InvalidOperationException($"{chain.Describe()}: no folder {id}");
+                    }
+                }
+
+                if (!await server.Folders.DeleteAsync(chain.Root, _ct))
+                {
+                    throw new InvalidOperationException($"{chain.Describe()}: no root");
+                }
+
+                break;
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(chain), chain.Kind, null);
+        }
+
+        var after = await _world.ReadStateAsync(ModelActor.Server, _ct);
+        NoteWrite(ModelActor.Server, before, after, tracked: false, chain.Describe());
+        RecordChanges(ModelActor.Server, before, after);
+        await CheckNewForeignKeyViolationsAsync(
+            ModelActor.Server,
+            foreignKeysBefore,
+            chain.Describe()
+        );
     }
 
     /// <summary>一括で挿入する品目の payload（キーの 4 バイトの big-endian）</summary>

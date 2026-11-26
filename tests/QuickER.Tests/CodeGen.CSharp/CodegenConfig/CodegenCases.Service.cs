@@ -1129,6 +1129,7 @@ internal static partial class CodegenCases
             .. Service_ControlCharacterRows(),
             .. Service_TypeNameRows(),
             .. Service_MemberNameCaseRows(),
+            .. SyncMemberNameRows(),
         ];
 
     // ===== 名前の行（P3-6 で移した） =====

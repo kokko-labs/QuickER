@@ -1478,6 +1478,8 @@ internal static partial class SyncModelScenarios
         list.AddRange(EngineConflictsScenarios());
         list.AddRange(EngineRefreshScenarios());
         list.AddRange(EngineBlobsScenarios());
+        list.AddRange(EngineRekeyScenarios());
+        list.AddRange(EngineDeepChainScenarios());
         list.AddRange(EngineLargeDownloadScenarios());
         list.AddRange(JudgeScenarios());
 
