@@ -1,0 +1,48 @@
+{
+  "tables": {
+    "PostgreSqlQueryParameterInterceptorTests": [
+      "date-execute-delete-condition-is-bound-as-timestamp",
+      "date-midnight-keeps-column-type",
+      "date-save-changes-is-left-alone",
+      "date-time-of-day-is-bound-as-timestamp",
+      "time-24-hours-keeps-column-type",
+      "time-beyond-day-is-bound-as-interval",
+      "time-execute-delete-condition-is-left-alone",
+      "time-execute-update-set-is-left-alone",
+      "time-in-day-keeps-column-type",
+      "time-in-list-in-day-keeps-column-type",
+      "time-in-list-with-beyond-element-is-bound-as-interval-array",
+      "time-just-beyond-24-hours-is-bound-as-interval",
+      "time-negative-is-bound-as-interval",
+      "time-save-changes-is-left-alone"
+    ],
+    "SqlServerQueryParameterInterceptorTests": [
+      "char-non-ascii-is-bound-as-unicode",
+      "datetime-before-min-is-bound-by-value",
+      "datetime-between-read-back-and-step-is-moved",
+      "datetime-between-step-and-read-back-is-moved",
+      "datetime-in-list-judges-each-element",
+      "datetime-past-max-is-moved",
+      "datetime-read-back-keeps-column-type",
+      "decimal-beyond-precision-is-bound-by-value",
+      "decimal-beyond-scale-is-bound-by-value",
+      "decimal-fitting-value-keeps-column-type",
+      "decimal-negative-beyond-scale-is-bound-by-value",
+      "decimal-trailing-zeros-fit-the-scale",
+      "execute-delete-condition-is-bound-by-value",
+      "execute-delete-datetime-condition-is-moved",
+      "execute-delete-tagged-smalldatetime-condition-is-bound-by-value",
+      "execute-update-datetime-values-are-left-alone",
+      "in-list-judges-each-element",
+      "int-column-decimal-rounding-to-integer-is-bound-by-value",
+      "int-column-fitting-decimal-keeps-cast-type",
+      "save-changes-is-left-alone",
+      "smalldatetime-past-max-is-bound-by-value",
+      "smalldatetime-seconds-is-bound-by-value",
+      "smalldatetime-whole-minute-keeps-column-type",
+      "varchar-ascii-keeps-column-type",
+      "varchar-like-pattern-non-ascii-is-bound-as-unicode",
+      "varchar-non-ascii-is-bound-as-unicode"
+    ]
+  }
+}

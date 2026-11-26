@@ -2419,6 +2419,12 @@ public abstract class SyncPlanCapabilityNetTestsBase
         // 網羅の行が、出すはずの変更の種類と強制した選び方を出している
         problems.AddRange(SyncPlanCoverageRows.MissingKindProblems(coverageOutcomes));
 
+        // 形の行に結んだ分岐の軸の台帳の項目：修正済みなら指摘のセルが流れて証拠が出る・未修正ならセルが流れない（決定的な行を流したときだけ）
+        if (!plan.IsSingle)
+        {
+            problems.AddRange(SyncPlanBranchEvidence.NetProblems(dialect.Name, scenarioOutcomes));
+        }
+
         if (scenarioOutcomes.Any(SyncPlanHistoryRows.IsHistoryRow))
         {
             var historyCoverage = new CoverageCounter(SyncPlanHistoryRows.Table);

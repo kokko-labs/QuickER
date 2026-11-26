@@ -163,209 +163,248 @@ internal static class SyncPlanShapeRows
     /// <summary>
     /// 網羅の配列に必ず含める完全な行（指摘の形。配列に同じ割り当ての行が無ければ後ろへ足し、実 DB の普段の実行にも入れる）
     /// </summary>
-    public static IReadOnlyList<IReadOnlyDictionary<string, string>> RequiredRows { get; } =
+    public static IReadOnlyList<RequiredRow> RequiredRows { get; } =
     [
         // L1（P5-2 の試運転・Oracle）：外部キー 2 本が参照する一意制約の列へ主キーを付け替え、片方の子の列の型を変える。型の
         // 食い違う外部キーは残り、主キーが置き換える一意制約の暗黙の削除がそれに阻まれる。兄弟の外部キーを外した後に断られると、
         // 暗黙コミットで兄弟の外部キーが消えたまま残った
-        new Dictionary<string, string>
-        {
-            [PkChange] = "MoveToUniqueColumn",
-            [ReferencingFks] = "2",
-            [TypeChange] = "ChildOnly",
-            [ExplicitOp] = "None",
-            [UniqueMultiplicity] = "1",
-            [ReferencedKey] = "Unique",
-            [ForeignKeyTypes] = "Same",
-            [CollateralFk] = "None",
-            [PrimaryKeyTwin] = "0",
-            [AddedForeignKey] = "None",
-        },
+        new RequiredRow(
+            "l1-move-to-unique-child-type",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "MoveToUniqueColumn",
+                [ReferencingFks] = "2",
+                [TypeChange] = "ChildOnly",
+                [ExplicitOp] = "None",
+                [UniqueMultiplicity] = "1",
+                [ReferencedKey] = "Unique",
+                [ForeignKeyTypes] = "Same",
+                [CollateralFk] = "None",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "None",
+            }
+        ),
         // L4（P5-2 の試運転・PostgreSQL）：DB が受け入れている型の違う外部キー（int → bigint）の親の主キーを並べ替え、子の列の
         // NULL 許容だけを変える。型を変えないのに型の食い違いと名指しして外部キーを外し直さず、主キーの解除が断られた
-        new Dictionary<string, string>
-        {
-            [PkChange] = "Reorder",
-            [ReferencingFks] = "1",
-            [TypeChange] = "ChildNullability",
-            [ExplicitOp] = "None",
-            [UniqueMultiplicity] = "0",
-            [ReferencedKey] = "PrimaryKey",
-            [ForeignKeyTypes] = "Wider",
-            [CollateralFk] = "None",
-            [PrimaryKeyTwin] = "0",
-            [AddedForeignKey] = "None",
-        },
+        new RequiredRow(
+            "l4-reorder-wider-child-nullability",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "Reorder",
+                [ReferencingFks] = "1",
+                [TypeChange] = "ChildNullability",
+                [ExplicitOp] = "None",
+                [UniqueMultiplicity] = "0",
+                [ReferencedKey] = "PrimaryKey",
+                [ForeignKeyTypes] = "Wider",
+                [CollateralFk] = "None",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "None",
+            }
+        ),
         // V1（P5-2 の試運転の 2 回目・PostgreSQL）：複合外部キーの組 (k, p_ref_1) が DB の受け入れている型の違いを持ち、別の組
         // (id, p_ref_0) の両端を bigint にして、親の主キーを並べ替える。外部キー単位で数えると型の決まらない組まで偽の食い違いにして
         // 外部キーを外し直さず、主キーの解除が断られた
-        new Dictionary<string, string>
-        {
-            [PkChange] = "Reorder",
-            [ReferencingFks] = "1",
-            [TypeChange] = "BothEnds",
-            [ExplicitOp] = "None",
-            [UniqueMultiplicity] = "0",
-            [ReferencedKey] = "PrimaryKey",
-            [ForeignKeyTypes] = "DecimalOtherKeyColumn",
-            [CollateralFk] = "None",
-            [PrimaryKeyTwin] = "0",
-            [AddedForeignKey] = "None",
-        },
+        new RequiredRow(
+            "v1-reorder-decimal-other-key-column",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "Reorder",
+                [ReferencingFks] = "1",
+                [TypeChange] = "BothEnds",
+                [ExplicitOp] = "None",
+                [UniqueMultiplicity] = "0",
+                [ReferencedKey] = "PrimaryKey",
+                [ForeignKeyTypes] = "DecimalOtherKeyColumn",
+                [CollateralFk] = "None",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "None",
+            }
+        ),
         // V3（同・MySQL）：子の外部キーが参照する列の一意制約の双子を両方外し、表 d の外部キーを作り直す。互いを「外部キーを支える
         // ほかのキー」と数えて先頭へ移さず、2 つ目の削除が断られたとき先に外した d の外部キーが消えたまま残った
-        new Dictionary<string, string>
-        {
-            [PkChange] = "None",
-            [ReferencingFks] = "1",
-            [TypeChange] = "None",
-            [ExplicitOp] = "DropAllUniques",
-            [UniqueMultiplicity] = "2",
-            [ReferencedKey] = "Unique",
-            [ForeignKeyTypes] = "Same",
-            [CollateralFk] = "AlterOtherForeignKey",
-            [PrimaryKeyTwin] = "0",
-            [AddedForeignKey] = "None",
-        },
+        new RequiredRow(
+            "v3-drop-unique-twins-with-collateral-fk",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "None",
+                [ReferencingFks] = "1",
+                [TypeChange] = "None",
+                [ExplicitOp] = "DropAllUniques",
+                [UniqueMultiplicity] = "2",
+                [ReferencedKey] = "Unique",
+                [ForeignKeyTypes] = "Same",
+                [CollateralFk] = "AlterOtherForeignKey",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "None",
+            }
+        ),
         // V4（同・Oracle・PostgreSQL）：残す外部キーの子の列を互換でない型（int → varchar）へ変え、表 d の外部キーを作り直す。
         // 列の変更で外部キーを外し直さない方言で名指しも先頭への移動もせず、Oracle は先に外した d の外部キーが消えたまま残った
-        new Dictionary<string, string>
-        {
-            [PkChange] = "None",
-            [ReferencingFks] = "1",
-            [TypeChange] = "ChildKindChange",
-            [ExplicitOp] = "None",
-            [UniqueMultiplicity] = "0",
-            [ReferencedKey] = "PrimaryKey",
-            [ForeignKeyTypes] = "Same",
-            [CollateralFk] = "AlterOtherForeignKey",
-            [PrimaryKeyTwin] = "0",
-            [AddedForeignKey] = "None",
-        },
+        new RequiredRow(
+            "v4-child-kind-change-with-collateral-fk",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "None",
+                [ReferencingFks] = "1",
+                [TypeChange] = "ChildKindChange",
+                [ExplicitOp] = "None",
+                [UniqueMultiplicity] = "0",
+                [ReferencedKey] = "PrimaryKey",
+                [ForeignKeyTypes] = "Same",
+                [CollateralFk] = "AlterOtherForeignKey",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "None",
+            }
+        ),
         // V6（同・MySQL）：主キーと同じ列の一意制約がある親の主キーを広げ、子の列を両端が食い違う型へ変える。主キーの解除を誤って
         // 「必ず断られる」と先頭へ移し、実際は一意制約が外部キーを支えて通り、続く列の変更の失敗で主キーが消えたまま残った
-        new Dictionary<string, string>
-        {
-            [PkChange] = "Extend",
-            [ReferencingFks] = "1",
-            [TypeChange] = "ChildOnly",
-            [ExplicitOp] = "None",
-            [UniqueMultiplicity] = "0",
-            [ReferencedKey] = "PrimaryKey",
-            [ForeignKeyTypes] = "Same",
-            [CollateralFk] = "None",
-            [PrimaryKeyTwin] = "1",
-            [AddedForeignKey] = "None",
-        },
+        new RequiredRow(
+            "v6-extend-pk-with-twin-unique",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "Extend",
+                [ReferencingFks] = "1",
+                [TypeChange] = "ChildOnly",
+                [ExplicitOp] = "None",
+                [UniqueMultiplicity] = "0",
+                [ReferencedKey] = "PrimaryKey",
+                [ForeignKeyTypes] = "Same",
+                [CollateralFk] = "None",
+                [PrimaryKeyTwin] = "1",
+                [AddedForeignKey] = "None",
+            }
+        ),
         // V8（修正 AC の実 DB の確かめ・PostgreSQL・Oracle）：外部キーの両端を同じ別の種類（int → varchar）へ変え、表 d の外部キーを
         // 作り直す。同期後の型は合うので名指しも外し直しもせず、外部キーを張ったまま片側だけ変えた途中の状態で断られた（42804・
         // ORA-02267。Oracle は先に外した d の外部キーが消えたまま残る形）
-        new Dictionary<string, string>
-        {
-            [PkChange] = "None",
-            [ReferencingFks] = "1",
-            [TypeChange] = "BothEndsKindChange",
-            [ExplicitOp] = "None",
-            [UniqueMultiplicity] = "0",
-            [ReferencedKey] = "PrimaryKey",
-            [ForeignKeyTypes] = "Same",
-            [CollateralFk] = "AlterOtherForeignKey",
-            [PrimaryKeyTwin] = "0",
-            [AddedForeignKey] = "None",
-        },
+        new RequiredRow(
+            "v8-both-ends-kind-change-with-collateral-fk",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "None",
+                [ReferencingFks] = "1",
+                [TypeChange] = "BothEndsKindChange",
+                [ExplicitOp] = "None",
+                [UniqueMultiplicity] = "0",
+                [ReferencedKey] = "PrimaryKey",
+                [ForeignKeyTypes] = "Same",
+                [CollateralFk] = "AlterOtherForeignKey",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "None",
+            }
+        ),
         // 型の違う外部キーの追加（同・MySQL・SQL Server）：live の列どうし（親 int・子 bigint）に外部キーを足す。どちらの端の型も
         // この同期で決まらないので「DB が受け入れている」とみなして数えず、警告なしに断られた（エラー 3780・Msg 1778）
-        new Dictionary<string, string>
-        {
-            [PkChange] = "None",
-            [ReferencingFks] = "0",
-            [TypeChange] = "None",
-            [ExplicitOp] = "None",
-            [UniqueMultiplicity] = "0",
-            [ReferencedKey] = "PrimaryKey",
-            [ForeignKeyTypes] = "Same",
-            [CollateralFk] = "None",
-            [PrimaryKeyTwin] = "0",
-            [AddedForeignKey] = "BigIntChild",
-        },
+        new RequiredRow(
+            "ac-added-bigint-child-fk",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "None",
+                [ReferencingFks] = "0",
+                [TypeChange] = "None",
+                [ExplicitOp] = "None",
+                [UniqueMultiplicity] = "0",
+                [ReferencedKey] = "PrimaryKey",
+                [ForeignKeyTypes] = "Same",
+                [CollateralFk] = "None",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "BigIntChild",
+            }
+        ),
         // 前寄せの型の判定（P5-2 の本番 PA1・Oracle）：外部キーの両端を別々の型へ変え（子は互換の範囲で広げ、親は互換でない型へ）、
         // 表 d の外部キーを作り直す。同期後の両端で「必ず断られる」と判定して、先頭の位置では通る子の変更を前寄せし、断られる親の
         // 変更は元の位置に残って、先に外した d の外部キーが消えたまま残った
-        new Dictionary<string, string>
-        {
-            [PkChange] = "None",
-            [ReferencingFks] = "1",
-            [TypeChange] = "DivergentEnds",
-            [ExplicitOp] = "None",
-            [UniqueMultiplicity] = "0",
-            [ReferencedKey] = "PrimaryKey",
-            [ForeignKeyTypes] = "Same",
-            [CollateralFk] = "AlterOtherForeignKey",
-            [PrimaryKeyTwin] = "0",
-            [AddedForeignKey] = "None",
-        },
+        new RequiredRow(
+            "ah-move-first-divergent-ends",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "None",
+                [ReferencingFks] = "1",
+                [TypeChange] = "DivergentEnds",
+                [ExplicitOp] = "None",
+                [UniqueMultiplicity] = "0",
+                [ReferencedKey] = "PrimaryKey",
+                [ForeignKeyTypes] = "Same",
+                [CollateralFk] = "AlterOtherForeignKey",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "None",
+            }
+        ),
         // 付け直しの並び（P5-2 の本番 PB1・MySQL・Oracle）：親の主キーを並べ替え（子の外部キーを外して付け直す）、親の無い値を持つ
         // 列へ外部キーを足す。付け直しを利用者の追加の後ろに置いたので、追加が既存の行で断られると付け直しが走らず、外した外部キーが
         // 消えたまま残った
-        new Dictionary<string, string>
-        {
-            [PkChange] = "Reorder",
-            [ReferencingFks] = "1",
-            [TypeChange] = "None",
-            [ExplicitOp] = "None",
-            [UniqueMultiplicity] = "0",
-            [ReferencedKey] = "PrimaryKey",
-            [ForeignKeyTypes] = "Same",
-            [CollateralFk] = "None",
-            [PrimaryKeyTwin] = "0",
-            [AddedForeignKey] = "OrphanChild",
-        },
+        new RequiredRow(
+            "ah-readd-order-orphan-child",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "Reorder",
+                [ReferencingFks] = "1",
+                [TypeChange] = "None",
+                [ExplicitOp] = "None",
+                [UniqueMultiplicity] = "0",
+                [ReferencedKey] = "PrimaryKey",
+                [ForeignKeyTypes] = "Same",
+                [CollateralFk] = "None",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "OrphanChild",
+            }
+        ),
         // 型の違う外部キーの追加（修正 AC2・4 方言）：live の列どうし（親 int・子 varchar）に外部キーを足す
-        new Dictionary<string, string>
-        {
-            [PkChange] = "None",
-            [ReferencingFks] = "0",
-            [TypeChange] = "None",
-            [ExplicitOp] = "None",
-            [UniqueMultiplicity] = "0",
-            [ReferencedKey] = "PrimaryKey",
-            [ForeignKeyTypes] = "Same",
-            [CollateralFk] = "None",
-            [PrimaryKeyTwin] = "0",
-            [AddedForeignKey] = "VarCharChild",
-        },
+        new RequiredRow(
+            "ac2-added-varchar-child-fk",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "None",
+                [ReferencingFks] = "0",
+                [TypeChange] = "None",
+                [ExplicitOp] = "None",
+                [UniqueMultiplicity] = "0",
+                [ReferencedKey] = "PrimaryKey",
+                [ForeignKeyTypes] = "Same",
+                [CollateralFk] = "None",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "VarCharChild",
+            }
+        ),
         // 前寄せの組の並び（夜間 CI の網の MySQL の種 8169）：外部キーが参照する列の一意制約の双子のうち、片方の列を変え（作り直し）、
         // もう片方を外す。支えうるキーが全部外れるので削除の組を前寄せするが、組の並びが作り直しの削除 → ただの削除だったので、
         // 作り直しの削除が通った後にただの削除が断られ（1553）、作り直す一意制約が消えたまま残った
-        new Dictionary<string, string>
-        {
-            [PkChange] = "None",
-            [ReferencingFks] = "1",
-            [TypeChange] = "None",
-            [ExplicitOp] = "ChangeFirstDropOthers",
-            [UniqueMultiplicity] = "2",
-            [ReferencedKey] = "Unique",
-            [ForeignKeyTypes] = "Same",
-            [CollateralFk] = "None",
-            [PrimaryKeyTwin] = "0",
-            [AddedForeignKey] = "None",
-        },
+        new RequiredRow(
+            "ah2-move-first-pair-order",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "None",
+                [ReferencingFks] = "1",
+                [TypeChange] = "None",
+                [ExplicitOp] = "ChangeFirstDropOthers",
+                [UniqueMultiplicity] = "2",
+                [ReferencedKey] = "Unique",
+                [ForeignKeyTypes] = "Same",
+                [CollateralFk] = "None",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "None",
+            }
+        ),
         // 前寄せの組に付け直すキーが 2 つ（修正 AH2 の残り）：外部キーが参照する列の一意制約の双子を両方作り直す。組をどう並べても
         // 前の作り直しの削除が通った後に次の削除が断られ（1553）、前の一意制約が消えたまま残る。作り直し 1 つを計画から外して名指しし、
         // 残した一意制約が外部キーを支える
-        new Dictionary<string, string>
-        {
-            [PkChange] = "None",
-            [ReferencingFks] = "1",
-            [TypeChange] = "None",
-            [ExplicitOp] = "ChangeAllUniques",
-            [UniqueMultiplicity] = "2",
-            [ReferencedKey] = "Unique",
-            [ForeignKeyTypes] = "Same",
-            [CollateralFk] = "None",
-            [PrimaryKeyTwin] = "0",
-            [AddedForeignKey] = "None",
-        },
+        new RequiredRow(
+            "ah2-two-readded-uniques",
+            new Dictionary<string, string>
+            {
+                [PkChange] = "None",
+                [ReferencingFks] = "1",
+                [TypeChange] = "None",
+                [ExplicitOp] = "ChangeAllUniques",
+                [UniqueMultiplicity] = "2",
+                [ReferencedKey] = "Unique",
+                [ForeignKeyTypes] = "Same",
+                [CollateralFk] = "None",
+                [PrimaryKeyTwin] = "0",
+                [AddedForeignKey] = "None",
+            }
+        ),
     ];
 
     /// <summary>網羅の配列（全行）。配列に含まれない必ず含む行は後ろへ足す</summary>
@@ -374,7 +413,39 @@ internal static class SyncPlanShapeRows
 
     /// <summary>必ず含む行の、全行の中の番号</summary>
     private static IReadOnlySet<int> RequiredRowIndexes { get; } =
-        RequiredRows.Select(required => IndexOf(AllRows, required)).ToHashSet();
+        RequiredRows.Select(required => IndexOf(AllRows, required.Assignment)).ToHashSet();
+
+    /// <summary>
+    /// 必ず含む行の方言の行 Id（分岐の軸の台帳の指摘のセルを引く。方言がその行を作らなければ null）
+    /// </summary>
+    /// <param name="dialect">方言名</param>
+    /// <param name="requiredRowId">必ず含む行の Id（<see cref="RequiredRow.Id"/>）</param>
+    /// <exception cref="ArgumentException">必ず含む行に無い Id</exception>
+    public static string? RequiredRowIdFor(string dialect, string requiredRowId)
+    {
+        var required =
+            RequiredRows.FirstOrDefault(row =>
+                string.Equals(row.Id, requiredRowId, StringComparison.Ordinal)
+            )
+            ?? throw new ArgumentException(
+                $"形の行の必ず含む行に {requiredRowId} が無い",
+                nameof(requiredRowId)
+            );
+        var index = IndexOf(AllRows, required.Assignment);
+
+        return CreatesRow(dialect, AllRows[index]) ? IdOf(dialect, index) : null;
+    }
+
+    /// <summary>
+    /// 方言が作る行のうち、水準の組（因子 → 水準）をすべて持つ行があるか（分岐の軸の台帳の「項目の水準が出る方言」）
+    /// </summary>
+    /// <param name="dialect">方言名</param>
+    /// <param name="levels">水準の組</param>
+    public static bool CreatesLevels(string dialect, IReadOnlyDictionary<string, string> levels) =>
+        AllRows.Any(row =>
+            CreatesRow(dialect, row)
+            && levels.All(pair => row.TryGetValue(pair.Key, out var level) && level == pair.Value)
+        );
 
     /// <summary>必ず含む 3 つ組（P1・Q6）</summary>
     public static IReadOnlyList<IReadOnlyDictionary<string, string>> RequiredShapes { get; } =
@@ -876,8 +947,10 @@ internal static class SyncPlanShapeRows
     {
         var rows = generated.ToList();
 
-        foreach (var required in RequiredRows)
+        foreach (var requiredRow in RequiredRows)
         {
+            var required = requiredRow.Assignment;
+
             if (
                 required.Count != Table.Factors.Count
                 || Table.Factors.Any(f => !required.ContainsKey(f.Name))

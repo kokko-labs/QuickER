@@ -125,6 +125,7 @@
   - 外部キーの両端の型の `DecimalOtherKeyColumn` は親の主キーの 2 列目 `k` だけを小数にする（子の `p_ref_1` は int のまま。型の変更の水準は `k` を変えないので、複合外部キーの型の決まらない組が DB の受け入れている違いを持つ。bigint にしないのは、整数の幅の宣言で互換になり形が消えるため）。型の変更の `ChildKindChange` は最初の子の外部キーの列を int → varchar(10) にする（`c1` は行 0。Oracle は行のある列の型の種類を変えられない＝ORA-01439）。明示の削除の `DropAllUniques` は `p.u` の一意制約を全部外す（一意制約 2 つの行だけ）。
   - 巻き添えの外部キーの変更（`CollateralFk`）の `AlterOtherForeignKey` は親の主キーを参照する表 `d` を足し、その外部キーの ON DELETE を CASCADE へ変える（作り直しの外部キーが計画の前の方で外れる）。主キーと同じ列の一意制約（`PrimaryKeyTwin`）は `uq_p_pk(id, k)` を張る。
   - 網羅の配列の後ろに、指摘の形の完全な行（`SyncPlanShapeRows.RequiredRows`＝P5-2 の試運転の L1・L4・2 回目の V1・V3・V4・V6、修正 AC2 の V8〔両端の種類の変更 × d の作り直し〕・型の違う外部キーの追加 2 つ〔BigIntChild・VarCharChild〕、修正 AH の前寄せ〔DivergentEnds × 参照 1 × d の作り直し〕・外部キーの追加の並び〔主キーの並べ替え × 参照 1 × OrphanChild〕、修正 AH2 の前寄せの組の並び〔一意制約 2 つ × 参照先 Unique × 参照 1 × ChangeFirstDropOthers〕と付け直すキーが 2 つの組〔同じく ChangeAllUniques〕の 13 行）を、含まれていなければ足す（全因子の起こり得る割り当てでなければ例外）。この行は普段の実 DB にも入れる。
+    - 必ず含む行は名前を持つ（`RequiredRow`。分岐の軸の台帳の指摘のセルが指し、新しい行と新しい水準は札を持つ＝`tests/QuickER.Tests/TestSupport/CLAUDE.md`「分岐の軸の台帳と新しい行の札」）。
   - Oracle は一意制約 2 つの行を、SQL Server・MySQL は両端の型の違う外部キーを作れない（Msg 1778・エラー 3780＝DB の事実）ので両端の型が Same でない行を、`SupportsUniqueConstraintOnPrimaryKey` が偽の方言（Oracle・SQLite）は主キーと同じ列の一意制約の行を作らない。行の数は PostgreSQL 365（全行）・SQLite 174・Oracle 107・SQL Server・MySQL 139。
 - 網と夜間の実 DB は全行を流す。普段の実 DB は 2 因子の網羅に要る行（PostgreSQL 76 行・SQLite 76 行・Oracle 71 行・SQL Server・MySQL 77 行）と必ず含む行だけを流す。
   - 2 因子の網羅に要る行は方言ごとに、その方言が作る行で作れる組を、その方言の行から選ぶ（`SyncPlanShapeRows.PairwiseRowIndexesFor`）。全方言で 1 つの部分を選ぶと、方言が作らない行の分だけその方言の組が普段の実行から抜ける。
@@ -250,6 +251,7 @@
   - 選び方。
   - 行を流す方言（能力）。
 - 網（DB を使わない）では `SyncPlanCapabilityNetTestsBase.ExpectationRows_Match` が、差分と計画の期待を面ごとに照合する。面は `diff` / `items` / `sections` / `warnings` / `excluded` / `rebuilds` / `reorders` / `exception`。
+- 新しく足す行（減るだけの写しに無い行）は札を持ち、実方言を 1 つでも持つなら全実方言に流す（網の能力の鍵と、実 DB の段を持てば実 DB の段の方言の両方）。外す方言は札の `Except(方言, 理由)` に書く（`tests/QuickER.Tests/TestSupport/CLAUDE.md`「分岐の軸の台帳と新しい行の札」）。
 
 ### 実 DB の段
 

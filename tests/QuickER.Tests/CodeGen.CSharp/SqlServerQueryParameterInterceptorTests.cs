@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using QuickER.Runtime.EntityFrameworkCore;
 using QuickER.Tests.TestSupport;
+using QuickER.Tests.TestSupport.Engines;
 using Xunit;
 
 namespace QuickER.Tests.CodeGen.CSharp;
@@ -40,10 +41,16 @@ public class SqlServerQueryParameterInterceptorTests
     /// <summary>表の行（DbContext への操作と、記録したコマンドの値を持つパラメータの期待の型）</summary>
     /// <param name="Act">DbContext への操作</param>
     /// <param name="Expected">値が null でないパラメータの「値 型 精度 スケール 長さ」（コマンドの並び順）。値の型で束縛したパラメータの精度・スケール・長さは、SqlClient が値から決めた数</param>
+    /// <param name="Tag">新しい行の札（減るだけの写し row-baseline.json に無い行だけ。tests/QuickER.Tests/TestSupport/CLAUDE.md「分岐の軸の台帳と新しい行の札」）</param>
     private sealed record InterceptRow(
         Func<ProbeContext, CancellationToken, Task> Act,
-        string[] Expected
+        string[] Expected,
+        RowTag? Tag = null
     );
+
+    /// <summary>札の対象の表の Id と札（減るだけの写しと照合する＝<see cref="RowBaselineTables"/>）</summary>
+    internal static IReadOnlyList<BaselineEntry> BaselineEntries =>
+        [.. Rows.Select(pair => new BaselineEntry(pair.Key, pair.Value.Tag))];
 
     /// <summary>行（Id → 行）</summary>
     /// <remarks>
