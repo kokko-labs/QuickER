@@ -310,6 +310,37 @@ internal static partial class SyncModelScenarios
             },
         };
 
+        // 根拠の確認（値の手放しの対照）：端末がフォルダー 983 の name を手放し（f983 → f983-released）、984 がその値を取る
+        // （どちらも未送信・手放しを先に書く。逆の順は端末の一意制約が断る）。実行は何も送らずに 984 の UniqueValueTakenOnServer
+        // を報告する。983 の手放しは競合にも決着にも入らず、手放す先の値に持ち主も親も無い（断られる根拠が無い）ので、届いたと
+        // みなして割り引き、サーバーで 983 がまだ f983 を持っていても pending-release になる。割り引きを外すと 983 が根拠に
+        // 数えられて違反が出なくなる
+        yield return new(
+            "judge-unfulfilled-release-unique-refusal-without-basis-is-spurious",
+            [Folder(SV, 983), Folder(SV, 984)],
+            [
+                new UpdateFolderOp(D1, Direct, 983, null, "f983-released"),
+                new UpdateFolderOp(D1, Direct, 984, null, "f983"),
+                Sync(D1),
+            ]
+        )
+        {
+            Transports = DirectOnly,
+            JudgeDevice = new(
+                true,
+                [
+                    new JudgeBreak(JudgeBreakKind.SkipRun, D1, 984, OnRun: 2)
+                    {
+                        ReportsConflict = true,
+                    },
+                ]
+            ),
+            ExpectedJudgeSignatures = new HashSet<string>
+            {
+                "3/spurious:model_folders:UniqueValueTakenOnServer:pending-release",
+            },
+        };
+
         // 照合 2（決定の後の編集）：持ち越しを宣言しないエンジンで、決定の後に端末が編集した行を、後の Collect の実行が報告なしに
         // サーバーの内容へ戻し、記録も消す
         yield return new(
