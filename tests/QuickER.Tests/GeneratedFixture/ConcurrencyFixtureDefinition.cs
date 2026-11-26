@@ -49,6 +49,9 @@ namespace QuickER.Tests.GeneratedConcurrencyFixture;
 ///   <item><c>markers</c>: <c>marker_id</c>（int・PK）だけ</item>
 /// </list>
 /// <para>
+/// あわせて、日時のオフセットを持つ代替キーの 2 表（<c>slots</c>・<c>slot_bookings</c>）を置く（<see cref="AddOffsetAlternateKeyTables"/>）。
+/// </para>
+/// <para>
 /// あわせて「DB 採番列は EditModel の入力必須にしない」も本図で固定する。VO 有無に依らず rowversion 列は
 /// <c>IsRequired=false</c>／Mapper は「入力があるときだけ代入」になり、新規行の EditModel 保存が成立する。
 /// </para>
@@ -449,8 +452,113 @@ public static class ConcurrencyFixtureDefinition
         };
 
         AddKeyShapeTables(diagram);
+        AddOffsetAlternateKeyTables(diagram);
 
         return diagram;
+    }
+
+    private static readonly Guid SlotId = new("ac000000-0000-0000-0000-000000000001");
+    private static readonly Guid SlotPkColId = new("ac000000-0000-0000-0000-000000000002");
+    private static readonly Guid SlotStartsAtColId = new("ac000000-0000-0000-0000-000000000003");
+    private static readonly Guid SlotLabelColId = new("ac000000-0000-0000-0000-000000000004");
+    private static readonly Guid SlotStartsAtUniqueId = new("ac000000-0000-0000-0000-000000000005");
+    private static readonly Guid SlotBookingId = new("ac000000-0000-0000-0000-000000000011");
+    private static readonly Guid SlotBookingPkColId = new("ac000000-0000-0000-0000-000000000012");
+    private static readonly Guid SlotBookingFkColId = new("ac000000-0000-0000-0000-000000000013");
+    private static readonly Guid RelSlotBookings = new("ac000000-0000-0000-0000-000000000101");
+
+    /// <summary>
+    /// 日時のオフセットを持つ代替キーの 2 表を足す（<c>BackendParitySqlServerRuntimeTests</c> のケース <c>alternate-key-offset-only-*</c>。
+    /// 3 回目の効果測定の HB6＝オフセットだけを変えた代替キーを EF Core 版が書かずに成功を返していた）
+    /// </summary>
+    /// <remarks>
+    /// <c>slots</c>: <c>slot_id</c>（int・PK）／<c>starts_at</c>（datetimeoffset(7)・NOT NULL・一意制約＝<c>slot_bookings.slot_starts_at</c> が参照する
+    /// 代替キー）／<c>slot_label</c>（nvarchar(50)・NULL 許容）。<c>slot_bookings</c>: <c>booking_id</c>（int・PK）／<c>slot_starts_at</c>
+    /// （datetimeoffset(7)・NULL 許容・<c>slots.starts_at</c> への FK・NO ACTION）。<c>DateTimeOffset</c> の等値は瞬間だけを比べるので、
+    /// オフセットだけが違う値は等しいとみなされる。
+    /// </remarks>
+    private static void AddOffsetAlternateKeyTables(ErDiagram diagram)
+    {
+        var slot = new Entity
+        {
+            Id = SlotId,
+            TableName = "slots",
+            Columns =
+            {
+                new Column
+                {
+                    Id = SlotPkColId,
+                    Name = "slot_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = SlotStartsAtColId,
+                    Name = "starts_at",
+                    DataType = "datetimeoffset(7)",
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = SlotLabelColId,
+                    Name = "slot_label",
+                    DataType = "nvarchar(50)",
+                    IsNullable = true,
+                },
+            },
+            UniqueConstraints =
+            {
+                new UniqueConstraint
+                {
+                    Id = SlotStartsAtUniqueId,
+                    Name = "UQ_slots_starts_at",
+                    ColumnIds = [SlotStartsAtColId],
+                },
+            },
+        };
+
+        var booking = new Entity
+        {
+            Id = SlotBookingId,
+            TableName = "slot_bookings",
+            Columns =
+            {
+                new Column
+                {
+                    Id = SlotBookingPkColId,
+                    Name = "booking_id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column
+                {
+                    Id = SlotBookingFkColId,
+                    Name = "slot_starts_at",
+                    DataType = "datetimeoffset(7)",
+                    IsForeignKey = true,
+                    IsNullable = true,
+                },
+            },
+        };
+
+        diagram.Entities.Add(slot);
+        diagram.Entities.Add(booking);
+        diagram.Relationships.Add(
+            new Relationship
+            {
+                Id = RelSlotBookings,
+                Type = RelationshipType.OneToMany,
+                SourceEntityId = SlotId,
+                TargetEntityId = SlotBookingId,
+                ColumnPairs = [new(SlotStartsAtColId, SlotBookingFkColId)],
+                ConstraintName = "FK_slot_bookings_slots_starts_at",
+                OnDelete = ForeignKeyReferentialAction.NoAction,
+                OnUpdate = ForeignKeyReferentialAction.NoAction,
+            }
+        );
     }
 
     /// <summary>キーと表名の形の表の名前（SQL Server の系統の 2 者比較のケース <c>key-shape-*</c> が使う）</summary>

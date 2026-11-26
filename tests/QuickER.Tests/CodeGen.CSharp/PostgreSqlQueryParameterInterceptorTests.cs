@@ -41,6 +41,12 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// EF Core 10 は ExecuteDelete のコマンドも出どころを <see cref="CommandSource.ExecuteUpdate"/> として渡す（実測）ので、time の枝は
 /// LinqQuery のコマンドだけを直し、ExecuteDelete の条件の範囲の外の値は DB が断る（docs の TimeSpan の既知の割り切り）。
 /// </para>
+/// <para>
+/// Kind=Utc・Local の DateTime（HA1）は、timestamp で送る値の Kind を外す（同じ tick の Unspecified）。date の枝（単一の値と date[] のリスト＝HA2）は
+/// 3 つの経路で、EF Core が timestamp と型を付けた値（単一の値と timestamp[] のリスト）は LinqQuery と、文が DELETE で始まる ExecuteDelete だけで直し、
+/// ExecuteUpdate の値（SET と WHERE を見分けられない）・SaveChanges・timestamptz の値には触れない。値は Kind を付けて書く（Unspecified は付けない）。
+/// 型を外した date[] のリストは Npgsql が値から timestamp の配列とみなす（DataTypeName が timestamp without time zone[]）。
+/// </para>
 /// </remarks>
 public class PostgreSqlQueryParameterInterceptorTests
 {
@@ -59,6 +65,18 @@ public class PostgreSqlQueryParameterInterceptorTests
     private static readonly DateTime Noon = new(2026, 1, 2, 12, 0, 0);
 
     private static readonly TimeSpan BeyondDay = new(1, 1, 0, 0);
+
+    private static readonly DateTime NoonUtc = DateTime.SpecifyKind(Noon, DateTimeKind.Utc);
+
+    private static readonly DateTime NoonLocal = DateTime.SpecifyKind(Noon, DateTimeKind.Local);
+
+    private static readonly DateTime MidnightUtc = DateTime.SpecifyKind(Midnight, DateTimeKind.Utc);
+
+    /// <summary>3 回目の効果測定の HA1（Kind=Utc・Local の DateTime を timestamp で送る）の札</summary>
+    private static readonly RowTag Ha1 = RowTag.Ledger("ha1");
+
+    /// <summary>3 回目の効果測定の HA2（date の列の IN のリストの時刻）の札</summary>
+    private static readonly RowTag Ha2 = RowTag.Ledger("ha2");
 
     /// <summary>札の対象の表の Id と札（減るだけの写しと照合する＝<see cref="RowBaselineTables"/>）</summary>
     internal static IReadOnlyList<BaselineEntry> BaselineEntries =>
@@ -171,6 +189,199 @@ public class PostgreSqlQueryParameterInterceptorTests
                 },
                 ["1.01:00:00 Time time without time zone"]
             ),
+            // ---- date の列と Kind=Utc・Local の値（HA1）：timestamp で送り直す値は Kind を外す（Npgsql は Utc を timestamp で送らない）----
+            ["date-utc-time-of-day-is-bound-as-timestamp-without-kind"] = new(
+                Where(NoonUtc, v => x => x.Day < v.Value),
+                ["2026-01-02T12:00:00 DateTime2 timestamp without time zone"],
+                Ha1
+            ),
+            ["date-local-time-of-day-is-bound-as-timestamp-without-kind"] = new(
+                Where(NoonLocal, v => x => x.Day == v.Value),
+                ["2026-01-02T12:00:00 DateTime2 timestamp without time zone"],
+                Ha1
+            ),
+            // 0 時ちょうどの値は date のまま（Npgsql は Utc の値も date で送る）で、Kind も変えない
+            ["date-utc-midnight-keeps-column-type-and-kind"] = new(
+                Where(MidnightUtc, v => x => x.Day == v.Value),
+                ["2026-01-02T00:00:00(Utc) Date date"],
+                Ha1
+            ),
+            // date の枝は 3 つの経路で直す：ExecuteUpdate の WHERE も SET も（SET の timestamp は date の列へ日付で保存される）
+            ["date-utc-execute-update-condition-is-bound-without-kind"] = new(
+                (c, ct) =>
+                {
+                    var v = new Box<DateTime>(NoonUtc);
+                    return c
+                        .Rows.Where(x => x.Day == v.Value)
+                        .ExecuteUpdateAsync(s => s.SetProperty(x => x.Id, x => x.Id), ct);
+                },
+                ["2026-01-02T12:00:00 DateTime2 timestamp without time zone"],
+                Ha1
+            ),
+            ["date-utc-execute-update-set-is-bound-without-kind"] = new(
+                (c, ct) =>
+                {
+                    var v = new Box<DateTime>(NoonUtc);
+                    return c
+                        .Rows.Where(x => x.Id == 1)
+                        .ExecuteUpdateAsync(s => s.SetProperty(x => x.Day, v.Value), ct);
+                },
+                ["2026-01-02T12:00:00 DateTime2 timestamp without time zone"],
+                Ha1
+            ),
+            // ---- timestamp の列と Kind=Utc・Local の値（HA1）：比べる値（LinqQuery・ExecuteDelete）だけ Kind を外す ----
+            ["timestamp-utc-is-sent-without-kind"] = new(
+                Where(NoonUtc, v => x => x.At == v.Value),
+                ["2026-01-02T12:00:00 DateTime2 timestamp without time zone"],
+                Ha1
+            ),
+            ["timestamp-local-is-sent-without-kind"] = new(
+                Where(NoonLocal, v => x => x.At > v.Value),
+                ["2026-01-02T12:00:00 DateTime2 timestamp without time zone"],
+                Ha1
+            ),
+            ["timestamp-execute-delete-utc-condition-is-sent-without-kind"] = new(
+                (c, ct) =>
+                {
+                    var v = new Box<DateTime>(NoonUtc);
+                    return c.Rows.Where(x => x.At < v.Value).ExecuteDeleteAsync(ct);
+                },
+                ["2026-01-02T12:00:00 DateTime2 timestamp without time zone"],
+                Ha1
+            ),
+            // TagWith のコメントの行の後の DELETE も ExecuteDelete と見分ける
+            ["timestamp-tagged-execute-delete-utc-condition-is-sent-without-kind"] = new(
+                (c, ct) =>
+                {
+                    var v = new Box<DateTime>(NoonUtc);
+                    return c
+                        .Rows.TagWith("probe")
+                        .Where(x => x.At < v.Value)
+                        .ExecuteDeleteAsync(ct);
+                },
+                ["2026-01-02T12:00:00 DateTime2 timestamp without time zone"],
+                Ha1
+            ),
+            // UPDATE の値は SET と WHERE を見分けられないので変えない（Utc の値を timestamp の列へ書く SET は Npgsql の規則のまま断られる）
+            ["timestamp-execute-update-utc-condition-is-left-alone"] = new(
+                (c, ct) =>
+                {
+                    var v = new Box<DateTime>(NoonUtc);
+                    return c
+                        .Rows.Where(x => x.At == v.Value)
+                        .ExecuteUpdateAsync(s => s.SetProperty(x => x.Id, x => x.Id), ct);
+                },
+                ["2026-01-02T12:00:00(Utc) DateTime2 timestamp without time zone"],
+                Ha1
+            ),
+            ["timestamp-execute-update-utc-set-is-left-alone"] = new(
+                (c, ct) =>
+                {
+                    var v = new Box<DateTime?>(NoonUtc);
+                    return c
+                        .Rows.Where(x => x.Id == 1)
+                        .ExecuteUpdateAsync(s => s.SetProperty(x => x.At, v.Value), ct);
+                },
+                ["2026-01-02T12:00:00(Utc) DateTime2 timestamp without time zone"],
+                Ha1
+            ),
+            ["timestamp-save-changes-utc-is-left-alone"] = new(
+                (c, ct) =>
+                    Save(
+                        c,
+                        new ProbeRow
+                        {
+                            Id = 1,
+                            Day = Midnight,
+                            At = NoonUtc,
+                        },
+                        ct
+                    ),
+                [
+                    "1 Int64 bigint",
+                    "2026-01-02T12:00:00(Utc) DateTime2 timestamp without time zone",
+                    "00:00:00 Time time without time zone",
+                    "2026-01-02T00:00:00 Date date",
+                ],
+                Ha1
+            ),
+            // timestamptz の列は Utc の値だけを受け付けるので触れない
+            ["timestamptz-utc-is-left-alone"] = new(
+                Where(NoonUtc, v => x => x.AtZone == v.Value),
+                ["2026-01-02T12:00:00(Utc) DateTime timestamp with time zone"],
+                Ha1
+            ),
+            // ---- IN のリスト（HA2・HA1）：date[] は時刻つきの要素があれば timestamp の配列へ、timestamp[] は比べる値の Kind を外す ----
+            ["date-in-list-time-of-day-is-bound-as-timestamp-array"] = new(
+                Where(new List<DateTime> { Midnight, Noon }, v => x => v.Value.Contains(x.Day)),
+                ["[2026-01-02T00:00:00, 2026-01-02T12:00:00] Object timestamp without time zone[]"],
+                Ha2
+            ),
+            ["date-in-list-utc-time-of-day-elements-lose-kind"] = new(
+                Where(
+                    new List<DateTime> { MidnightUtc, NoonUtc },
+                    v => x => v.Value.Contains(x.Day)
+                ),
+                ["[2026-01-02T00:00:00, 2026-01-02T12:00:00] Object timestamp without time zone[]"],
+                Ha2
+            ),
+            ["date-in-list-midnights-keeps-column-type-and-kind"] = new(
+                Where(
+                    new List<DateTime> { MidnightUtc, Midnight.AddDays(1) },
+                    v => x => v.Value.Contains(x.Day)
+                ),
+                ["[2026-01-02T00:00:00(Utc), 2026-01-03T00:00:00] Object date[]"],
+                Ha2
+            ),
+            ["date-in-nullable-list-with-null-keeps-null"] = new(
+                Where(
+                    new List<DateTime?> { null, Noon },
+                    v => x => v.Value.Contains((DateTime?)x.Day)
+                ),
+                ["[, 2026-01-02T12:00:00] Object timestamp without time zone[]"],
+                Ha2
+            ),
+            ["date-in-list-execute-delete-condition-is-bound-as-timestamp-array"] = new(
+                (c, ct) =>
+                {
+                    var v = new Box<List<DateTime>>([Noon]);
+                    return c.Rows.Where(x => v.Value.Contains(x.Day)).ExecuteDeleteAsync(ct);
+                },
+                ["[2026-01-02T12:00:00] Object timestamp without time zone[]"],
+                Ha2
+            ),
+            ["date-in-list-execute-update-condition-is-bound-as-timestamp-array"] = new(
+                (c, ct) =>
+                {
+                    var v = new Box<List<DateTime>>([Noon]);
+                    return c
+                        .Rows.Where(x => v.Value.Contains(x.Day))
+                        .ExecuteUpdateAsync(s => s.SetProperty(x => x.Id, x => x.Id), ct);
+                },
+                ["[2026-01-02T12:00:00] Object timestamp without time zone[]"],
+                Ha2
+            ),
+            ["timestamp-in-list-utc-elements-lose-kind"] = new(
+                Where(new List<DateTime?> { NoonUtc, Midnight }, v => x => v.Value.Contains(x.At)),
+                ["[2026-01-02T12:00:00, 2026-01-02T00:00:00] Object timestamp without time zone[]"],
+                Ha1
+            ),
+            ["timestamp-in-list-execute-update-utc-condition-is-left-alone"] = new(
+                (c, ct) =>
+                {
+                    var v = new Box<List<DateTime?>>([NoonUtc]);
+                    return c
+                        .Rows.Where(x => v.Value.Contains(x.At))
+                        .ExecuteUpdateAsync(s => s.SetProperty(x => x.Id, x => x.Id), ct);
+                },
+                ["[2026-01-02T12:00:00(Utc)] Object timestamp without time zone[]"],
+                Ha1
+            ),
+            ["timestamptz-in-list-utc-is-left-alone"] = new(
+                Where(new List<DateTime?> { NoonUtc }, v => x => v.Value.Contains(x.AtZone)),
+                ["[2026-01-02T12:00:00(Utc)] Object timestamp with time zone[]"],
+                Ha1
+            ),
         };
 
     /// <summary>値を閉包のフィールドから読む述語で、一覧を読む操作を作る</summary>
@@ -255,7 +466,8 @@ public class PostgreSqlQueryParameterInterceptorTests
     private static string Show(object? value) =>
         value switch
         {
-            DateTime d => d.ToString("s", CultureInfo.InvariantCulture),
+            DateTime d => d.ToString("s", CultureInfo.InvariantCulture)
+                + (d.Kind == DateTimeKind.Unspecified ? "" : $"({d.Kind})"),
             TimeSpan t => t.ToString("c", CultureInfo.InvariantCulture),
             IEnumerable items and not string => "["
                 + string.Join(", ", items.Cast<object?>().Select(Show))
@@ -271,6 +483,10 @@ public class PostgreSqlQueryParameterInterceptorTests
         public DateTime Day { get; set; }
 
         public TimeSpan Clock { get; set; }
+
+        public DateTime? At { get; set; }
+
+        public DateTime? AtZone { get; set; }
     }
 
     /// <summary>生成の Fluent と同じ構成の DbContext（PostgreSQL の型マッパーが EF Core に教える列の型を付ける）</summary>
@@ -286,6 +502,11 @@ public class PostgreSqlQueryParameterInterceptorTests
                 entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedNever();
                 entity.Property(e => e.Day).HasColumnName("day").HasColumnType("date");
                 entity.Property(e => e.Clock).HasColumnName("clock").HasColumnType("time");
+                entity.Property(e => e.At).HasColumnName("at").HasColumnType("timestamp");
+                entity
+                    .Property(e => e.AtZone)
+                    .HasColumnName("at_zone")
+                    .HasColumnType("timestamp with time zone");
             });
     }
 

@@ -2,14 +2,21 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedTranslatorParityFixture;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
+
+/// <summary>長さを宣言したバイナリの列の長さと、固定長（<c>binary(n)</c>）か可変長（<c>varbinary(n)</c>）か</summary>
+/// <param name="Length">宣言した長さ</param>
+/// <param name="FixedLength">固定長か（短い値を 0x00 で詰めるか）</param>
+public readonly record struct BinaryColumnLength(int Length, bool FixedLength);
 
 /// <summary>
 /// 生成ランタイムの式の翻訳を、3 つの実装先（SQL Server の ADO・SQLite の ADO・インメモリ）で
@@ -38,16 +45,25 @@ public abstract class TranslatorParityRuntimeTestsBase
     protected abstract Task<ServiceProvider> CreateProviderAsync();
 
     /// <summary>
-    /// 固定長のバイナリの列（プロパティ名 → 長さ）。期待を作るとき、これらの列と比べる値をその列へ保存したときの値へ直す
+    /// 長さを宣言したバイナリの列（プロパティ名 → 長さと固定長か）。期待を作るとき、これらの列と比べる値をその列へ保存したときの値へ直す
     /// （<see cref="ComparingBytes"/>。SQL Server の派生だけが持つ）
     /// </summary>
-    protected virtual IReadOnlyDictionary<string, int>? FixedBinaryLengths => null;
+    protected virtual IReadOnlyDictionary<string, BinaryColumnLength>? BinaryColumnLengths => null;
 
     /// <summary>
-    /// SQL Server の図の固定長のバイナリの列（<c>bin_fixed</c> は <c>binary(4)</c>＝<see cref="TranslatorParityFixtureDefinition"/>）
+    /// SQL Server の図の長さを宣言したバイナリの列（<c>bin_fixed</c> は <c>binary(4)</c>・<c>bin</c> は <c>varbinary(4)</c>＝
+    /// <see cref="TranslatorParityFixtureDefinition"/>）
     /// </summary>
-    internal static readonly IReadOnlyDictionary<string, int> SqlServerFixedBinaryLengths =
-        new Dictionary<string, int>(StringComparer.Ordinal) { ["BinFixed"] = 4 };
+    internal static readonly IReadOnlyDictionary<
+        string,
+        BinaryColumnLength
+    > SqlServerBinaryColumnLengths = new Dictionary<string, BinaryColumnLength>(
+        StringComparer.Ordinal
+    )
+    {
+        ["BinFixed"] = new(4, FixedLength: true),
+        ["Bin"] = new(4, FixedLength: false),
+    };
 
     /// <summary>実装先を初期化し、probes のシードを投入する。各テストの先頭で呼ぶ</summary>
     protected async Task SetUpAsync()
@@ -80,6 +96,7 @@ public abstract class TranslatorParityRuntimeTestsBase
     /// 列が表せない文字が化けた形の '??'（id 2）と '?'（id 4）を持つ。datetime の legacy_at は列の型でちょうど表せる値だけを持つ
     /// （id 1・2・3 が 1/300 秒の 0・1・2 単位〔読み戻すと .000・.003・.007〕・id 5 が翌日の 0 時）。範囲の最後の値
     /// 9999-12-31 23:59:59.997 は持たない（方言切替で写す MySQL の datetime は秒の端数を持たず、丸めると範囲を出て書けない）。
+    /// NULL 許容の bool の flag は true（id 1・4）・false（id 2・8）・NULL（ほか）を持つ。
     /// </remarks>
     internal static IReadOnlyList<ProbeEntity> SeedProbes() =>
         [
@@ -100,7 +117,8 @@ public abstract class TranslatorParityRuntimeTestsBase
                 bin: [0x01],
                 binFixed: [0x01],
                 legacyAt: LegacyAtBase,
-                smallAt: SmallAtBase
+                smallAt: SmallAtBase,
+                flag: true
             ),
             Probe(
                 2,
@@ -117,7 +135,8 @@ public abstract class TranslatorParityRuntimeTestsBase
                 bin: [0x01, 0x00],
                 binFixed: [0x01, 0x00],
                 legacyAt: LegacyAtBase.AddMilliseconds(3),
-                smallAt: SmallAtBase.AddMinutes(1)
+                smallAt: SmallAtBase.AddMinutes(1),
+                flag: false
             ),
             Probe(
                 3,
@@ -132,7 +151,7 @@ public abstract class TranslatorParityRuntimeTestsBase
                 legacyAt: LegacyAtBase.AddMilliseconds(7),
                 smallAt: SmallAtLast
             ),
-            Probe(4, "\t", null, null, null, false, ansi: "?", bin: [0xFF]),
+            Probe(4, "\t", null, null, null, false, ansi: "?", bin: [0xFF], flag: true),
             Probe(
                 5,
                 "　",
@@ -147,7 +166,7 @@ public abstract class TranslatorParityRuntimeTestsBase
             ),
             Probe(6, "", "Zc", new DateTime(2024, 1, 15, 0, 0, 0), null, false),
             Probe(7, "Bob\n", null, new DateTime(2025, 1, 15, 8, 0, 0), null, true, amount: 250m),
-            Probe(8, "label", "ab", null, null, false),
+            Probe(8, "label", "ab", null, null, false, flag: false),
             Probe(9, "x", "", null, null, false),
             Probe(10, null, null, null, null, true, group: "g10"),
             Probe(11, "Alicia", null, null, null, false, group: "Alicia"),
@@ -170,7 +189,8 @@ public abstract class TranslatorParityRuntimeTestsBase
         byte[]? bin = null,
         byte[]? binFixed = null,
         DateTime? legacyAt = null,
-        DateTime? smallAt = null
+        DateTime? smallAt = null,
+        bool? flag = null
     ) =>
         new()
         {
@@ -191,6 +211,7 @@ public abstract class TranslatorParityRuntimeTestsBase
             BinFixed = binFixed,
             LegacyAt = legacyAt,
             SmallAt = smallAt,
+            Flag = flag,
         };
 
     /// <summary>datetime の列 legacy_at のシードの基準の値（id 1。id 2・3 はこれに .003・.007 を足した値）</summary>
@@ -221,7 +242,7 @@ public abstract class TranslatorParityRuntimeTestsBase
             predicate,
             p => p.ProbeId,
             SeedProbes().Count,
-            FixedBinaryLengths,
+            BinaryColumnLengths,
             known
         );
 
@@ -234,7 +255,7 @@ public abstract class TranslatorParityRuntimeTestsBase
         Expression<Func<TEntity, bool>> predicate,
         Func<TEntity, long> key,
         int seeded,
-        IReadOnlyDictionary<string, int>? fixedBinaryLengths = null,
+        IReadOnlyDictionary<string, BinaryColumnLength>? binaryColumnLengths = null,
         string? known = null
     )
         where TEntity : EntityBaseCore, new()
@@ -245,7 +266,7 @@ public abstract class TranslatorParityRuntimeTestsBase
         var expected = stored
             .Where(
                 (
-                    (Expression<Func<TEntity, bool>>)ComparingBytes(predicate, fixedBinaryLengths)
+                    (Expression<Func<TEntity, bool>>)ComparingBytes(predicate, binaryColumnLengths)
                 ).Compile()
             )
             .Select(key)
@@ -284,14 +305,14 @@ public abstract class TranslatorParityRuntimeTestsBase
     /// 期待にする。
     /// </remarks>
     /// <param name="predicate">述語</param>
-    /// <param name="fixedBinaryLengths">
-    /// 固定長のバイナリの列（プロパティ名 → 長さ）。その列と比べる値は、その列へ保存したときの値（<see cref="AsStoredInFixedBinary"/>）へ
-    /// 直してから比べる（docs のバイナリの段落の SQL Server の固定長の列の規則）。列どうしの比較は直さない
+    /// <param name="binaryColumnLengths">
+    /// 長さを宣言したバイナリの列（プロパティ名 → 長さと固定長か）。その列と比べる値は、その列へ保存したときの値
+    /// （<see cref="AsStoredInBinaryColumn"/>）へ直してから比べる（docs のバイナリの段落の SQL Server の長さを宣言した列の規則）。列どうしの比較は直さない
     /// </param>
     internal static LambdaExpression ComparingBytes(
         LambdaExpression predicate,
-        IReadOnlyDictionary<string, int>? fixedBinaryLengths = null
-    ) => (LambdaExpression)new ByteComparisonRewriter(fixedBinaryLengths).Visit(predicate);
+        IReadOnlyDictionary<string, BinaryColumnLength>? binaryColumnLengths = null
+    ) => (LambdaExpression)new ByteComparisonRewriter(binaryColumnLengths).Visit(predicate);
 
     /// <summary>2 つのバイナリがバイトの列で等しいか（NULL どうしは等しく、片方だけの NULL は等しくない）</summary>
     private static bool SameBytes(byte[]? left, byte[]? right) =>
@@ -301,25 +322,27 @@ public abstract class TranslatorParityRuntimeTestsBase
     private static bool ContainsBytes(IEnumerable<byte[]?> values, byte[]? value) =>
         values.Any(item => SameBytes(item, value));
 
-    /// <summary>並びの要素をそれぞれ固定長の列へ保存したときの値に直したとき、バイトの列で等しいバイナリがあるか</summary>
+    /// <summary>並びの要素をそれぞれ長さを宣言したバイナリの列へ保存したときの値に直したとき、バイトの列で等しいバイナリがあるか</summary>
     private static bool ContainsBytesAsStored(
         IEnumerable<byte[]?> values,
         byte[]? value,
-        int length
-    ) => values.Any(item => SameBytes(AsStoredInFixedBinary(item, length), value));
+        int length,
+        bool fixedLength
+    ) => values.Any(item => SameBytes(AsStoredInBinaryColumn(item, length, fixedLength), value));
 
     /// <summary>
-    /// 固定長のバイナリの列（<c>binary(n)</c>）へ保存したときの値：短い値は 0x00 で n バイトに詰め、超えた分が 0x00 だけの長い値は
-    /// n バイトに切る。ほかの長い値は保存できないのでそのまま（長さが違うのでどの行とも等しくない）。docs のバイナリの段落の写し
+    /// 長さ n を宣言したバイナリの列へ保存したときの値：超えた分が 0x00 だけの長い値は n バイトに切り、固定長の列（<c>binary(n)</c>）は短い値を
+    /// 0x00 で n バイトに詰める（<c>varbinary(n)</c> は短い値をそのまま持つ）。ほかの長い値は保存できないのでそのまま（長さが違うのでどの行とも
+    /// 等しくない）。docs のバイナリの段落の写し
     /// </summary>
-    private static byte[]? AsStoredInFixedBinary(byte[]? value, int length)
+    private static byte[]? AsStoredInBinaryColumn(byte[]? value, int length, bool fixedLength)
     {
         if (value is null)
         {
             return null;
         }
 
-        if (value.Length < length)
+        if (fixedLength && value.Length < length)
         {
             var padded = new byte[length];
             value.CopyTo(padded, 0);
@@ -333,28 +356,29 @@ public abstract class TranslatorParityRuntimeTestsBase
 
     /// <summary><see cref="ComparingBytes"/> の書き換え</summary>
     private sealed class ByteComparisonRewriter(
-        IReadOnlyDictionary<string, int>? fixedBinaryLengths
+        IReadOnlyDictionary<string, BinaryColumnLength>? binaryColumnLengths
     ) : ExpressionVisitor
     {
-        /// <summary>式が固定長のバイナリの列（述語の引数のプロパティ）なら、その長さ</summary>
-        private int? FixedLengthOf(Expression expression) =>
+        /// <summary>式が長さを宣言したバイナリの列（述語の引数のプロパティ）なら、その長さと固定長か</summary>
+        private BinaryColumnLength? DeclaredLengthOf(Expression expression) =>
             expression is MemberExpression { Expression: ParameterExpression } member
-            && fixedBinaryLengths?.TryGetValue(member.Member.Name, out var length) == true
+            && binaryColumnLengths?.TryGetValue(member.Member.Name, out var length) == true
                 ? length
                 : null;
 
-        /// <summary>値の側を、相手が固定長の列なら、その列へ保存したときの値へ直す式（列どうしは直さない）</summary>
+        /// <summary>値の側を、相手が長さを宣言した列なら、その列へ保存したときの値へ直す式（列どうしは直さない）</summary>
         private Expression AsStored(Expression value, Expression other) =>
-            FixedLengthOf(other) is int length
+            DeclaredLengthOf(other) is { } declared
             && value is not MemberExpression { Expression: ParameterExpression }
                 ? Expression.Call(
                     typeof(TranslatorParityRuntimeTestsBase).GetMethod(
-                        nameof(AsStoredInFixedBinary),
+                        nameof(AsStoredInBinaryColumn),
                         System.Reflection.BindingFlags.NonPublic
                             | System.Reflection.BindingFlags.Static
                     )!,
                     Visit(value),
-                    Expression.Constant(length)
+                    Expression.Constant(declared.Length),
+                    Expression.Constant(declared.FixedLength)
                 )
                 : Visit(value);
 
@@ -404,7 +428,7 @@ public abstract class TranslatorParityRuntimeTestsBase
                 && typeof(IEnumerable<byte[]?>).IsAssignableFrom(source.Type)
             )
             {
-                if (FixedLengthOf(value) is int length)
+                if (DeclaredLengthOf(value) is { } declared)
                 {
                     return Expression.Call(
                         typeof(TranslatorParityRuntimeTestsBase).GetMethod(
@@ -414,7 +438,8 @@ public abstract class TranslatorParityRuntimeTestsBase
                         )!,
                         Visit(source),
                         Visit(value),
-                        Expression.Constant(length)
+                        Expression.Constant(declared.Length),
+                        Expression.Constant(declared.FixedLength)
                     );
                 }
 
@@ -451,7 +476,31 @@ public abstract class TranslatorParityRuntimeTestsBase
             .ToHashSet();
 
         Known.Keys.Where(id => !probeIds.Contains(id)).Should().BeEmpty();
+
+        var ids = TranslatorParityPredicateRows.Table.Select(row => row.Id).ToHashSet();
+        KnownRefusals.Keys.Where(id => !ids.Contains(id)).Should().BeEmpty();
+        KnownRefusals.Keys.Intersect(Known.Keys).Should().BeEmpty();
     }
+
+    /// <summary>
+    /// 実装先の翻訳器が NotSupportedException で断ると分かっている行と、その理由（docs の既知の割り切りを出典にする。
+    /// 断らずに流れたら赤）。既定は無し
+    /// </summary>
+    protected virtual IReadOnlyDictionary<string, string> KnownRefusals { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// QuickER 版（SQL Server・SQLite）の翻訳器が断る、列の側の ulong への変換の行（インメモリと EF Core 版は流して C# と比べる）
+    /// </summary>
+    protected static IReadOnlyDictionary<string, string> QuickErUlongColumnCastRefusals { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["bigint-column-ulong-cast-greater"] = QuickErUlongColumnCastReason,
+            ["int-column-ulong-cast-greater"] = QuickErUlongColumnCastReason,
+        };
+
+    private const string QuickErUlongColumnCastReason =
+        "QuickER 版の翻訳器は、列の側に書いた ulong への変換を、変換を名指しした NotSupportedException で断る。C# が折り返した値は bigint に入らず、SQL で同じ値を作れないので翻訳しない（docs/code-generation.md「Letter case, whitespace, and date parts」の Known limitation：A cast to ulong is refused because its wrapped value does not fit a bigint）";
 
     /// <summary>
     /// 述語の表（<see cref="TranslatorParityPredicateRows"/>）の 1 行が、C# と同じ行を返すことを検証する。
@@ -470,10 +519,61 @@ public abstract class TranslatorParityRuntimeTestsBase
     {
         await SetUpAsync();
 
+        if (KnownRefusals.TryGetValue(id, out var refusal))
+        {
+            var run = () => RunPredicateRowAsync(id);
+            var thrown = await run.Should()
+                .ThrowAsync<NotSupportedException>(
+                    "行 {0} は翻訳器が断ると宣言している（{1}）。断らなくなったら宣言を消す",
+                    id,
+                    refusal
+                );
+            thrown.WithMessage("*UInt64*");
+
+            return;
+        }
+
+        await RunPredicateRowAsync(id);
+    }
+
+    /// <summary>
+    /// probes の並び替えの行：述語で絞り、キーで並べ（同じキーは probe_id の昇順）、C# の OrderBy と ThenBy の並びと一致することを表明する
+    /// </summary>
+    private async Task ShouldOrderLikeCSharpAsync(OrderedProbePredicate ordered)
+    {
+        var repository = Repository<IProbeRepository>();
+        var stored = await repository.Query().ToListAsync(Ct);
+        var filtered = stored.Where(ordered.Predicate.Compile());
+        var key = ordered.Key.Compile();
+        var expected = (
+            ordered.Descending ? filtered.OrderByDescending(key) : filtered.OrderBy(key)
+        )
+            .ThenBy(p => p.ProbeId)
+            .Select(p => p.ProbeId)
+            .ToList();
+
+        var query = repository.Query().Where(ordered.Predicate);
+        query = ordered.Descending
+            ? query.OrderByDescending(ordered.Key)
+            : query.OrderBy(ordered.Key);
+        var actual = (await query.OrderBy(p => p.ProbeId).ToListAsync(Ct))
+            .Select(p => p.ProbeId)
+            .ToList();
+
+        actual.Should().Equal(expected, "キー {0} の並びは C# の並びと同じであるべき", ordered.Key);
+    }
+
+    /// <summary>述語の表の 1 行を、行の入力の表へシードを入れてから C# と突き合わせる</summary>
+    private async Task RunPredicateRowAsync(string id)
+    {
         switch (TranslatorParityPredicateRows.Table[id].Input)
         {
             case ProbePredicate probe:
                 await ShouldMatchCSharpAsync(probe.Predicate, Known.GetValueOrDefault(id));
+                break;
+
+            case OrderedProbePredicate ordered:
+                await ShouldOrderLikeCSharpAsync(ordered);
                 break;
 
             case SmallChildPredicate child:
@@ -519,6 +619,248 @@ public abstract class TranslatorParityRuntimeTestsBase
             default:
                 throw new InvalidOperationException($"行 {id} の入力の型を扱えない");
         }
+    }
+
+    // ===== 値の束縛の生成の表 =====
+
+    /// <summary>派生が担う実装先（属性 <see cref="RuntimeCellAttribute"/> の述語の一致の実装先）</summary>
+    private RuntimeTarget BindingTarget =>
+        GetType()
+            .GetCustomAttributes<RuntimeCellAttribute>(inherit: false)
+            .Single(cell => cell.Feature == RuntimeFeatures.TranslatorParity)
+            .Target;
+
+    /// <summary>
+    /// 値の束縛の生成の表（<see cref="TranslatorParityBindingRows"/>）の 1 行が、C# の評価と同じ答えを返すことを検証する
+    /// （例外は不一致。既知の失敗は <see cref="TranslatorParityBindingKnownFailures"/> と厳密に照合する）。
+    /// </summary>
+    /// <remarks>
+    /// Query は当たる行のキーを、ExecuteDelete は消した数と残った行のキー（C# の補集合）を比べる。ExecuteUpdate の経路は EF Core 版だけが持つ
+    /// （QuickER 版の Repository に ExecuteUpdate は無い＝作らない形の宣言）。
+    /// </remarks>
+    [Theory(DisplayName = "[翻訳パリティ] 値の束縛の生成の表の行が C# と同じ答えを返す")]
+    [MemberData(
+        nameof(TranslatorParityBindingRows.QuickErIds),
+        MemberType = typeof(TranslatorParityBindingRows)
+    )]
+    public async Task Binding_MatchesCSharp(string id) =>
+        TranslatorParityBindingKnownFailures.AssertRow(
+            BindingTarget,
+            id,
+            await RunBindingRowAsync(id)
+        );
+
+    /// <summary>
+    /// 分岐の軸の台帳の指摘のセル（この実装先を範囲に持つ、値の束縛の生成の表に結んだ項目の必ず含む行）を流し、未修正の項目はセルが C# と割れて
+    /// 項目の Pending に当たり、修正済みの項目はセルで証拠が出ることを照合する（<see cref="TranslatorParityBindingEvidence.CellProblems"/>）
+    /// </summary>
+    [Fact(
+        DisplayName = "[翻訳パリティ] 値の束縛の台帳の指摘のセルは、未修正なら項目の Pending に当たり、修正済みなら証拠が出る"
+    )]
+    public async Task LedgerCells_FollowStatus()
+    {
+        var outcomes = new Dictionary<string, BindingRunOutcome>(StringComparer.Ordinal);
+
+        foreach (var id in TranslatorParityBindingEvidence.CellRowIdsFor(BindingTarget))
+        {
+            outcomes[id] = await RunBindingRowAsync(id);
+        }
+
+        TranslatorParityBindingEvidence.CellProblems(BindingTarget, outcomes).Should().BeEmpty();
+    }
+
+    /// <summary>値の束縛の生成の表の 1 行を、実装先を作り直してシードを入れてから流し、C# の評価と比べた結果を返す</summary>
+    private async Task<BindingRunOutcome> RunBindingRowAsync(string id)
+    {
+        await SetUpAsync();
+
+        var row = TranslatorParityBindingRows.Rows[id].Input;
+        BindingRunOutcome outcome;
+
+        switch (row.Entity)
+        {
+            case BindingEntity.Probe:
+                outcome = await RunBindingAsync(
+                    Repository<IProbeRepository>(),
+                    (Expression<Func<ProbeEntity, bool>>)row.Predicate,
+                    p => p.ProbeId,
+                    row.QueryPath
+                );
+                break;
+
+            case BindingEntity.SmallChild:
+                await SeedCrossTypeFamilyAsync();
+                outcome = await RunBindingAsync(
+                    Repository<ISmallChildRepository>(),
+                    (Expression<Func<SmallChildEntity, bool>>)row.Predicate,
+                    c => c.Id,
+                    row.QueryPath
+                );
+                break;
+
+            default:
+                var parents = Repository<IBigParentRepository>();
+
+                foreach (var seed in WideBigParents())
+                {
+                    await parents.InsertAsync(seed, Ct);
+                }
+
+                outcome = await RunBindingAsync(
+                    parents,
+                    (Expression<Func<BigParentEntity, bool>>)row.Predicate,
+                    p => p.Id,
+                    row.QueryPath
+                );
+                break;
+        }
+
+        return outcome;
+    }
+
+    /// <summary>値の束縛の生成の表の既知の失敗の項目は、この実装先が流す行を名指す</summary>
+    [Fact(
+        DisplayName = "[翻訳パリティ] 値の束縛の既知の失敗は、この実装先が流す生成の表の行を名指す"
+    )]
+    public void BindingKnown_NamesRowsTheTargetRuns() =>
+        TranslatorParityBindingKnownFailures.Problems(BindingTarget).Should().BeEmpty();
+
+    /// <summary>
+    /// パラメータの捕まえ方の自己検査：並列に流れる流れは、それぞれ自分の範囲の中のコマンドのパラメータだけを集め、範囲の外のコマンドは
+    /// どこにも書かない（SqlClient の診断の通知と、EF Core のインターセプターが書く口の両方）
+    /// </summary>
+    [Fact(
+        DisplayName = "[翻訳パリティ] 値の束縛のパラメータの捕まえ方は、並列の流れのコマンドを混ぜない"
+    )]
+    public async Task BindingCapture_KeepsParallelRunsApart()
+    {
+        using var listener = new System.Diagnostics.DiagnosticListener(
+            BindingParameterCapture.SqlClientListenerName
+        );
+        var started = new Rendezvous(3);
+        var written = new Rendezvous(3);
+
+        async Task<IReadOnlyList<CapturedParameter>> FlowAsync(string name, bool viaListener)
+        {
+            using var scope = BindingParameterCapture.Begin();
+            await started.ArriveAsync();
+
+            using var command = new Microsoft.Data.SqlClient.SqlCommand($"SELECT @{name}");
+            command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter($"@{name}", name));
+
+            if (viaListener)
+            {
+                listener.Write(
+                    "Microsoft.Data.SqlClient." + BindingParameterCapture.WriteCommandBefore,
+                    new { Command = command }
+                );
+            }
+            else
+            {
+                BindingParameterCapture.Record(command);
+            }
+
+            await written.ArriveAsync();
+
+            return scope.Parameters;
+        }
+
+        var flows = await Task.WhenAll(
+            Task.Run(() => FlowAsync("a", viaListener: true)),
+            Task.Run(() => FlowAsync("b", viaListener: false)),
+            Task.Run(() => FlowAsync("c", viaListener: true))
+        );
+
+        flows[0].Select(parameter => parameter.Name).Should().Equal("@a");
+        flows[1].Select(parameter => parameter.Name).Should().Equal("@b");
+        flows[2].Select(parameter => parameter.Name).Should().Equal("@c");
+
+        // 範囲の外のコマンドはどこにも書かない（例外にもしない）
+        using var outside = new Microsoft.Data.SqlClient.SqlCommand("SELECT @outside");
+        outside.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@outside", 1));
+        BindingParameterCapture.Record(outside);
+    }
+
+    /// <summary>決まった数の流れがそろうまで待つ</summary>
+    private sealed class Rendezvous(int count)
+    {
+        private readonly TaskCompletionSource _all = new(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        private int _arrived;
+
+        public Task ArriveAsync()
+        {
+            if (Interlocked.Increment(ref _arrived) == count)
+            {
+                _all.SetResult();
+            }
+
+            return _all.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        }
+    }
+
+    /// <summary>行の経路を流し、C# の評価（同じ実装先から読み戻した全行へ述語を当てた結果）と比べた結果を返す</summary>
+    private static async Task<BindingRunOutcome> RunBindingAsync<TEntity, TKey>(
+        IRepository<TEntity, TKey> repository,
+        Expression<Func<TEntity, bool>> predicate,
+        Func<TEntity, long> key,
+        string path
+    )
+        where TEntity : EntityBaseCore, new()
+    {
+        var stored = await repository.Query().ToListAsync(Ct);
+        var compiled = predicate.Compile();
+        var hits = stored.Where(compiled).Select(key).ToList();
+        var expected =
+            path == TranslatorParityBindingRows.ExecuteDelete
+                ? $"deleted={hits.Count} remaining={BindingRunOutcome.Keys(stored.Select(key).Except(hits))}"
+                : BindingRunOutcome.Keys(hits);
+        IReadOnlyList<CapturedParameter> parameters;
+        IReadOnlyList<string> commandTexts;
+        string actual;
+
+        using (var capture = BindingParameterCapture.Begin())
+        {
+            try
+            {
+                if (path == TranslatorParityBindingRows.ExecuteDelete)
+                {
+                    var deleted = await repository
+                        .Query()
+                        .Where(predicate)
+                        .ExecuteDeleteAsync(cascadeDelete: false, Ct);
+                    actual = $"deleted={deleted}";
+                }
+                else
+                {
+                    actual = BindingRunOutcome.Keys(
+                        (await repository.Query().Where(predicate).ToListAsync(Ct)).Select(key)
+                    );
+                }
+            }
+            catch (Exception exception)
+            {
+                return BindingRunOutcome.Threw(path, expected, exception, capture.Parameters) with
+                {
+                    CommandTexts = capture.CommandTexts,
+                };
+            }
+
+            parameters = capture.Parameters;
+            commandTexts = capture.CommandTexts;
+        }
+
+        if (path == TranslatorParityBindingRows.ExecuteDelete)
+        {
+            var remaining = (await repository.Query().ToListAsync(Ct)).Select(key);
+            actual += $" remaining={BindingRunOutcome.Keys(remaining)}";
+        }
+
+        return BindingRunOutcome.Compared(path, expected, actual, parameters) with
+        {
+            CommandTexts = commandTexts,
+        };
     }
 
     // ===== 列を含まない部分式（クロージャの値・定数）は先に評価する =====

@@ -476,7 +476,10 @@ EF Core 版でこの枝を書くと、クエリの実行時に EF Core が循環
 自己参照を同じ向きにもう一度辿る形（`Include(c => c.Children).ThenInclude(c => c.Children)` など）は対象外で、EF Core 版 Repository でも使えます。
 
 翻訳できるのは、等値・比較・`&&` と `||`・`Contains` / `StartsWith` / `EndsWith`（LIKE）・リストの `Contains`（IN）・日付部品（`Year` など）・`string.IsNullOrEmpty` と `string.IsNullOrWhiteSpace`・値オブジェクト比較です。
+IN の検索の要素には日付部品も書けます（`days.Contains(x.ShippedAt.Value.Date)`）。
 NULL 許容の列は `.Value` 経由でも読めます（`x.ShippedAt != null && x.ShippedAt.Value.Year == 2024`）。
+NULL 許容の `bool` の列を素の条件に書く形（`x.IsShipped != null && x.IsShipped.Value`）と並び替えのキー（`OrderBy(x => x.IsShipped!.Value)`）も含みます。
+並び替えでは、`NULL` の行は SQL が `NULL` を並べる位置に並びます（C# はその行で例外になります）。
 クロージャの変数・定数・それらどうしの比較のように列を読まない部分は、翻訳の前に評価して定数の条件にします。
 `&&` と `||` は C# と同じく左辺で結果が決まればそこで止まるため、`filter == null || x.Name == filter` は `filter` が null のとき何も絞りません。
 射影（Select）・GroupBy・Join・算術式は未対応で、実行時例外になります（生 SQL か EF Core で回避してください）。
@@ -540,6 +543,15 @@ IN 検索には、表に収まらない場合がいくつかあります。
 リストの `Contains` の否定も同様に、IN 句の組み立て側へ畳み込んで上記の `NOT IN` 形を出します。
 否定の否定は打ち消し合い、`!(!(a != b))` は補償を保ったまま `a != b` として翻訳されます（三重以上も同じように畳み込まれます）。
 等値と IN 以外の否定は、`NOT (...)` になります。
+列どうしの部分一致の否定（`!x.Name.Contains(x.Other)`）もその 1 つで、`NOT (... LIKE ...)` になり、どちらかの列が `NULL` の行は一致にも否定にも当たりません（C# はその行で例外になるので、`!= null` で外します）。
+
+`object` を受ける `col.Equals(value)` は、値の実行時の型が列の型と違うと C# では偽です（`int` の列の `x.Id.Equals(10L)`）。
+そのため、どの行にも一致しない条件へ翻訳し、その否定は全行に一致する条件へ翻訳します。
+
+> **既知の割り切り**: NULL の補償は演算子にだけ掛かります。
+> `x.Amount.Equals(null)`（`null` を持つ変数の `Equals` も）は普通のパラメータとして束縛され、どの行にも一致しません。
+> C# は列が `NULL` の行に一致します。
+> `x.Amount == null` と書きます。
 
 > **既知の割り切り**: 反転が効くのは `!` が比較に直接乗っている場合だけです。
 > `!(a == b && c)` は De Morgan 展開されず、個別に補償された各項を `NOT (...)` で包んだ形になります。
@@ -686,6 +698,8 @@ SQL Server の QuickER 版 Repository は長さも比べるので、可変長の
 固定長の列とは、比べる値をその列へ保存したときの値に直してから、長さまで比べます。
 短い値は `0x00` で `n` バイトに詰め、超えた分が `0x00` だけの長い値は `n` バイトに切ります（`binary(4)` の列と比べる `0x01` と `0x0100000000` は、どちらも `0x01000000` を持つ行に一致します）。
 超えた分に `0x00` でないバイトを含む値はその列に保存できないので、どの行とも等しくありません。
+長さを宣言した可変長の列（`varbinary(n)`）も、超えた分が `0x00` だけの長い値は `n` バイトに切って保存するので、比べる値も同じく切ります（`varbinary(4)` の列と比べる `0x0100000000` は `0x01000000` を持つ行に一致します）。
+短い値はそのまま比べます。
 
 > **既知の割り切り**: SQL Server の EF Core 版 Repository は SQL Server の比べ方のままで、可変長の列では末尾の `0x00` だけが違う値を等しいとみなします（`value` が `0x01` のとき、`x.Data == value` は `0x0100` を持つ行にも一致します）。
 > 比較の SQL は EF Core が書き、QuickER はその形を変えられないためです。
@@ -774,6 +788,7 @@ SQL Server の QuickER 版 Repository と EF Core 版 Repository は、比べる
 置き直した値は、どの互換レベルでも C# と同じ答えになります。
 EF Core 版 Repository では、クエリのすべてのパラメータ（名前付きクエリ・手書きの LINQ の `Query()`・IN のリストの要素・`Contains` のパターン）と、`ExecuteDeleteAsync` の条件が対象です（[EF Core モード](#ef-core-モードgenerateefcorerepositories)を参照）。
 PostgreSQL の EF Core 版 Repository も、`date` の列と比べる時刻つきの `DateTime` を同じように扱って `timestamp` で送り、クエリでは `time` の列と比べる範囲の外の `TimeSpan` を `interval` で送ります。
+日付部品（`x.At.Value.Date == day`）には使える列の型が無いので、SQL Server の QuickER 版 Repository は、日付部品と比べる `DateTime` を IN のリストの要素も含めて `datetime2` で送ります。
 
 > **既知の割り切り**: EF Core 版 Repository では、手書きの LINQ に書いた定数はパラメータになりません。
 > EF Core は定数を SQL へ書き込み、Unicode でない列と比べる文字列の定数は Unicode でない文字列で書くので、ASCII の外の文字は `?` に変わり、`?` を持つ行に一致します（`Query().Where(x => x.Code == "日本")`）。
@@ -781,12 +796,34 @@ PostgreSQL の EF Core 版 Repository も、`date` の列と比べる時刻つ�
 > 簡易 DSL の条件の文字列のリテラルは変数として生成するので、名前付きクエリは C# と同じ答えになります。
 > 同じく、SQL Server の `datetime`・`smalldatetime` の列と比べる `DateTime` の定数は列の型のリテラルで書かれるので、列が持てない値は比べる前に列の精度へ丸められます（`smalldatetime` の列と比べる `x.At == new DateTime(2024, 1, 1, 10, 0, 40)` は 10:01 に一致します）。
 > 列が持てる値は C# と同じ答えになります。
-> 簡易 DSL は日付のリテラルを持たないので、名前付きクエリには当たりません。
+> SQL Server と PostgreSQL では、`date` の列と比べる `DateTime` の定数は `date` のリテラルで書かれるので、時刻を落としてから比べます（`x.Day < new DateTime(2024, 1, 1, 12, 0, 0)` は 1 月 1 日の行に一致しません）。
+> EF Core は列を読まないメソッド呼び出しの値（`x.Day < Today()`）も定数として書くので、ここに書いたことはその呼び出しにも当てはまります。
+> PostgreSQL では、`DateTime` の定数のリスト・配列を `timestamp` の列と比べると（`new[] { new DateTime(2024, 1, 1) }.Contains(x.At)`）、`NotSupportedException` で失敗します。
+> リストを変数に入れて渡してください（EF Core はパラメータで送ります）。
+> 簡易 DSL は日付のリテラルを持たず、IN のリストをパラメータで渡すので、名前付きクエリには当たりません。
 
 > **既知の割り切り**: SQL Server・PostgreSQL・Oracle の EF Core 版 Repository では、整数の列と decimal の列の比較（`Query().Where(x => x.Qty > x.Price)`）が、桁あふれで失敗することがあります。
 > EF Core は整数の列を decimal の列の型（`decimal(10,2)` など）へ CAST するので、その型に入らない桁の整数を持つ行が 1 行でもあると、クエリ全体が失敗します。
 > QuickER 版 Repository と MySQL の EF Core 版 Repository は、失敗せずに 2 つの列を比べます。
+> EF Core 版 Repository では、列の側に書いた縮める変換（`Query().Where(x => (short)x.Id == -1)`）が C# のように折り返さないので（SQL Server・PostgreSQL・Oracle は変換先の型に入らない値の行で失敗することがあり、SQLite と MySQL は変換が無いものとして列を比べます）、列は変換せずに比べ、値の側を広げてください。
+> 符号だけを変える変換（`(uint)x.Id`・`(ulong)x.Id`）も C# のように負の値を折り返さないので、負の値を持つ列では、プロバイダーによって答えが変わるかクエリが失敗します。
+> 列は変換せずに比べ、値の側を変換してください。
 > 簡易 DSL の条件は列と値だけを比べるので、名前付きクエリはこの形になりません。
+
+> **既知の割り切り**: EF Core 版 Repository は、整数の列と比べる `char` の値（`letter` が `char` のときの `Query().Where(x => x.Id > letter)`）を、C# が比べる数でなく文字列として送ります。
+> プロバイダーと条件の形によって、クエリが失敗するか（PostgreSQL・SQL Server・Oracle と、MySQL の `ExecuteDeleteAsync`）、エラーなしに答えが変わります（`QuickErDbContext` へ書いた `ExecuteUpdate` の SQLite、クエリの MySQL）。
+> 値は数にして渡してください（`(int)letter` か `int` の変数）。
+> QuickER 版 Repository は数を束縛します。
+
+> **既知の割り切り**: QuickER 版 Repository は、列の側に書いた、SQL で同じにできない形で列の値を変えうる変換を、変換を名指しした `NotSupportedException` で断ります。
+> 断るのは、縮める変換（`Query().Where(x => (short)x.Id == -1)`）・decimal の列の `(int)x.Amount`・`ulong` への変換（`(ulong)x.Id`）・符号なしの型から同じ大きさの符号付きの型への変換（`uint` のプロパティの `(int)x.Count`）です。
+> C# は比べる前に行ごとの値を折り返すか小数部を落とし、SQL の `CAST` はどれも同じにならないので、列は変換せずに比べ、値の側を変換してください。
+> `ulong` への変換を断るのは、折り返した値が `bigint` に入らないためです。
+> 値の側の変換（`x.Id == (int)ratio`）は、束縛の前に C# と同じに当たるので、自由に書けます。
+
+32 ビット以下の符号付きの整数の列を、その値が入る符号なしの型へ符号だけを変える変換（`(uint)x.Id`・`(ushort)x.Small`・`(byte)x.Tiny`）は翻訳し、C# と同じ答えになります。
+負の値には変換先の型の 2^n を足して折り返し（`CASE WHEN [Id] < 0 THEN CAST([Id] AS bigint) + 4294967296 ELSE [Id] END`）、NULL の列は NULL のままです。
+SQL Server では、この列と比べる符号なしの値を `bigint` で送ります。
 
 > **既知の割り切り**: PostgreSQL と MySQL は日時をマイクロ秒までしか持たず、ドライバは比べる値のそれより細かい部分を落として送ります。
 > そのため 1 マイクロ秒より細かい端数を持つ `DateTime`・`DateTimeOffset`・`TimeSpan`（1 tick は 100 ナノ秒）は、マイクロ秒へ切り詰めた値として比べられ、C# では一致しない `x.At == value` が一致することがあります。
@@ -902,6 +939,8 @@ Save フックが飛ばした子は削除されていないので、コレクシ
 EF Core モードでは、同じ行を持つ 2 つのナビゲーションをどちらも Include して読むと、この形になります（EF Core は同じ行を両方のコレクションで 1 つのインスタンスにします）。
 保存の前に、片方のコレクションからその行を外してください。
 変更の無いインスタンスに 2 度届くのは、そのまま保存します。
+ただし、その下に変更を持つ行があれば、同じく断ります（道ごとにインスタンスの下を歩き直し、その行を道の数だけ書くことになるため）。
+2 つの道がどちらもそのインスタンスを削除する（削除する 2 つの親のコレクションに入っている、など）ときも、削除を 2 回書くことになるので断ります。
 
 どの実装先もこれらを確かめ、リモートのクライアントはグラフを送る前に確かめます。
 
@@ -1397,10 +1436,17 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   EF Core はパラメータに列の型 `date` を付け、Npgsql は時刻を落としてから送るので、`x.Day < noon` はその日の行を落とし、`x.Day == noon` はその日の行に一致します。
   `PostgreSqlQueryParameterInterceptor` はこうした値を `timestamp` で送るので、PostgreSQL は C# と同じく日付を値の全体と比べます。
   0 時ちょうどの値は `date` の型のままです。
-  SQL Server のインターセプターと同じく、変えるのは LINQ のクエリと `ExecuteDelete` / `ExecuteUpdate` のコマンドだけです。
+  `date` の列の `IN` のリスト（`dates.Contains(x.Day)`）がこうした値を含むときも、同じく timestamp の配列で送ります。
+  SQL Server のインターセプターと同じく、変えるのは LINQ のクエリと `ExecuteDelete` / `ExecuteUpdate` のコマンドだけです（`ExecuteUpdate` が `date` の列へ書く値は日付で保存されます）。
   `AddGeneratedEfCoreRepositories` は、渡した構成の後にこのインターセプターを DbContext のオプションへ足します。
   `DbContextOptions` を自分で組むときは、`AddInterceptors` で `PostgreSqlQueryParameterInterceptor.Instance` を足してください。
   ほかのプロバイダの接続には触れません
+- PostgreSQL では、`date`・`timestamp` の列と比べる `DateTimeKind.Utc`・`DateTimeKind.Local` の `DateTime` が C# と同じ答えになります（C# は 2 つの `DateTime` を tick で比べ、Kind を見ません）。
+  Npgsql は `DateTimeKind.Utc` の `DateTime` を `timestamp` として送らないので、そのままでは比較が `ArgumentException` になります。
+  `PostgreSqlQueryParameterInterceptor` は、こうした値とこうした `IN` のリストの要素を、同じ tick の `DateTimeKind.Unspecified` で送ります。
+  `timestamp` の列について変えるのは、LINQ のクエリと `ExecuteDelete` のコマンドだけです（SQL Server と同じくコマンドの文で見分けます）。
+  `UPDATE` の値は `SET` の値と `WHERE` の値を見分けられないので変えず、`QuickErDbContext` へ自分で書く `ExecuteUpdate` の `WHERE` の Utc の値は、書く値と同じく断られます。
+  `timestamp with time zone` のパラメータには触れません
 - PostgreSQL では、LINQ のクエリで `time` の列と比べる範囲の外の `TimeSpan`（負の値と 24 時間を超える値）を `interval` で送ります。
   EF Core はパラメータに列の型 `time` を付け、PostgreSQL はその型のこうした値を断ります。
   `PostgreSqlQueryParameterInterceptor` はその型を外し（こうした値を含む `IN` のリストも）、PostgreSQL は C# と同じく列を interval と比べます。
@@ -1422,7 +1468,9 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   構成しないと、プロバイダは `DateTime` を `timestamp with time zone` として送って `DateTimeKind.Unspecified` の値を断り、`DateTimeOffset` も同じく送って UTC 以外のオフセットを断り、文字列を `text` として送って JSON・XML の列で PostgreSQL に断られます。
   `TimeSpan` は `interval` として送り、PostgreSQL は `time` の列の範囲の外の値を、日の部分を落としてエラーなしに保存します（`1.01:00:00` は `01:00:00`、`-01:00:00` は `23:00:00`）。
   構成すると、PostgreSQL はこうした値を断ります。
-  `DateTimeKind.Utc` の `DateTime` は `timestamp` の列へ書けず、`timestamptz` の列は UTC のオフセットだけを受け付けます（どちらも Npgsql の規則）。
+  `DateTimeKind.Utc` の `DateTime` は `timestamp` の列へ書けず（`SaveChanges` と `ExecuteUpdate` の `SET`）、`timestamptz` の列は UTC のオフセットだけを受け付けます（どちらも Npgsql の規則）。
+  比べる値は、変数で渡せば Kind に依らず C# と同じ答えになります（上の `DateTimeKind.Utc` の項目を参照）。
+  ただし、定数で書いた Utc の `DateTime` を `timestamp` の列と比べると断られます：EF Core は定数と、行に依らないメソッド呼び出しの値を SQL のリテラルとして書き、Npgsql は Utc の値からそのリテラルを作れないので、値は変数で渡してください。
   `money` と SQL Server の `datetime`・`smalldatetime`（前の項目）を除き、ほかの列には列の型を構成しないので、どの方言でも同じ C# 型へ写る型だけの図は、方言に依らず同じコードを生成します。
 - MySQL の写し方（`timestamp` を `DateTime`、`char(36)` を `Guid`。[DB 型と C# 型の対応](#db-型と-c-型の対応)を参照）は、ドライバが MySql.Data の MySql.EntityFrameworkCore で確かめました。
   Pomelo では確かめていません。
@@ -1455,6 +1503,7 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   `contextOwnsConnection: true` で渡した接続は、2 つめの文脈が接続を切り替えた時点で EF Core が破棄するので、そうした文脈はプールや使い回しをしないでください。
 
 > **既知の割り切り**: SQL Server で、`QuickErDbContext` へ自分で書く `ExecuteUpdate` の `WHERE` は、列が持てない `datetime`・`smalldatetime` の値を列の型で送るので、比べる前に丸められます。
+> そうした列の日付部品と比べる値（`x.At.Value.Date == value`）も同じです（EF Core は値を列と同じ型にするので、列が持てない値は丸められるか断られます）。
 > `SqlServerQueryParameterInterceptor` は `UPDATE` のコマンドのパラメータを変えません。
 > `SET` の値と `WHERE` の値を見分けられず、`SET` の値の型を変えると保存される値が変わるためです。
 > 生成した Repository は `ExecuteUpdate` を出さないので、生成コードには当たりません。

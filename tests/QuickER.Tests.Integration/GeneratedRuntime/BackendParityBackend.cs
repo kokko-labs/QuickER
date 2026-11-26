@@ -740,7 +740,7 @@ public sealed class ParityBackend : IAsyncDisposable
                     if (entity.CustomerId is null || entity.CustomerId.Value == 0)
                     {
                         entity.CustomerId = CustomerIdValue.Create(
-                            ParityHookRecorder.AssignedCustomerKey
+                            recorder.NextKey("customers", ParityHookRecorder.AssignedCustomerKey)
                         );
                     }
 
@@ -768,7 +768,9 @@ public sealed class ParityBackend : IAsyncDisposable
                 {
                     if (entity.OrderId is null || entity.OrderId.Value == 0)
                     {
-                        entity.OrderId = OrderIdValue.Create(ParityHookRecorder.AssignedOrderKey);
+                        entity.OrderId = OrderIdValue.Create(
+                            recorder.NextKey("orders", ParityHookRecorder.AssignedOrderKey)
+                        );
                     }
 
                     return $"{ParityFormat.KeyOf(entity)} customer={entity.CustomerId?.Value}";
@@ -820,7 +822,9 @@ public sealed class ParityBackend : IAsyncDisposable
                 {
                     if (entity.LineId is null || entity.LineId.Value == 0)
                     {
-                        entity.LineId = LineIdValue.Create(ParityHookRecorder.AssignedLineKey);
+                        entity.LineId = LineIdValue.Create(
+                            recorder.NextKey("order_lines", ParityHookRecorder.AssignedLineKey)
+                        );
                     }
 
                     return $"{ParityFormat.KeyOf(entity)} order={entity.OrderId?.Value}";
@@ -847,7 +851,7 @@ public sealed class ParityBackend : IAsyncDisposable
                     if (entity.ContactId is null || entity.ContactId.Value == 0)
                     {
                         entity.ContactId = ContactIdValue.Create(
-                            ParityHookRecorder.AssignedContactKey
+                            recorder.NextKey("contacts", ParityHookRecorder.AssignedContactKey)
                         );
                     }
 
@@ -886,7 +890,7 @@ public sealed class ParityBackend : IAsyncDisposable
                     if (entity.CustomerId is null || entity.CustomerId.Value == 0)
                     {
                         entity.CustomerId = EfOnly.CustomerIdValue.Create(
-                            ParityHookRecorder.AssignedCustomerKey
+                            recorder.NextKey("customers", ParityHookRecorder.AssignedCustomerKey)
                         );
                     }
 
@@ -915,7 +919,7 @@ public sealed class ParityBackend : IAsyncDisposable
                     if (entity.OrderId is null || entity.OrderId.Value == 0)
                     {
                         entity.OrderId = EfOnly.OrderIdValue.Create(
-                            ParityHookRecorder.AssignedOrderKey
+                            recorder.NextKey("orders", ParityHookRecorder.AssignedOrderKey)
                         );
                     }
 
@@ -969,7 +973,7 @@ public sealed class ParityBackend : IAsyncDisposable
                     if (entity.LineId is null || entity.LineId.Value == 0)
                     {
                         entity.LineId = EfOnly.LineIdValue.Create(
-                            ParityHookRecorder.AssignedLineKey
+                            recorder.NextKey("order_lines", ParityHookRecorder.AssignedLineKey)
                         );
                     }
 
@@ -997,7 +1001,7 @@ public sealed class ParityBackend : IAsyncDisposable
                     if (entity.ContactId is null || entity.ContactId.Value == 0)
                     {
                         entity.ContactId = EfOnly.ContactIdValue.Create(
-                            ParityHookRecorder.AssignedContactKey
+                            recorder.NextKey("contacts", ParityHookRecorder.AssignedContactKey)
                         );
                     }
 
@@ -1034,6 +1038,47 @@ public sealed class ParityHookRecorder(List<string> log, IReadOnlyList<ParityHoo
 
     /// <summary><see cref="ParityHookBehavior.EditKeyThenContinue"/> が顧客に書く code</summary>
     public const string RewrittenCode = "HOOKED";
+
+    /// <summary>
+    /// 記録の並び（実装先ごとに 1 つ・リモートのサーバーのフックも同じ並びへ書く）→ 保存ごとの表ごとの <see cref="ParityHookBehavior.AssignKey"/> の回数
+    /// </summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<
+        List<string>,
+        Dictionary<string, int>
+    > AssignedCounts = new();
+
+    /// <summary>
+    /// 保存を始める（その実装先の <see cref="ParityHookBehavior.AssignKey"/> の通し番号を表ごとに 0 へ戻す。グラフ保存の手が保存の前に呼ぶ）
+    /// </summary>
+    /// <param name="log">実装先の記録の並び（<see cref="ParityBackend.Hooks"/>）</param>
+    public static void BeginSave(List<string> log)
+    {
+        var counts = AssignedCounts.GetOrCreateValue(log);
+
+        lock (counts)
+        {
+            counts.Clear();
+        }
+    }
+
+    /// <summary>
+    /// 保存の中で <paramref name="table"/> に決めるキー：最初は <paramref name="first"/>（<see cref="AssignedCustomerKey"/> など）、2 つ目からは
+    /// 1 ずつ足す（同じ保存で同じ型の新しい行が 2 つ以上あっても違うキーになる。最初のキーは保存ごとに同じ）
+    /// </summary>
+    /// <param name="table">表</param>
+    /// <param name="first">最初のキー</param>
+    public int NextKey(string table, int first)
+    {
+        var counts = AssignedCounts.GetOrCreateValue(log);
+
+        lock (counts)
+        {
+            var assigned = counts.GetValueOrDefault(table);
+            counts[table] = assigned + 1;
+
+            return first + assigned;
+        }
+    }
 
     /// <summary>Before：記録し、振る舞いに従って値を書き換え、続けるか（true）飛ばすか（false）を返すか、投げる</summary>
     /// <param name="call">呼び出し（<c>操作:表/キー</c>）</param>

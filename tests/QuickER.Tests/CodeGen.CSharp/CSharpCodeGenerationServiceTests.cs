@@ -639,8 +639,10 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("if (call.Object is not null && call.Arguments.Count == 1)");
         // 非 null 要素をパラメータ化して IN (...) を生成、空コレクションは恒偽（否定は恒真）条件
         content.Should().Contain("(false, false) => $\"{column} IN ({values})\"");
-        content.Should().Contain("(false, false) => \"1 = 0\"");
-        content.Should().Contain("(false, true) => \"1 = 1\"");
+        content.Should().Contain("(false, false) => AlwaysFalse,");
+        content.Should().Contain("(false, true) => AlwaysTrue,");
+        content.Should().Contain("private const string AlwaysFalse = \"1 = 0\";");
+        content.Should().Contain("private const string AlwaysTrue = \"1 = 1\";");
         // null 要素は IS NULL へ畳み、NOT IN は列側の NULL を無条件補償する（C# / EF Core の意味論）
         content
             .Should()

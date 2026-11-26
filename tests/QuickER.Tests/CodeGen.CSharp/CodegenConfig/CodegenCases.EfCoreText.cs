@@ -849,7 +849,253 @@ internal static partial class CodegenCases
                 "diag-efcore-unique-principal-column-no-warning",
                 uniquePrincipal: true
             ),
+            // --- 行に依らない値の判定（PredicateExpressionParts.IsRowFree）を使う 2 つの書き換え ---
+            ColumnTextRow(
+                "exec-efcore-sqlite-integral-decimal-rewrite-values-with-own-lambda",
+                "EfCoreRowFreeRewriteTests",
+                "SqliteIntegralDecimalEquality_RewritesValuesWithOwnLambda（値の式の中のラムダが宣言した引数は行に数えず書き換え、ラムダの中で行を読む値は書き換えない）",
+                () =>
+                    EfCoreText_NonUnicodeDiagram(
+                        DialectNames.SqlServer,
+                        "varchar(20)",
+                        "nvarchar(50)"
+                    ),
+                EfCoreText_NonUnicodeOptions(valueObjects: false),
+                exec: [EfCoreText_SqliteRowFreeRewrite()]
+            ),
+            ColumnTextRow(
+                "exec-efcore-npgsql-value-object-list-nulls-rewrite-values-with-own-lambda",
+                "EfCoreRowFreeRewriteTests",
+                "NpgsqlValueObjectListNulls_RewritesValuesWithOwnLambda（値の式の中のラムダが宣言した引数は行に数えず書き換え、ラムダの中で行を読む値は書き換えない）",
+                () =>
+                    EfCoreText_NonUnicodeDiagram(
+                        DialectNames.SqlServer,
+                        "varchar(20)",
+                        "nvarchar(50)"
+                    ),
+                EfCoreText_NonUnicodeOptions(valueObjects: true),
+                exec: [EfCoreText_NpgsqlRowFreeRewrite()]
+            ),
         ];
+
+    // ===== 行に依らない値の判定（3 回目の効果測定の HA4） =====
+
+    /// <summary>
+    /// 書き換え器（<paramref name="rewriter"/> の internal の <c>Rewrite&lt;TEntity&gt;</c>）に述語の本体を通し、書き換えたか（別のインスタンスか）と、
+    /// 書き換えた述語を行に当てた答えを返す
+    /// </summary>
+    private static (bool Rewritten, Func<object, bool> Evaluate) EfCoreText_Rewrite(
+        Type rewriter,
+        Type entity,
+        System.Linq.Expressions.ParameterExpression row,
+        System.Linq.Expressions.Expression body
+    )
+    {
+        var predicate = System.Linq.Expressions.Expression.Lambda(
+            typeof(Func<,>).MakeGenericType(entity, typeof(bool)),
+            body,
+            row
+        );
+        var result = (System.Linq.Expressions.LambdaExpression)
+            rewriter
+                .GetMethod(
+                    "Rewrite",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static
+                )!
+                .MakeGenericMethod(entity)
+                .Invoke(null, [predicate])!;
+        var compiled = result.Compile();
+
+        return (!ReferenceEquals(result, predicate), value => (bool)compiled.DynamicInvoke(value)!);
+    }
+
+    /// <summary><c>source.Select(selector).ToList()</c>（行に依らない値の式にラムダを含める形）</summary>
+    private static System.Linq.Expressions.Expression EfCoreText_SelectToList(
+        object source,
+        Type element,
+        System.Linq.Expressions.LambdaExpression selector
+    ) =>
+        System.Linq.Expressions.Expression.Call(
+            typeof(Enumerable),
+            nameof(Enumerable.ToList),
+            [element],
+            System.Linq.Expressions.Expression.Call(
+                typeof(Enumerable),
+                nameof(Enumerable.Select),
+                [element, element],
+                System.Linq.Expressions.Expression.Constant(source),
+                selector
+            )
+        );
+
+    /// <summary>
+    /// SQLite の整数と decimal の等値の書き換え（<c>SqliteIntegralDecimalEquality</c>）：値の式の中のラムダが宣言した引数（<c>p =&gt; p</c>）は
+    /// 行に数えないので、<c>prices.Select(p =&gt; p).ToList().Contains((decimal)x.ItemId)</c> と <c>(decimal)x.ItemId == prices.Select(p =&gt; p).First()</c>
+    /// を書き換え、書き換えた述語は C# と同じ答えを返す。ラムダの中で行を読む値（<c>p =&gt; p + x.ItemId</c>）は書き換えない
+    /// </summary>
+    private static ExecCheck EfCoreText_SqliteRowFreeRewrite() =>
+        new(
+            "sqlite-integral-decimal-rewrite-values-with-own-lambda",
+            assembly =>
+            {
+                var problems = new List<string>();
+                var entity = ProbeKit.Type(assembly, "ItemEntity");
+                var rewriter = ProbeKit.Type(assembly, "SqliteIntegralDecimalEquality");
+                var x = System.Linq.Expressions.Expression.Parameter(entity, "x");
+                var column = System.Linq.Expressions.Expression.Convert(
+                    System.Linq.Expressions.Expression.Property(x, "ItemId"),
+                    typeof(decimal)
+                );
+                var prices = new List<decimal> { 10m, 11.5m };
+                var p = System.Linq.Expressions.Expression.Parameter(typeof(decimal), "p");
+                var own = EfCoreText_SelectToList(
+                    prices,
+                    typeof(decimal),
+                    System.Linq.Expressions.Expression.Lambda(p, p)
+                );
+                var readsRow = EfCoreText_SelectToList(
+                    prices,
+                    typeof(decimal),
+                    System.Linq.Expressions.Expression.Lambda(
+                        System.Linq.Expressions.Expression.Add(p, column),
+                        p
+                    )
+                );
+
+                System.Linq.Expressions.Expression Contains(
+                    System.Linq.Expressions.Expression values
+                ) =>
+                    System.Linq.Expressions.Expression.Call(
+                        typeof(Enumerable),
+                        nameof(Enumerable.Contains),
+                        [typeof(decimal)],
+                        values,
+                        column
+                    );
+
+                System.Linq.Expressions.Expression EqualsFirst(
+                    System.Linq.Expressions.Expression values
+                ) =>
+                    System.Linq.Expressions.Expression.Equal(
+                        column,
+                        System.Linq.Expressions.Expression.Call(
+                            typeof(Enumerable),
+                            nameof(Enumerable.First),
+                            [typeof(decimal)],
+                            values
+                        )
+                    );
+
+                object Row(int id)
+                {
+                    var item = ProbeKit.Create(entity);
+                    ProbeKit.Set(item, "ItemId", id);
+                    return item;
+                }
+
+                foreach (
+                    var (name, body, rewritten) in new[]
+                    {
+                        ("contains-own-lambda", Contains(own), true),
+                        ("equal-own-lambda", EqualsFirst(own), true),
+                        ("contains-lambda-reading-row", Contains(readsRow), false),
+                        ("equal-lambda-reading-row", EqualsFirst(readsRow), false),
+                    }
+                )
+                {
+                    var (changed, evaluate) = EfCoreText_Rewrite(rewriter, entity, x, body);
+
+                    if (changed != rewritten)
+                    {
+                        problems.Add($"{name}: 書き換えた={changed}（期待 {rewritten}）");
+                    }
+
+                    if (rewritten && (!evaluate(Row(10)) || evaluate(Row(11))))
+                    {
+                        problems.Add(
+                            $"{name}: 書き換えた述語の答え（10 → {evaluate(Row(10))}・11 → {evaluate(Row(11))}）が C# と違う（期待 True・False）"
+                        );
+                    }
+                }
+
+                return problems;
+            }
+        );
+
+    /// <summary>
+    /// PostgreSQL の値オブジェクトの IN の null の書き換え（<c>NpgsqlValueObjectListNulls</c>）：値の式の中のラムダが宣言した引数（<c>c =&gt; c</c>）は
+    /// 行に数えないので、<c>codes.Select(c =&gt; c).ToList().Contains(x.Code)</c> を書き換え、書き換えた述語は null を含むリストで C# と同じ答えを返す。
+    /// ラムダの中で行を読む値（<c>c =&gt; x.Code</c>）は書き換えない
+    /// </summary>
+    private static ExecCheck EfCoreText_NpgsqlRowFreeRewrite() =>
+        new(
+            "npgsql-value-object-list-nulls-rewrite-values-with-own-lambda",
+            assembly =>
+            {
+                var problems = new List<string>();
+                var entity = ProbeKit.Type(assembly, "ItemEntity");
+                var rewriter = ProbeKit.Type(assembly, "NpgsqlValueObjectListNulls");
+                var codeType = entity.GetProperty("Code")!.PropertyType;
+                var x = System.Linq.Expressions.Expression.Parameter(entity, "x");
+                var code = System.Linq.Expressions.Expression.Property(x, "Code");
+                object Code(string value) => ProbeKit.CallStatic(codeType, "Create", value)!;
+                var codes = (System.Collections.IList)
+                    Activator.CreateInstance(typeof(List<>).MakeGenericType(codeType))!;
+                codes.Add(Code("a"));
+                codes.Add(null);
+                var c = System.Linq.Expressions.Expression.Parameter(codeType, "c");
+
+                System.Linq.Expressions.Expression Contains(
+                    System.Linq.Expressions.LambdaExpression selector
+                ) =>
+                    System.Linq.Expressions.Expression.Call(
+                        typeof(Enumerable),
+                        nameof(Enumerable.Contains),
+                        [codeType],
+                        EfCoreText_SelectToList(codes, codeType, selector),
+                        code
+                    );
+
+                object Row(string? value)
+                {
+                    var item = ProbeKit.Create(entity);
+                    ProbeKit.Set(item, "Code", value is null ? null : Code(value));
+                    return item;
+                }
+
+                var (ownChanged, evaluate) = EfCoreText_Rewrite(
+                    rewriter,
+                    entity,
+                    x,
+                    Contains(System.Linq.Expressions.Expression.Lambda(c, c))
+                );
+
+                if (!ownChanged)
+                {
+                    problems.Add("contains-own-lambda: 書き換えなかった（期待 書き換える）");
+                }
+                else if (!evaluate(Row("a")) || !evaluate(Row(null)) || evaluate(Row("b")))
+                {
+                    problems.Add(
+                        $"contains-own-lambda: 書き換えた述語の答え（a → {evaluate(Row("a"))}・null → {evaluate(Row(null))}・b → {evaluate(Row("b"))}）が C# と違う（期待 True・True・False）"
+                    );
+                }
+
+                var (rowChanged, _) = EfCoreText_Rewrite(
+                    rewriter,
+                    entity,
+                    x,
+                    Contains(System.Linq.Expressions.Expression.Lambda(code, c))
+                );
+
+                if (rowChanged)
+                {
+                    problems.Add("contains-lambda-reading-row: 書き換えた（期待 書き換えない）");
+                }
+
+                return problems;
+            }
+        );
 
     // ===== 外部キーの参照先の列 =====
 

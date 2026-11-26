@@ -41,7 +41,18 @@ public sealed class TranslatorParityEfCorePostgreSqlRuntimeTests(PostgreSqlConta
         ["offset-greater-or-equal-instant"] = NonUtcOffset,
         ["offset-negated-equals"] = NonUtcOffset,
         ["offset-in-mixed-offsets"] = NonUtcOffset,
+        ["int-column-sign-cast-equals-uint-beyond-int"] = SignOnlyCast,
+        ["int-column-sign-cast-greater-uint-max-int"] = SignOnlyCast,
+        ["in-uint-list-sign-cast-column"] = SignOnlyCast,
+        ["in-uint-array-sign-cast-column"] = SignOnlyCast,
+        ["bigint-column-ulong-cast-greater"] = SignOnlyCast,
+        ["int-column-ulong-cast-greater"] = SignOnlyCast,
     };
+
+    /// <summary>列の側の符号だけの変換の割り切りの理由</summary>
+    private const string SignOnlyCast =
+        "EF Core の PostgreSQL プロバイダは列の側の (uint)・(ulong) を負の値を折り返さない変換に書くので、C# が折り返して当てる行と黙って答えが割れる（例外にならない。縮める変換と違い、変換先の型の範囲に入らない行が無い）"
+        + ColumnCastFindingNote;
 
     private const string NonUtcOffset =
         "PostgreSQL の timestamptz は時差 0（UTC）の値だけを扱い、Npgsql が時差 0 でない DateTimeOffset のパラメータを ArgumentException で断る（docs の DateTimeOffset の既知の割り切り）";
@@ -83,7 +94,10 @@ public sealed class TranslatorParityEfCorePostgreSqlRuntimeTests(PostgreSqlConta
         await fixture.ExecuteAsync(Generated.Ddl, Ct);
 
         return Binding.CreateProvider(options =>
-            options.UseNpgsql(fixture.ConnectionString).IgnoreServiceProviderCacheLimit()
+            options
+                .UseNpgsql(fixture.ConnectionString)
+                .IgnoreServiceProviderCacheLimit()
+                .AddInterceptors(BindingParameterCapture.EfCoreInterceptor)
         );
     }
 }

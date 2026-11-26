@@ -3,6 +3,8 @@ using AwesomeAssertions;
 using QuickER.Dialects;
 using QuickER.Provider;
 using QuickER.Tests.Integration.Dialects.SyncPlanFuzz;
+using QuickER.Tests.Integration.GeneratedRuntime;
+using QuickER.Tests.TestSupport;
 using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.Integration;
@@ -28,6 +30,14 @@ public sealed class BranchAxisLedgerTests
                 DialectNames.All,
                 SyncPlanShapeRows.CreatesLevels,
                 SyncPlanBranchEvidence.ByName.Keys.ToHashSet(StringComparer.Ordinal)
+            ),
+            // 値の束縛の生成の表（実装先は RuntimeTarget の名前。証拠の判定は生成の表の側の TranslatorParityBindingEvidence）
+            [TranslatorParityBindingRows.TablePart] = new(
+                TranslatorParityBindingRows.Table,
+                [.. TranslatorParityBindingRows.RequiredRows.Select(row => row.Id)],
+                TranslatorParityBindingRows.Targets,
+                TranslatorParityBindingRows.CreatesLevels,
+                TranslatorParityBindingEvidence.ByName.Keys.ToHashSet(StringComparer.Ordinal)
             ),
         };
 
@@ -160,6 +170,154 @@ public sealed class BranchAxisLedgerTests
 
         var problems = SyncPlanBranchEvidence
             .NetProblems(DialectNames.Oracle, cell == "absent" ? [] : [outcome], [item], known)
+            .ToList();
+
+        if (expected is null)
+        {
+            problems.Should().BeEmpty(name);
+        }
+        else
+        {
+            problems.Should().ContainSingle(name).Which.Should().Contain(expected, name);
+        }
+    }
+
+    [Theory(
+        DisplayName = "[台帳] 値の束縛の指摘のセルの照合：未修正はセルの割れが項目の Pending に当たり、修正済みはセルで証拠が出る（自己検査）"
+    )]
+    [InlineData("unfixed-violation-received-by-pending", "unfixed", "violation", "pending", null)]
+    [InlineData(
+        "unfixed-ran-without-violations",
+        "unfixed",
+        "clean",
+        "pending",
+        "switch the status to fixed"
+    )]
+    [InlineData(
+        "unfixed-violation-without-pending-of-item",
+        "unfixed",
+        "violation",
+        "other-item",
+        "no pending known failure"
+    )]
+    [InlineData(
+        "unfixed-violation-pending-of-other-slice",
+        "unfixed",
+        "violation",
+        "other-slice",
+        "no pending known failure"
+    )]
+    [InlineData(
+        "unfixed-violation-accepted-not-pending",
+        "unfixed",
+        "violation",
+        "accepted",
+        "no pending known failure"
+    )]
+    [InlineData(
+        "unfixed-violation-pending-of-other-row",
+        "unfixed",
+        "violation",
+        "other-row",
+        "no pending known failure"
+    )]
+    [InlineData("unfixed-cell-did-not-run", "unfixed", "absent", "pending", "did not run")]
+    [InlineData("fixed-with-evidence", "fixed", "evidence", "none", null)]
+    [InlineData("fixed-without-evidence", "fixed", "clean", "none", "without the evidence")]
+    [InlineData("fixed-cell-did-not-run", "fixed", "absent", "none", "did not run")]
+    public void BindingCellProblems_FollowStatus(
+        string name,
+        string status,
+        string cell,
+        string entry,
+        string? expected
+    )
+    {
+        const string ItemId = "self-check";
+        const string Slice = "区切り x";
+        const string CellRow = "xb1-date-part-equal-tick-before-midnight";
+        var target = RuntimeTarget.AdoSqlServer;
+        var rowId = TranslatorParityBindingRows.RowIdOfRequired(CellRow)!;
+        var item = new BranchAxisItem(
+            ItemId,
+            "自己検査の項目",
+            BranchAxisLedgerEntries.ValueBinding,
+            status == "fixed" ? BranchAxisStatus.BoundFixed : BranchAxisStatus.BoundUnfixed,
+            null,
+            new BranchBinding(
+                TranslatorParityBindingRows.TablePart,
+                [new("ColumnShape", "date-part")],
+                CellRow,
+                [target.ToString()],
+                "date-part-value-bound-as-datetime2",
+                []
+            ),
+            "`GeneratedRuntime/TranslatorParityBindings`",
+            [],
+            status == "fixed" ? null : Slice
+        );
+        CapturedParameter Parameter(string providerType) =>
+            new(
+                "@p0",
+                "DateTime",
+                providerType,
+                0,
+                0,
+                0,
+                "2024-01-15T23:59:59.9999999(Unspecified)"
+            );
+        var outcome = cell switch
+        {
+            "violation" => BindingRunOutcome.Compared(
+                TranslatorParityBindingRows.Query,
+                "[]",
+                "[2]",
+                [Parameter("DateTime")]
+            ),
+            "clean" => BindingRunOutcome.Compared(
+                TranslatorParityBindingRows.Query,
+                "[]",
+                "[]",
+                [Parameter("DateTime")]
+            ),
+            _ => BindingRunOutcome.Compared(
+                TranslatorParityBindingRows.Query,
+                "[]",
+                "[]",
+                [Parameter("DateTime2")]
+            ),
+        };
+
+        KnownEntry Entry(string finding, KnownKind kind, string? fixedIn, string signature) =>
+            new(
+                finding,
+                kind,
+                fixedIn,
+                kind == KnownKind.Accepted ? "自己検査" : null,
+                TranslatorParityBindingKnownFailures.ScopeOf(target),
+                KnownMatch.ExactSignature,
+                Signature: signature
+            );
+
+        IReadOnlyList<KnownEntry> known = entry switch
+        {
+            "pending" => [Entry(ItemId, KnownKind.Pending, Slice, rowId)],
+            "other-item" => [Entry("another-item", KnownKind.Pending, Slice, rowId)],
+            "other-slice" => [Entry(ItemId, KnownKind.Pending, "区切り y", rowId)],
+            "accepted" => [Entry(ItemId, KnownKind.Accepted, null, rowId)],
+            "other-row" => [Entry(ItemId, KnownKind.Pending, Slice, rowId + "-other")],
+            _ => [],
+        };
+        var outcomes =
+            cell == "absent"
+                ? new Dictionary<string, BindingRunOutcome>(StringComparer.Ordinal)
+                : new Dictionary<string, BindingRunOutcome>(StringComparer.Ordinal)
+                {
+                    [rowId] = outcome,
+                };
+
+        var problems = TranslatorParityBindingEvidence
+            .CellProblems(target, outcomes, [item], known)
             .ToList();
 
         if (expected is null)

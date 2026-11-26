@@ -458,7 +458,9 @@ A branch that follows the inverse of the navigation before it (here `Orders` →
 A self reference followed in the same direction again, such as `Include(c => c.Children).ThenInclude(c => c.Children)`, is not affected and works on the EF Core Repository too.
 
 Supported: equality, comparison, `&&`/`||`, `Contains`/`StartsWith`/`EndsWith` (LIKE), `Contains` on a list (IN), date parts (`Year`, etc.), `string.IsNullOrEmpty` and `string.IsNullOrWhiteSpace`, and value-object comparison.
+The item of an IN search can be a date part too (`days.Contains(x.ShippedAt.Value.Date)`).
 A nullable column can be read through `.Value` (`x.ShippedAt != null && x.ShippedAt.Value.Year == 2024`).
+That includes a nullable `bool` column written as a bare condition (`x.IsShipped != null && x.IsShipped.Value`) and an ordering key (`OrderBy(x => x.IsShipped!.Value)`), where a `NULL` row sorts as SQL sorts `NULL` while C# would throw on it.
 A part of the predicate that reads no column, such as a closure variable, a constant, or a comparison between them, is evaluated before translation and becomes a constant condition.
 `&&` and `||` stop at the left operand when it settles the result, as C# does, so `filter == null || x.Name == filter` filters nothing when `filter` is null.
 Projection (Select), GroupBy, Join, and arithmetic expressions are not supported and throw at runtime; work around them with raw SQL or EF Core.
@@ -519,6 +521,13 @@ Negation flips the operator instead of wrapping the comparison in `NOT (...)`.
 A negated `Contains` is folded into the IN clause the same way, emitting the `NOT IN` forms above.
 A negated negation cancels out, so `!(!(a != b))` is translated as `a != b` with its compensation intact, and any deeper stack of negations collapses the same way.
 Negating anything other than an equality or an IN search produces `NOT (...)`.
+A substring match between two columns (`!x.Name.Contains(x.Other)`) is one of them: it becomes `NOT (... LIKE ...)`, and a row where either column is `NULL` matches neither the match nor its negation (C# throws on such a row, so guard it with `!= null`).
+
+`col.Equals(value)` with the `object` overload is false in C# when the value's runtime type differs from the column's (`x.Id.Equals(10L)` on an `int` column), so it is translated as a condition that matches no row, and its negation as one that matches every row.
+
+> **Known limitation**: the null compensation applies to the operators only.
+> `x.Amount.Equals(null)` (or `Equals` with a variable holding `null`) is bound as an ordinary parameter and matches no row, where C# matches the rows whose column is `NULL`.
+> Write `x.Amount == null` instead.
 
 > **Known limitation**: the flip only applies when the `!` sits directly on a comparison.
 > `!(a == b && c)` is not rewritten by De Morgan's laws: it becomes `NOT (...)` around individually compensated operands, and `NOT (UNKNOWN)` is still UNKNOWN, so a row that a `NULL` made UNKNOWN inside the parentheses is dropped where C# and the in-memory and EF Core backends would have kept it.
@@ -655,6 +664,8 @@ The QuickER Repository on SQL Server compares the lengths as well, so on a varia
 Against a fixed-length column, it first turns the compared value into the value the column would store, then compares the lengths as well.
 A shorter value is padded with `0x00` to `n` bytes, and a longer value whose excess is only `0x00` bytes is cut to `n` bytes (`0x01` and `0x0100000000` compared with a `binary(4)` column both match a row holding `0x01000000`).
 A value whose excess holds a byte other than `0x00` cannot be stored in the column, so it equals no row.
+A variable-length column with a declared length (`varbinary(n)`) also cuts a longer value whose excess is only `0x00` bytes to `n` bytes when it stores it, so the compared value is cut the same way (`0x0100000000` compared with a `varbinary(4)` column matches a row holding `0x01000000`).
+A shorter value is compared as it is.
 
 > **Known limitation**: the EF Core Repository on SQL Server keeps the SQL Server comparison and, on a variable-length column, treats values that differ only in trailing `0x00` bytes as equal (`x.Data == value` with `value` holding `0x01` also matches a row holding `0x0100`).
 > EF Core writes the comparison itself, and QuickER has no way to change the form of the SQL it emits.
@@ -741,18 +752,41 @@ A value a `datetime` column cannot read back (`.004`, a sub-millisecond value, o
 From compatibility level 130, SQL Server compares a `datetime` column with a `datetime2` value using the exact steps (`.0033333`), so without the move a value such as `.0031`, between a read-back value and its step, would answer differently from C#; the moved value answers as C# does at any compatibility level.
 On the EF Core Repository this covers every parameter of a query (a named query, `Query()` with hand-written LINQ, the elements of an IN list, the pattern of `Contains`) and the condition of `ExecuteDeleteAsync` (see [EF Core mode](#ef-core-mode-generateefcorerepositories)).
 On PostgreSQL, the EF Core Repository does the same for a `DateTime` with a time of day compared with a `date` column, which it sends as a `timestamp`, and, in a query, for a `TimeSpan` outside the range of a `time` column, which it sends as an `interval`.
+A date part (`x.At.Value.Date == day`) has no column type to take, so the QuickER Repository on SQL Server sends a `DateTime` compared with it as `datetime2`, the elements of an IN list included.
 
 > **Known limitation**: on the EF Core Repository, a constant written in hand-written LINQ is not a parameter.
 > EF Core writes it into the SQL, and writes a string constant compared with a non-Unicode column as non-Unicode text, so a character outside ASCII turns into `?` and the comparison matches the rows that hold `?` (`Query().Where(x => x.Code == "日本")`).
 > Pass such a value in a variable, which EF Core sends as a parameter.
 > A string literal in a mini DSL condition is generated as a variable, so a named query answers as C# does.
 > In the same way, a `DateTime` constant compared with a `datetime` or `smalldatetime` column on SQL Server is written as a literal of the column's type, so a value the column cannot hold is rounded to the column's precision before the comparison (`x.At == new DateTime(2024, 1, 1, 10, 0, 40)` against a `smalldatetime` column matches 10:01); a value the column holds compares as C# does.
-> The mini DSL has no date literal, so a named query is not affected.
+> On SQL Server and PostgreSQL, a `DateTime` constant compared with a `date` column is written as a `date` literal, so its time of day is dropped before the comparison (`x.Day < new DateTime(2024, 1, 1, 12, 0, 0)` misses the rows of January 1).
+> EF Core also writes the value of a method call that reads no column (`x.Day < Today()`) as a constant, so these notes apply to such a call as well.
+> On PostgreSQL, comparing a list or an array of `DateTime` constants with a `timestamp` column (`new[] { new DateTime(2024, 1, 1) }.Contains(x.At)`) fails with a `NotSupportedException`.
+> Put the list in a variable, which EF Core sends as a parameter.
+> The mini DSL has no date literal and passes an IN list as a parameter, so a named query is not affected.
 
 > **Known limitation**: on the EF Core Repository on SQL Server, PostgreSQL, and Oracle, comparing an integer column with a decimal column (`Query().Where(x => x.Qty > x.Price)`) can fail with an arithmetic overflow.
 > EF Core casts the integer column to the type of the decimal column (`decimal(10,2)`, say), so one row whose integer has more integral digits than that type holds makes the whole query fail.
 > The QuickER Repository and the EF Core Repository on MySQL compare the two columns without failing.
+> On the EF Core Repository, a narrowing cast written on a column (`Query().Where(x => (short)x.Id == -1)`) does not wrap around as it does in C# (SQL Server, PostgreSQL, and Oracle can fail on a row whose value lies outside the target type, and SQLite and MySQL compare the column as if there were no cast), so compare the column without the cast and widen the value side instead.
+> A cast that only changes the sign (`(uint)x.Id`, `(ulong)x.Id`) does not wrap a negative value around as C# does either, so on a column with negative values the answer differs or the query fails, depending on the provider.
+> Compare the column without the cast and convert the value side instead.
 > A mini DSL condition compares a column with a value only, so a named query does not meet this.
+
+> **Known limitation**: the EF Core Repository sends a `char` value compared with an integer column (`Query().Where(x => x.Id > letter)` with `letter` a `char`) as text instead of the number C# compares.
+> Depending on the provider and the shape of the condition, the query fails (PostgreSQL, SQL Server, Oracle, and a MySQL `ExecuteDeleteAsync`), or the answer differs without an error (SQLite in an `ExecuteUpdate` written on `QuickErDbContext`, MySQL in a query).
+> Pass the value as a number instead: `(int)letter`, or an `int` variable.
+> The QuickER Repository binds the number.
+
+> **Known limitation**: the QuickER Repository refuses a cast written on a column that can change the column's value in a way SQL cannot repeat, with a `NotSupportedException` that names the cast.
+> These are a narrowing cast (`Query().Where(x => (short)x.Id == -1)`), `(int)x.Amount` on a decimal column, a cast to `ulong` (`(ulong)x.Id`), and a cast from an unsigned type to the signed type of the same size (`(int)x.Count` on a `uint` property).
+> C# wraps the value of each row around or drops its fraction before comparing, and no SQL `CAST` does the same, so compare the column without the cast and convert the value side instead.
+> A cast to `ulong` is refused because its wrapped value does not fit a `bigint`.
+> The value side may be cast freely (`x.Id == (int)ratio`): the cast is applied as C# applies it before the value is bound.
+
+A cast on a column that only changes the sign of a signed integer of 32 bits or less to an unsigned type that holds it (`(uint)x.Id`, `(ushort)x.Small`, `(byte)x.Tiny`) is translated and answers as C# does.
+A negative value is wrapped around by adding 2^n of the target type (`CASE WHEN [Id] < 0 THEN CAST([Id] AS bigint) + 4294967296 ELSE [Id] END`), and a NULL column stays NULL.
+On SQL Server, an unsigned value compared with such a column is sent as a `bigint`.
 
 > **Known limitation**: PostgreSQL and MySQL keep a date and time to the microsecond, and their drivers drop the part of a compared value finer than that before sending it.
 > A `DateTime`, `DateTimeOffset`, or `TimeSpan` with a fraction finer than a microsecond (a tick is 100 nanoseconds) therefore compares as the value cut to the microsecond, so `x.At == value` can hold where C# says no.
@@ -863,7 +897,8 @@ The same instance can sit in two collections of the save, or be passed twice in 
 When that instance carries changes of its own (new, updated or deleted), the save is refused with an `InvalidOperationException` that names the row, since it would write the row once per path.
 In EF Core mode this is the shape a graph takes when two navigations that hold the same row are both included: EF Core resolves the row to one instance in both collections.
 Take the row out of one of the collections before you save it.
-An instance without changes reached twice goes on.
+An instance without changes reached twice goes on, unless a row below it carries changes: each path walks below the instance again and would write that row once per path, so the save is refused the same way.
+When both paths delete the instance (it sits, for example, in a collection of a deleted parent twice), the save is refused as well, since it would write the deletion twice.
 
 Every backend runs these checks; a remote client runs them before it sends the graph.
 
@@ -1320,10 +1355,17 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - On PostgreSQL, a `DateTime` with a time of day compared with a `date` column keeps its time of day.
   EF Core gives the parameter the column's type `date`, and Npgsql drops the time of day before sending it, so `x.Day < noon` misses the rows of that day and `x.Day == noon` matches them.
   `PostgreSqlQueryParameterInterceptor` sends such a value as `timestamp`, so PostgreSQL compares the date with the whole value, as C# does; a value at midnight keeps the type `date`.
-  Like the SQL Server interceptor, it changes the commands of LINQ queries and of `ExecuteDelete` / `ExecuteUpdate` only.
+  An `IN` list for a `date` column (`dates.Contains(x.Day)`) that holds such a value is sent as an array of timestamps in the same way.
+  Like the SQL Server interceptor, it changes the commands of LINQ queries and of `ExecuteDelete` / `ExecuteUpdate` only; a value an `ExecuteUpdate` writes to a `date` column is stored as its date.
   `AddGeneratedEfCoreRepositories` adds it to the DbContext options after your configuration.
   When you build `DbContextOptions` yourself, add `PostgreSqlQueryParameterInterceptor.Instance` with `AddInterceptors`.
   Connections of other providers are left untouched.
+- On PostgreSQL, a `DateTime` of `DateTimeKind.Utc` or `DateTimeKind.Local` compared with a `date` or `timestamp` column answers as C# does: C# compares two `DateTime` values by their ticks and ignores their kinds.
+  Npgsql refuses to send a `DateTime` of `DateTimeKind.Utc` as a `timestamp`, so the comparison would otherwise throw `ArgumentException`.
+  `PostgreSqlQueryParameterInterceptor` sends such a value, and each element of such an `IN` list, with the same ticks and the kind `DateTimeKind.Unspecified`.
+  For a `timestamp` column it does so only in the commands of LINQ queries and of `ExecuteDelete`, told apart by the command text as on SQL Server.
+  The values of an `UPDATE` are left as they are, because its `SET` values cannot be told apart from its `WHERE` values, so a Utc value in the `WHERE` of an `ExecuteUpdate` you write on `QuickErDbContext` is refused, as a value it writes is.
+  A `timestamp with time zone` parameter is left as it is.
 - On PostgreSQL, a `TimeSpan` outside the range of a `time` column (a negative value or one beyond 24 hours) compared in a LINQ query is sent as an `interval`.
   EF Core gives the parameter the column's type `time`, which PostgreSQL refuses for such a value.
   `PostgreSqlQueryParameterInterceptor` drops that type, also for an `IN` list holding such a value, and PostgreSQL compares the column with the interval as C# does; a value within the range keeps the type `time`.
@@ -1342,7 +1384,8 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   Without it, the provider sends a `DateTime` as `timestamp with time zone` and refuses a value of `DateTimeKind.Unspecified`, sends a `DateTimeOffset` the same way and refuses an offset other than UTC, and sends a string as `text`, which PostgreSQL refuses for a JSON or XML column.
   It sends a `TimeSpan` as an `interval`, and PostgreSQL stores a value outside the range of a `time` column without its days and without an error (`1.01:00:00` as `01:00:00`, `-01:00:00` as `23:00:00`).
   With the column type, PostgreSQL refuses such a value.
-  A `DateTime` of `DateTimeKind.Utc` cannot be written to a `timestamp` column, and a `timestamptz` column takes a UTC offset only (both are Npgsql's rules).
+  A `DateTime` of `DateTimeKind.Utc` cannot be written to a `timestamp` column (with `SaveChanges` or the `SET` of an `ExecuteUpdate`), and a `timestamptz` column takes a UTC offset only (both are Npgsql's rules).
+  A compared value passed in a variable answers as C# does whatever its kind (see the item on `DateTimeKind.Utc` above), but a Utc `DateTime` written as a constant and compared with a `timestamp` column is refused: EF Core writes a constant, and the value of a call that does not depend on the row, into the SQL as a literal, which Npgsql cannot build from a Utc value, so pass the value in a variable.
   No other column gets a column type apart from `money` and, on SQL Server, `datetime` and `smalldatetime` (the previous items), so a diagram of types every dialect maps to the same C# type generates the same code whatever its dialect.
 - The MySQL mappings (`timestamp` as `DateTime`, `char(36)` as `Guid`, see [Database types and C# types](#database-types-and-c-types)) were checked with MySql.EntityFrameworkCore, whose driver is MySql.Data.
   Pomelo was not checked.
@@ -1370,6 +1413,7 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
   A connection passed with `contextOwnsConnection: true` is disposed by EF Core when the second context switches connections, so do not pool or reuse such a context.
 
 > **Known limitation**: on SQL Server, the `WHERE` of an `ExecuteUpdate` you write on `QuickErDbContext` yourself sends a `datetime` or `smalldatetime` value the column cannot hold with the column's type, so it is rounded before the comparison.
+> The same holds for a value compared with the date part of such a column (`x.At.Value.Date == value`): EF Core types the value like the column, so a value the column cannot hold is rounded or refused.
 > `SqlServerQueryParameterInterceptor` leaves the parameters of an `UPDATE` command as they are, because it cannot tell its `SET` values from its `WHERE` values, and retyping a `SET` value would change what is stored.
 > The generated repositories do not expose `ExecuteUpdate`, so generated code is not affected.
 

@@ -52,6 +52,14 @@ internal static class RowBaselineTables
                 "SyncPlanShapeRows.RequiredRows",
                 SyncPlanShapeRows.RequiredRows
             ),
+            BaselineTable.LevelsOf(
+                "TranslatorParityBindingRows.Levels",
+                TranslatorParityBindingRows.Table
+            ),
+            BaselineTable.RequiredRowsOf(
+                "TranslatorParityBindingRows.RequiredRows",
+                TranslatorParityBindingRows.RequiredRows
+            ),
         ];
 
     /// <summary>

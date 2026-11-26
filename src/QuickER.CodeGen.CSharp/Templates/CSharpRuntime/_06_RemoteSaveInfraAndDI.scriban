@@ -2941,6 +2941,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             property,
             static p => p.GetCustomAttribute<SqlColumnTypeAttribute>()
         );
+
         if (attribute is null)
         {
             command.Parameters.AddWithValue(name, rawValue ?? DBNull.Value);
@@ -3026,10 +3027,15 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             static p => p.GetCustomAttribute<SqlColumnTypeAttribute>()
         );
 
-        // A binary value compared with a fixed-length column (binary(n)) is compared as that column stores it (see AsStoredInFixedBinary)
-        if (variableLength && attribute is { DbType: SqlDbType.Binary, Size: > 0 } && rawValue is byte[] bytes)
+        // A binary value compared with a binary column of a declared length (binary(n), varbinary(n)) is compared as that column
+        // stores it (see AsStoredInBinaryColumn)
+        if (
+            variableLength
+            && attribute is { DbType: SqlDbType.Binary or SqlDbType.VarBinary, Size: > 0 }
+            && rawValue is byte[] bytes
+        )
         {
-            rawValue = AsStoredInFixedBinary(bytes, attribute.Size);
+            rawValue = AsStoredInBinaryColumn(bytes, attribute.Size, attribute.DbType == SqlDbType.Binary);
         }
 
         if (attribute is null || rawValue is null || QueryValueFits(attribute, rawValue))
@@ -3053,14 +3059,10 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             return;
         }
 
-        // SqlClient maps no unsigned integer or sbyte, so such a value goes as bigint, or as decimal beyond bigint's range
+        // SqlClient maps no unsigned integer or sbyte (see UnsignedAsSigned)
         if (rawValue is sbyte or ushort or uint or ulong)
         {
-            var whole = Convert.ToDecimal(rawValue, CultureInfo.InvariantCulture);
-            command.Parameters.AddWithValue(
-                name,
-                whole <= long.MaxValue ? (object)(long)whole : whole
-            );
+            command.Parameters.AddWithValue(name, UnsignedAsSigned(rawValue));
             return;
         }
 
@@ -3068,18 +3070,18 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
     }
 
     /// <summary>
-    /// A binary value as a fixed-length binary(n) column stores it: a shorter value padded with 0x00 to n bytes, and a longer
-    /// value cut to n bytes when its excess is only 0x00 bytes.
+    /// A binary value as a binary column of declared length n stores it: a longer value cut to n bytes when its excess is only
+    /// 0x00 bytes, and, for a fixed-length binary(n) column, a shorter value padded with 0x00 to n bytes.
     /// </summary>
     /// <remarks>
     /// Only the WHERE values of the translator's binary comparisons come here: they are bound in their variable-length form and
     /// their lengths are compared too, so a value is first turned into the form the column holds, and finds the row that writing
     /// the same value would have stored. A longer value with any other excess cannot be stored and is left as it is: its length
-    /// differs from every stored value, so it equals no row.
+    /// differs from every stored value, so it equals no row. A varbinary(n) column keeps a shorter value as it is.
     /// </remarks>
-    private static byte[] AsStoredInFixedBinary(byte[] bytes, int size)
+    private static byte[] AsStoredInBinaryColumn(byte[] bytes, int size, bool fixedLength)
     {
-        if (bytes.Length < size)
+        if (fixedLength && bytes.Length < size)
         {
             var padded = new byte[size];
             bytes.CopyTo(padded, 0);
@@ -3280,7 +3282,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
 
     /// <summary>
     /// Binds a query WHERE-clause parameter. When the column name is known and its column property is found, the
-    /// parameter is explicitly constructed with the column type; otherwise falls back to AddWithValue.
+    /// parameter is explicitly constructed with the column type; otherwise falls back to AddWithValue{{ if repository_dialect == "sqlserver" }} (a DateTime as datetime2, an unsigned value as bigint){{ end }}.
     /// </summary>
     /// <param name="command">The command to add the parameter to</param>
     /// <param name="name">The parameter name (with the @ prefix)</param>
@@ -3315,9 +3317,42 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             AddQueryColumnParameter(command, name, property, rawValue, variableLength);
             return;
         }
+{{~ if repository_dialect == "sqlserver" ~}}
+
+        // A value compared with something other than a column (a date part such as CAST([at] AS date)) has no column type to
+        // take. A DateTime goes as datetime2: AddWithValue would pick datetime, which rounds the value to 1/300 of a second and
+        // cannot hold a date before 1753, so the comparison would answer differently from C#
+        if (rawValue is DateTime dateTime)
+        {
+            command.Parameters.Add(
+                new {{ sql_parameter_type }}(name, SqlDbType.DateTime2) { Value = dateTime }
+            );
+            return;
+        }
+
+        // An unsigned value (compared with a sign cast written on a column, such as (uint)x.Id) cannot be sent as it is either
+        if (rawValue is sbyte or ushort or uint or ulong)
+        {
+            command.Parameters.AddWithValue(name, UnsignedAsSigned(rawValue));
+            return;
+        }
+{{~ end ~}}
 
         command.Parameters.AddWithValue(name, rawValue ?? DBNull.Value);
     }
+{{~ if repository_dialect == "sqlserver" ~}}
+
+    /// <summary>
+    /// An unsigned integer or an sbyte as a value SqlClient can send: a bigint, or a decimal beyond bigint's range. SqlClient
+    /// maps none of these types and refuses them with an ArgumentException.
+    /// </summary>
+    private static object UnsignedAsSigned(object value)
+    {
+        var whole = Convert.ToDecimal(value, CultureInfo.InvariantCulture);
+
+        return whole <= long.MaxValue ? (object)(long)whole : whole;
+    }
+{{~ end ~}}
 
 {{~ if repository_dialect == "sqlserver" ~}}
     /// <summary>Creates an IDataReader for SqlBulkCopy that reads an entity collection one row at a time (store-generated columns are excluded from insertion).</summary>
@@ -3450,7 +3485,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
             return true;
         }
 
-        /// <summary>Whether every byte from <paramref name="length"/> on is 0x00 (shared with the query binding's AsStoredInFixedBinary).</summary>
+        /// <summary>Whether every byte from <paramref name="length"/> on is 0x00 (shared with the query binding's AsStoredInBinaryColumn).</summary>
         internal static bool IsPaddingBeyond(byte[] bytes, int length)
         {
             for (var index = length; index < bytes.Length; index++)
@@ -3510,6 +3545,7 @@ public abstract class HttpRemoteRepositoryCore<TEntity, TKey> : IRemoteRepositor
         public int GetValues(object[] values)
         {
             var count = Math.Min(values.Length, FieldCount);
+
             for (var i = 0; i < count; i++)
             {
                 values[i] = GetValue(i);

@@ -26,8 +26,12 @@ public sealed class TranslatorParityAdoSqlServerRuntimeTests(SqlServerContainerF
     : TranslatorParityRuntimeTestsBase
 {
     /// <inheritdoc />
-    protected override IReadOnlyDictionary<string, int>? FixedBinaryLengths =>
-        SqlServerFixedBinaryLengths;
+    protected override IReadOnlyDictionary<string, BinaryColumnLength>? BinaryColumnLengths =>
+        SqlServerBinaryColumnLengths;
+
+    /// <inheritdoc />
+    protected override IReadOnlyDictionary<string, string> KnownRefusals =>
+        QuickErUlongColumnCastRefusals;
 
     protected override async Task<ServiceProvider> CreateProviderAsync()
     {

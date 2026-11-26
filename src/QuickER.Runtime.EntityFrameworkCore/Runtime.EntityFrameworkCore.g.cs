@@ -599,7 +599,13 @@ public static class EntityGraphSaver
 /// <para>
 /// Value object columns are projected onto string columns by a converter, but by default EF Core cannot translate these instance methods.
 /// It generates <c>ISqlExpressionFactory.Like</c> with the same semantics as the QuickER SQL Server implementation
-/// (ordinal substring match → LIKE, escaping of the wildcards <c>\ % _ [</c>, <c>ESCAPE '\'</c>, and treating a null argument as an empty string).
+/// (ordinal substring match → LIKE, escaping of the wildcards <c>\ % _ [</c>, <c>ESCAPE '\'</c>).
+/// </para>
+/// <para>
+/// A null argument is not given a meaning here: the generated repository refuses a null pattern with
+/// <see cref="ArgumentNullException"/> before the query is translated, as every backend does. A null that reaches the
+/// translator anyway (a context queried directly) makes the pattern NULL, which matches no row; where concatenating NULL
+/// yields the rest of the string (Oracle), the pattern is also tested for NULL so that it keeps matching no row.
 /// </para>
 /// <para>
 /// The argument accepts both the string overload and the TSelf (value object) overload. Constants are escaped on the client side,
@@ -1430,9 +1436,10 @@ public sealed class SqlServerQueryParameterInterceptor : DbCommandInterceptor
 
     /// <summary>
     /// Whether a command's text, after its leading blank and comment lines (<c>TagWith</c> writes its tags as <c>--</c> lines),
-    /// starts with DELETE: EF Core reports an <c>ExecuteDelete</c> command with the same source as an <c>ExecuteUpdate</c> one.
+    /// starts with DELETE: EF Core reports an <c>ExecuteDelete</c> command with the same source as an <c>ExecuteUpdate</c> one
+    /// (<see cref="PostgreSqlQueryParameterInterceptor"/> tells them apart the same way).
     /// </summary>
-    private static bool IsDeleteCommand(string commandText)
+    internal static bool IsDeleteCommand(string commandText)
     {
         foreach (var line in commandText.AsSpan().EnumerateLines())
         {
@@ -1569,8 +1576,19 @@ public sealed class SqlServerQueryParameterInterceptor : DbCommandInterceptor
 /// </para>
 /// <para>
 /// Before a query runs, a <c>date</c> parameter whose <c>DateTime</c> value has a time of day is retyped as a timestamp without
-/// time zone; PostgreSQL then compares the column as a timestamp. A value without a time of day keeps the type EF Core gave it.
-/// The rule is the one the QuickER Repository for SQL Server applies to a value compared with a <c>date</c> column.
+/// time zone; PostgreSQL then compares the column as a timestamp. A list parameter typed <c>date[]</c> (<c>IN</c>) holding such a
+/// value loses the type EF Core gave it and is sent as an array of timestamps. A value without a time of day keeps the type EF
+/// Core gave it. The rule is the one the QuickER Repository for SQL Server applies to a value compared with a <c>date</c> column.
+/// </para>
+/// <para>
+/// Npgsql refuses to send a <c>DateTime</c> of <see cref="DateTimeKind.Utc"/> as a timestamp without time zone, while C# compares
+/// two <c>DateTime</c> values by their ticks whatever their kinds. A value sent as such a timestamp, whether retyped from
+/// <c>date</c> or typed <c>timestamp</c> by EF Core (a single value or the elements of a list), is therefore sent with its kind
+/// set to <see cref="DateTimeKind.Unspecified"/> and the same ticks, so that it compares as C# compares it. A value typed
+/// <c>timestamp</c> by EF Core is changed only in the commands of LINQ queries and of <c>ExecuteDelete</c>, told apart from an
+/// <c>ExecuteUpdate</c> by its text as <see cref="SqlServerQueryParameterInterceptor"/> does: the values of an <c>UPDATE</c>
+/// cannot be told apart from the values it writes, and a <see cref="DateTimeKind.Utc"/> value written to a <c>timestamp</c>
+/// column keeps Npgsql's refusal. A <c>timestamp with time zone</c> parameter is left as it is.
 /// </para>
 /// <para>
 /// A <c>time</c> column holds 00:00:00 to 24:00:00, and PostgreSQL refuses a negative value or one beyond 24 hours typed as
@@ -1579,8 +1597,9 @@ public sealed class SqlServerQueryParameterInterceptor : DbCommandInterceptor
 /// (<c>x.Clock &lt; oneDayAndAnHour</c> matches every row). A value within the range keeps the <c>time</c> type.
 /// </para>
 /// <para>
-/// The date rule changes the commands of LINQ queries and of <c>ExecuteDelete</c> / <c>ExecuteUpdate</c>; the time rule changes
-/// only the commands of LINQ queries. EF Core reports an <c>ExecuteDelete</c> command as <c>ExecuteUpdate</c>, and a value
+/// The date rule changes the commands of LINQ queries and of <c>ExecuteDelete</c> / <c>ExecuteUpdate</c> (a value written to a
+/// <c>date</c> column as a timestamp is stored as its date); the time rule changes only the commands of LINQ queries. EF Core
+/// reports an <c>ExecuteDelete</c> command as <c>ExecuteUpdate</c>, and a value
 /// written to a <c>time</c> column as an interval would be stored without its days, so the condition of <c>ExecuteDelete</c> /
 /// <c>ExecuteUpdate</c> keeps the <c>time</c> type and PostgreSQL refuses a value outside the range. The commands of
 /// <c>SaveChanges</c> are left as they are, so a value written to a <c>date</c> column is still stored as the date, and a value
@@ -1670,7 +1689,8 @@ public sealed class PostgreSqlQueryParameterInterceptor : DbCommandInterceptor
     }
 
     /// <summary>
-    /// Retypes, on an Npgsql connection, every <c>date</c> parameter of a query command whose value has a time of day, and every
+    /// Retypes, on an Npgsql connection, every <c>date</c> parameter (or <c>date[]</c> list) of a query command whose value has a
+    /// time of day, takes the kind off the <c>DateTime</c> values sent as a timestamp without time zone, and retypes every
     /// <c>time</c> parameter (or list of them) of a LINQ query whose value is outside the range of a <c>time</c> column.
     /// </summary>
     private static void Retype(DbCommand command, CommandEventData eventData)
@@ -1688,6 +1708,10 @@ public sealed class PostgreSqlQueryParameterInterceptor : DbCommandInterceptor
         // time column (a value written as an interval loses its days without an error)
         var query = eventData.CommandSource == CommandSource.LinqQuery;
 
+        // A timestamp value is known to be compared, not written, only in a LINQ query and a DELETE (an UPDATE's SET values cannot
+        // be told apart from its WHERE values, and a Utc value written to a timestamp column keeps Npgsql's refusal)
+        var compares = query || SqlServerQueryParameterInterceptor.IsDeleteCommand(command.CommandText);
+
         foreach (DbParameter parameter in command.Parameters)
         {
             if (
@@ -1699,6 +1723,36 @@ public sealed class PostgreSqlQueryParameterInterceptor : DbCommandInterceptor
                 // EF Core names the provider type on the parameter (date), which wins over DbType: reset it first
                 parameter.ResetDbType();
                 parameter.DbType = System.Data.DbType.DateTime2;
+                parameter.Value = WithoutKind(dateTime);
+            }
+            else if (
+                DataTypeNameOf(parameter) == DateArrayTypeName
+                && DateTimesOf(parameter.Value) is { } dates
+                && dates.Any(date => date is { } value && value.TimeOfDay != TimeSpan.Zero)
+            )
+            {
+                // Without a type of its own, Npgsql sends DateTime values of an unspecified kind as an array of timestamps, which
+                // PostgreSQL compares with the date column as a timestamp
+                parameter.ResetDbType();
+                parameter.Value = WithoutKinds(dates);
+            }
+            else if (
+                compares
+                && parameter.DbType == System.Data.DbType.DateTime2
+                && parameter.Value is DateTime moment
+                && moment.Kind != DateTimeKind.Unspecified
+            )
+            {
+                parameter.Value = WithoutKind(moment);
+            }
+            else if (
+                compares
+                && DataTypeNameOf(parameter) == TimestampArrayTypeName
+                && DateTimesOf(parameter.Value) is { } moments
+                && moments.Any(element => element is { Kind: not DateTimeKind.Unspecified })
+            )
+            {
+                parameter.Value = WithoutKinds(moments);
             }
             else if (query && IsTimeOutsideRange(parameter))
             {
@@ -1724,6 +1778,65 @@ public sealed class PostgreSqlQueryParameterInterceptor : DbCommandInterceptor
 
     /// <summary>Whether the value fits a <c>time</c> column (00:00:00 to 24:00:00).</summary>
     private static bool FitsTime(TimeSpan value) => value >= TimeSpan.Zero && value <= TimeSpan.FromDays(1);
+
+    /// <summary>The data type name Npgsql reports for a list parameter compared with a <c>date</c> column.</summary>
+    private const string DateArrayTypeName = "date[]";
+
+    /// <summary>The data type name Npgsql reports for a list parameter compared with a <c>timestamp</c> column.</summary>
+    private const string TimestampArrayTypeName = "timestamp without time zone[]";
+
+    /// <summary>The <c>DataTypeName</c> property of each parameter type (null for a type without one), looked up once per type.</summary>
+    private static readonly ConcurrentDictionary<Type, PropertyInfo?> _dataTypeNameProperties = new();
+
+    /// <summary>
+    /// The PostgreSQL data type name of the parameter (<c>date[]</c>, <c>timestamp without time zone[]</c>, ...; null for a
+    /// parameter type without the property or a parameter without a type), read by name since Npgsql is not referenced. A list
+    /// parameter's <c>DbType</c> does not tell its element type.
+    /// </summary>
+    private static string? DataTypeNameOf(DbParameter parameter) =>
+        _dataTypeNameProperties
+            .GetOrAdd(parameter.GetType(), static type => type.GetProperty("DataTypeName"))
+            ?.GetValue(parameter) as string;
+
+    /// <summary>The elements of a list value whose elements are all <c>DateTime</c> or null, or null for any other value.</summary>
+    private static List<DateTime?>? DateTimesOf(object? value)
+    {
+        if (value is not System.Collections.IEnumerable values || value is string or byte[])
+        {
+            return null;
+        }
+
+        var dates = new List<DateTime?>();
+
+        foreach (var element in values)
+        {
+            switch (element)
+            {
+                case null:
+                    dates.Add(null);
+                    break;
+                case DateTime date:
+                    dates.Add(date);
+                    break;
+                default:
+                    return null;
+            }
+        }
+
+        return dates;
+    }
+
+    /// <summary>The same ticks with the kind <see cref="DateTimeKind.Unspecified"/> (C# compares DateTime values by their ticks).</summary>
+    private static DateTime WithoutKind(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Unspecified);
+
+    /// <summary>
+    /// The elements of a list with their kinds taken off, as an array of <c>DateTime?</c> when the list holds a null, and of
+    /// <c>DateTime</c> otherwise.
+    /// </summary>
+    private static Array WithoutKinds(List<DateTime?> dates) =>
+        dates.Contains(null)
+            ? dates.Select(date => date is { } value ? WithoutKind(value) : (DateTime?)null).ToArray()
+            : dates.Select(date => WithoutKind(date!.Value)).ToArray();
 
     /// <summary>Whether the connection is an Npgsql connection (or derives from one).</summary>
     private static bool IsNpgsqlConnection(DbConnection? connection)
@@ -2096,8 +2209,13 @@ internal static class SqliteIntegralDecimalEquality
                 && PredicateExpressionParts.IsRowFree(values)
             )
             {
+                // The collection may be a value type (ImmutableArray<decimal?>), which Expression.Call does not box into the
+                // IEnumerable parameter itself, so it goes through an explicit conversion
                 return Expression.Call(
-                    Expression.Call(KeysOfMethod, values),
+                    Expression.Call(
+                        KeysOfMethod,
+                        Expression.Convert(values, typeof(System.Collections.IEnumerable))
+                    ),
                     ListContainsMethod,
                     Expression.Convert(integer, typeof(long?))
                 );
@@ -2111,7 +2229,10 @@ internal static class SqliteIntegralDecimalEquality
 /// <summary>The parts of a predicate's expression tree the EF Core rewrites read (<see cref="SqliteIntegralDecimalEquality"/>, <see cref="NpgsqlValueObjectListNulls"/>).</summary>
 internal static class PredicateExpressionParts
 {
-    /// <summary>Whether the expression reads no lambda parameter (so EF Core evaluates it on the client).</summary>
+    /// <summary>
+    /// Whether the expression reads no parameter of a lambda around it, the row (so EF Core evaluates it on the client). The
+    /// parameters a lambda inside the expression declares (<c>prices.Select(p =&gt; p).ToList()</c>) do not count.
+    /// </summary>
     internal static bool IsRowFree(Expression expression)
     {
         var finder = new ParameterFinder();
@@ -2151,13 +2272,30 @@ internal static class PredicateExpressionParts
         return (values, node.Arguments[1]);
     }
 
+    /// <summary>Finds a parameter the scanned expression reads without declaring it in a lambda of its own.</summary>
     private sealed class ParameterFinder : ExpressionVisitor
     {
+        /// <summary>The parameters of the lambdas inside the expression that enclose the node being visited.</summary>
+        private readonly List<ParameterExpression> _declared = [];
+
         public bool Found { get; private set; }
+
+        protected override Expression VisitLambda<T>(Expression<T> node)
+        {
+            _declared.AddRange(node.Parameters);
+            Visit(node.Body);
+            _declared.RemoveRange(_declared.Count - node.Parameters.Count, node.Parameters.Count);
+
+            return node;
+        }
 
         protected override Expression VisitParameter(ParameterExpression node)
         {
-            Found = true;
+            if (!_declared.Contains(node))
+            {
+                Found = true;
+            }
+
             return node;
         }
     }
@@ -2864,6 +3002,19 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
 
         /// <summary>The operation actually performed (updated from Update to Insert when <c>insertWhenUpdateMissing</c> switches it).</summary>
         public SaveOperation Operation { get; set; } = operation;
+
+        /// <summary>
+        /// Registers a recorded insert with EF Core as Added. An insert is recorded without being registered, and is registered
+        /// once its Before hook has run (or right away when no Before hook can run), so that the hook can still assign the key;
+        /// an insert the hook skips is never registered. The other operations are registered when they are recorded.
+        /// </summary>
+        public void RegisterInsert()
+        {
+            if (Operation == SaveOperation.Insert && Entry is { State: EntityState.Detached } entry)
+            {
+                entry.State = EntityState.Added;
+            }
+        }
     }
 
     /// <summary>
@@ -3728,11 +3879,29 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         }
     }
 
-    /// <summary>Compares a stored value with an entity's value (a byte array by its content).</summary>
-    private static bool StoredValueEquals(object? stored, object? value) =>
-        stored is byte[] || value is byte[]
+    /// <summary>
+    /// Compares a stored value with an entity's value as the column holds it: a byte array by its content, and a
+    /// <see cref="DateTimeOffset"/> (also inside a value object) by its instant and its offset.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="DateTimeOffset.Equals(DateTimeOffset)"/> compares the instants only, so a value that changes nothing but
+    /// the offset would count as unchanged and never be written, while the column stores the offset and the QuickER
+    /// repositories write it.
+    /// </remarks>
+    private static bool StoredValueEquals(object? stored, object? value)
+    {
+        var storedRaw = SqlParameterValue.Unwrap(stored);
+        var valueRaw = SqlParameterValue.Unwrap(value);
+
+        if (storedRaw is DateTimeOffset storedOffset && valueRaw is DateTimeOffset valueOffset)
+        {
+            return storedOffset.EqualsExact(valueOffset);
+        }
+
+        return stored is byte[] || value is byte[]
             ? System.Collections.StructuralComparisons.StructuralEqualityComparer.Equals(stored, value)
             : Equals(stored, value);
+    }
 
     /// <summary>How many times one entry is attempted while its statement keeps matching no row although the stored values were adopted.</summary>
     private const int MaxConcurrencyAttempts = 10;
@@ -4256,10 +4425,16 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     ///     context owns when another one is set, so a connection passed with <c>contextOwnsConnection: true</c> cannot be
     ///     given back usable: such a context is disposed with this save, as it would be anyway, but it must not be reused
     ///     (pooled) afterwards.</item>
-    ///   <item>A context configured without either (the factory attached a connection at run time with
-    ///     <c>SetDbConnection</c>) gets that connection back as not owned. Whether the context owned it cannot be read
-    ///     through a public API, so the save leans towards never disposing the application's connection: a connection
-    ///     attached with <c>contextOwnsConnection: true</c> is then left for the code that attached it to dispose.</item>
+    ///   <item>A context configured without either holds a connection it got at run time: one the factory attached with
+    ///     <c>SetDbConnection</c>, or one it created from a connection string set with <c>SetConnectionString</c> or from
+    ///     the provider's own options (a data source). Whether the context owns it cannot be read through a public API, so
+    ///     it is read from what EF Core does when the shared connection is set: EF Core disposes a connection the context
+    ///     owns (seen through <see cref="System.ComponentModel.Component.Disposed"/>). A connection that survives is the
+    ///     application's, and goes back as not owned, so the context never disposes it. A disposed one is replaced the way
+    ///     the context got it: the context gets <c>SetDbConnection(null)</c> and the connection string it held before the
+    ///     switch, read before its connection was created (no connection string when it creates its connection from the
+    ///     provider's options), and creates a new connection when it is next used. Giving the disposed connection back would
+    ///     leave a pooled context with a connection that has lost its connection string.</item>
     /// </list>
     /// <para>
     /// When the factory hands both contexts the same connection, the second context is left as it is.
@@ -4271,9 +4446,21 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         private readonly bool _ownsConnection;
         private readonly string? _connectionString;
 
+        /// <summary>Whether the connection the context got at run time follows EF Core's ownership (see the remarks).</summary>
+        private readonly bool _ownershipObserved;
+
+        /// <summary>The connection string the context held before its run-time connection was created (null when it had none).</summary>
+        private readonly string? _runtimeConnectionString;
+
+        /// <summary>Whether EF Core disposed the run-time connection when the shared one was set (the context owned it).</summary>
+        private bool _ownDisposed;
+
         public HeldBackContext(TContext context, System.Data.Common.DbConnection shared)
         {
             Context = context;
+
+            // Read before the connection is created: once it exists, this falls back to the connection's own string
+            var runtimeConnectionString = context.Database.GetConnectionString();
             var own = context.Database.GetDbConnection();
 
             if (ReferenceEquals(own, shared))
@@ -4288,14 +4475,23 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
             {
                 _connectionString = connectionString;
             }
+            else if (relational.Connection is not null)
+            {
+                _own = own;
+                _ownsConnection = relational.IsConnectionOwned;
+            }
             else
             {
                 _own = own;
-                _ownsConnection = relational.Connection is not null && relational.IsConnectionOwned;
+                _ownershipObserved = true;
+                _runtimeConnectionString = runtimeConnectionString;
+                own.Disposed += OnOwnDisposed;
             }
 
             context.Database.SetDbConnection(shared, contextOwnsConnection: false);
         }
+
+        private void OnOwnDisposed(object? sender, EventArgs e) => _ownDisposed = true;
 
         /// <summary>The context that tracks the held-back rows.</summary>
         public TContext Context { get; }
@@ -4304,10 +4500,25 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         {
             Context.Database.UseTransaction(null);
 
+            if (_ownershipObserved)
+            {
+                _own!.Disposed -= OnOwnDisposed;
+            }
+
             if (_connectionString is not null)
             {
                 Context.Database.SetDbConnection(null, contextOwnsConnection: true);
                 Context.Database.SetConnectionString(_connectionString);
+            }
+            else if (_ownDisposed)
+            {
+                // The context owned its run-time connection and EF Core disposed it: it creates a new one when next used
+                Context.Database.SetDbConnection(null, contextOwnsConnection: true);
+
+                if (_runtimeConnectionString is not null)
+                {
+                    Context.Database.SetConnectionString(_runtimeConnectionString);
+                }
             }
             else if (_own is not null)
             {
@@ -4392,8 +4603,13 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
 
         if (!hasHooks && !readsStoredForeignKeys && !writesOwnColumns && heldBack is null)
         {
-            // No Before hook can assign a parent's key, so the unset foreign keys are filled at once
+            // No Before hook can assign a parent's key, so the unset foreign keys are filled at once and the inserts registered
             consistency.FillAll();
+
+            foreach (var op in tracked)
+            {
+                op.RegisterInsert();
+            }
 
             // Pre-existing path: SaveChanges without an explicit transaction (executed internally as a single transaction).
             var rowsWithoutHooks = await SaveTrackedChangesAsync(
@@ -4425,6 +4641,8 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         // stay on the entity, as they do in the QuickER repositories: demoting a Modified entry resets its modified values to
         // the originals, and the change detection of SaveChanges would write a skipped delete or insert as an UPDATE of the
         // values the hook wrote. The entry is not detached, which would take a skipped child out of its parent's collection.
+        // An insert is registered only after its Before hook (so the hook can assign its key), and one the hook skips is never
+        // registered.
         var survivors = new List<TrackedOperation>(tracked.Count);
 
         foreach (var op in tracked)
@@ -4440,11 +4658,12 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
                 || await hooks.InvokeBeforeAsync(op.Entity, op.Operation, cancellationToken).ConfigureAwait(false)
             )
             {
+                op.RegisterInsert();
                 survivors.Add(op);
             }
             else
             {
-                if (op.Entry is not null)
+                if (op.Entry is { State: not EntityState.Detached })
                 {
                     op.Entry.OriginalValues.SetValues(op.Entry.CurrentValues);
                     op.Entry.State = EntityState.Unchanged;
@@ -4653,7 +4872,8 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
     /// <summary>
     /// Registers one entity of the cascade closure with the DbContext via RowState → EntityState conversion, records it as a
     /// save target (when not Unchanged) into <paramref name="tracked"/>, and walks on to its children (pre-save processing for
-    /// the disconnected pattern; called once per root).
+    /// the disconnected pattern; called once per root). An Added entity is recorded here and registered after its Before hook
+    /// (<see cref="TrackedOperation.RegisterInsert"/>).
     /// </summary>
     /// <remarks>
     /// <para>
@@ -4706,8 +4926,18 @@ public abstract class EfCoreRepositoryCore<TEntity, TKey, TContext>(
         if (!consistency.IsUntracked(entity))
         {
             var entry = context.Entry(entity);
-            entry.State = ToEntityState(entity.RowState);
-            RecordOperation(tracked, entity, entry);
+
+            if (entity.IsAdded)
+            {
+                // Recorded now and registered after its Before hook (TrackedOperation.RegisterInsert), so that the hook can still
+                // assign its key: two new rows whose keys are unset would otherwise collide in the change tracker
+                tracked.Add(new TrackedOperation(entity, entry, SaveOperation.Insert));
+            }
+            else
+            {
+                entry.State = ToEntityState(entity.RowState);
+                RecordOperation(tracked, entity, entry);
+            }
         }
 
         if (!cascadeSave)

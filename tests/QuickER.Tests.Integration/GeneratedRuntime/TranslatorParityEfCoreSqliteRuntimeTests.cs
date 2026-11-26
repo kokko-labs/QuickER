@@ -49,7 +49,22 @@ public sealed class TranslatorParityEfCoreSqliteRuntimeTests
         ["offset-not-equals-same-instant-other-offset"] = OffsetText,
         ["offset-negated-equals"] = OffsetText,
         ["offset-in-mixed-offsets"] = OffsetText,
+        ["int-column-sign-cast-equals-uint-beyond-int"] = SignOnlyCast,
+        ["int-column-sign-cast-greater-uint-max-int"] = SignOnlyCast,
+        ["in-uint-list-sign-cast-column"] = SignOnlyCast,
+        ["in-uint-array-sign-cast-column"] = SignOnlyCast,
+        ["bigint-column-ulong-cast-greater"] = UlongOrdering,
+        ["int-column-ulong-cast-greater"] = UlongOrdering,
     };
+
+    /// <summary>列の側の符号だけの変換の割り切りの理由（縮める変換と同じ形）</summary>
+    private const string SignOnlyCast =
+        "EF Core の SQLite プロバイダは列の側の (uint) などを値を変えない変換に書き、負の値を折り返さないので、C# が折り返して当てる行と黙って答えが割れる（例外にならない）"
+        + ColumnCastFindingNote;
+
+    /// <summary>UInt64 の大小の比較の割り切りの理由</summary>
+    private const string UlongOrdering =
+        "EF Core の SQLite プロバイダは UInt64 の大小の比較を翻訳できず、InvalidOperationException で断る（プロバイダの文書の Query limitations：SQLite が持たない型の比較と並び替えはクライアントの評価が要る）";
 
     /// <summary>DateTimeOffset の列の大小の比較の割り切りの理由</summary>
     private const string OffsetOrdering =
@@ -77,6 +92,7 @@ public sealed class TranslatorParityEfCoreSqliteRuntimeTests
                 options
                     .UseSqlite(_db.ReadWriteCreateConnectionString)
                     .IgnoreServiceProviderCacheLimit()
+                    .AddInterceptors(BindingParameterCapture.EfCoreInterceptor)
             )
             .BuildServiceProvider();
     }

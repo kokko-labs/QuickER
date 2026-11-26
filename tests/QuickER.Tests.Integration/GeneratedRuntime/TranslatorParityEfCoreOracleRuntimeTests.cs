@@ -32,7 +32,18 @@ public sealed class TranslatorParityEfCoreOracleRuntimeTests(OracleContainerFixt
     {
         ["int-column-greater-decimal-column"] = ColumnCast,
         ["int-column-equals-decimal-column"] = ColumnCast,
+        ["int-column-sign-cast-equals-uint-beyond-int"] = SignOnlyCast,
+        ["int-column-sign-cast-greater-uint-max-int"] = SignOnlyCast,
+        ["in-uint-list-sign-cast-column"] = SignOnlyCast,
+        ["in-uint-array-sign-cast-column"] = SignOnlyCast,
+        ["bigint-column-ulong-cast-greater"] = SignOnlyCast,
+        ["int-column-ulong-cast-greater"] = SignOnlyCast,
     };
+
+    /// <summary>列の側の符号だけの変換の割り切りの理由</summary>
+    private const string SignOnlyCast =
+        "EF Core の Oracle プロバイダは列の側の (uint)・(ulong) を負の値を折り返さない変換に書くので、C# が折り返して当てる行と黙って答えが割れる（例外にならない。縮める変換と違い、変換先の型の範囲に入らない行が無い）"
+        + ColumnCastFindingNote;
 
     private const string ColumnCast =
         "整数の列と decimal の列の比較は、EF Core が整数の列を相手の列の型（DECIMAL(10,2)）へ CAST し、整数部の桁が入らない行で ORA-01438 になる（docs の EF Core の節の既知の割り切り）";
@@ -80,7 +91,10 @@ public sealed class TranslatorParityEfCoreOracleRuntimeTests(OracleContainerFixt
         await fixture.ExecuteAsync(Generated.Ddl, Ct);
 
         return Binding.CreateProvider(options =>
-            options.UseOracle(fixture.ConnectionString).IgnoreServiceProviderCacheLimit()
+            options
+                .UseOracle(fixture.ConnectionString)
+                .IgnoreServiceProviderCacheLimit()
+                .AddInterceptors(BindingParameterCapture.EfCoreInterceptor)
         );
     }
 }

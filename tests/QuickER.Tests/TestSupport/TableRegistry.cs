@@ -92,5 +92,14 @@ internal static class TableRegistry
             ["tests/QuickER.Tests/CodeGen.CSharp/PostgreSqlQueryParameterInterceptorTests.cs"],
             [Templates + "_08_EfCore.scriban", "src/QuickER.Runtime.EntityFrameworkCore"]
         ),
+        new(
+            "TranslatorConversions",
+            "翻訳器の変換の表（QuickER 版の式の翻訳器が比べる 2 つの側に書いた変換を両方言でどう扱うか＝列の側の値を変えうる数の変換は名指しで断り、値の側は変換を当てて束縛する・日付部品の IN・列名の無い値の束縛の型）",
+            [Fixture + "SqlExpressionTranslatorConversionTests.cs"],
+            [
+                Templates + "_05_QueryPipeline.scriban",
+                Templates + "_06_RemoteSaveInfraAndDI.scriban",
+            ]
+        ),
     ];
 }

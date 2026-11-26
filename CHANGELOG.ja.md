@@ -11,6 +11,7 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 #### 生成コード
 
 - **リモートの保存・挿入・更新の応答が、版を列の値だけで運ぶようになりました** — 版だけを運ぶ欄（`RemoteSaveResult.RowVersions` など）を消し、値の無い応答と値の数が合わない応答は `InvalidOperationException` で断ります。リモートのサーバーとクライアントは、同じ版の QuickER で生成し直してください
+- **QuickER 版は、`Query()` の条件の列の側に書いた、列の値を変えうる変換を断り、符号だけの変換は C# と同じに折り返すようになりました** — `(short)x.Id == -1`・decimal の列の `(int)x.Amount`・`(ulong)x.Id`・`uint` の `(int)x.Count` は変換を名指しした `NotSupportedException` を投げ、`(uint)x.Id` は負の値を折り返して比べます（前はどれも変換を無視していました）。列は変換せずに比べ、値の側を変換してください
 
 #### 双方向同期
 
@@ -92,6 +93,21 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
 - **SQL Server の `smalldatetime`・`smallmoney`・`image` の列を持つ図を、SQLite とのマルチターゲットで生成できるようになりました** — SQLite がこれらを `datetime`・`money`・`blob` と同じに扱います。SQLite の図のこれらの列は、`string` でなく `DateTime`・`decimal`・`byte[]` のプロパティになります。
 - **SQL Server の `datetime`・`smalldatetime` の列の条件が、両方の版で C# と同じ答えになりました** — 列が持てない値を、列の精度へ丸めずに比べます。EF Core 版で手書きの LINQ に直接書いた日時の定数は、例外にならず列の精度へ丸めて比べるようになりました。
 - **双方向同期の生成で、記述子が `GeneratedSyncTables` の固定のメンバーとぶつかる表を名指しするようになりました** — 表 `all`・`alls` の生成コードはコンパイルできず、`object` のメンバーの名前の表（`to_string` など）は警告を出していましたが、生成は何も知らせていませんでした。表の名前を変えてください。
+- **SQL Server の QuickER 版で、`x.At.Value.Date` のような日付部品と `DateTime` の比較が C# と同じ答えになりました** — 値を古い `datetime` で送っていたので 1/300 秒へ丸まり、1753 年より前の日付も送れず、違う行に当たるか失敗していました。今は `datetime2` で送ります。
+- **QuickER 版で、`Query()` の条件の値の側に書いた変換が当たるようになりました** — `x.Qty == (int)ratio` の変換が外れ、小数のまま比べていたので、違う行に当たることがありました。整数の列と比べる `char` の値も、C# が読む数として比べるようになりました。
+- **QuickER 版で、日付部品を要素にしたリストの `Contains` を翻訳できるようになりました** — `days.Contains(x.At.Value.Date)` とその否定は `NotSupportedException` になっていました。
+- **PostgreSQL の EF Core 版で、変数で渡した `DateTimeKind.Utc` の値と `date`・`timestamp` の列の比較が C# と同じ答えになりました** — Npgsql は Utc の値を `timestamp` として送らないので、比較が `ArgumentException` になっていました。今は同じ tick で Kind を外して送り、`timestamp` の列へ書く Utc の値は今までどおり断ります。
+- **PostgreSQL の EF Core 版で、`date` の列と比べる `IN` のリストの値の時刻を落とさなくなりました** — `dates.Contains(x.Day)` のリストを `date[]` で送っていたので、時刻つきの値がその日の行に当たっていました。今は単一の値と同じく timestamp の配列で送ります。
+- **SQLite の EF Core 版で、整数の列とラムダで作った `decimal` の値の等値・`IN` を書き換えるようになりました** — `prices.Select(p => p).ToList()` のような値では文字列で比べ、どの行にも当たりませんでした。PostgreSQL の、`null` を含む値オブジェクトの `IN` の書き換えも、こうした値に当たるようになりました。
+- **EF Core 版で、Before の保存フックがキーを決める同じ型の新しい行を 2 つ以上保存できるようになりました** — フックより前に追跡へ入れていたので未設定のキーがぶつかり、グラフ保存が `InvalidOperationException` になっていました。今は新しい行を Before のフックの後に追跡へ入れます。
+- **SQL Server の QuickER 版で、`varbinary(n)` の列の行を、超えた分が `0x00` だけの長い値で見つけられるようになりました** — 列はその値を `n` バイトに切って保存するのに、条件は切らずに比べていたので、どの行にも当たりませんでした。
+- **QuickER 版で、列どうしの部分一致の否定を翻訳できるようになりました** — `!x.Name.Contains(x.Other)` は、`!` の無い形は翻訳できるのに `NotSupportedException` になっていました。
+- **QuickER 版で、型の違う値との `Equals(object)` が C# と同じ答えになりました** — `int` の列の `x.Id.Equals(10L)` は数として比べ、10 を持つ行に当たっていました。今はどの行にも当たらず、その否定は全行に当たります。
+- **QuickER 版で、NULL 許容の `bool` の列の `.Value` を素の条件と並び替えのキーに書けるようになりました** — `x.IsShipped != null && x.IsShipped.Value` と `OrderBy(x => x.IsShipped!.Value)` は `NotSupportedException` になっていました。
+- **SQLite の EF Core 版で、整数の列と比べる値型のコレクションの `Contains` が例外にならなくなりました** — `ImmutableArray<decimal?>` では、整数と `decimal` の等値の書き換えが `ArgumentException` になっていました。
+- **EF Core 版で、削除する行の代替キーを取る保存の後に、使い回す文脈へ破棄した接続を戻さなくなりました** — `UseSqlServer()` で構成し実行時に接続文字列を付けた文脈は、次に使うと失敗していました。
+- **EF Core 版で、`DateTimeOffset` の値のオフセットだけを変えた代替キーを書くようになりました** — 2 つの値は同じ瞬間なので変更なしとみなし、書かずに成功を返していました。
+- **変更の無い同じインスタンスに 2 つの道で届き、両方の道が削除するか、その下に変更を持つ行があるグラフ保存を、どの実装先でも断るようになりました** — QuickER 版は主キーで失敗し、EF Core 版は行を 1 回書いて After のフックを道の数だけ鳴らしていました。
 
 #### 双方向同期
 

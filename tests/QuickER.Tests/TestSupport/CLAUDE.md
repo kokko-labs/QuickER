@@ -33,6 +33,16 @@
     Kind が Local の日時は、機械の時差を付けず `DateTime:Local:` と時差なしの時刻を書く。読むだけで乱数を引かない。
 - ガード：TestSupport 直下の `SeedSourceTests` / `KnownFailureSetTests` / `KnownCaseLedgerTests` / `EngineReportTests` / `CoverageGuardTests` / `SeedFingerprintTests`。mutation 実証済み。
 
+## 値の池（ValuePools/）
+
+- 置き場所は `tests/QuickER.Tests/TestSupport/ValuePools/`（名前空間 `QuickER.Tests.TestSupport.ValuePools`）。BCL だけに依存し、Integration が `Compile Include="..\QuickER.Tests\TestSupport\ValuePools\**\*.cs"` の glob で同じファイルをコンパイルする（Engines と同じ向き）。
+- 形：型ごとの静的なクラス（`DateTimePool`・`IntegerPool`・`DecimalPool`・`NarrowingPool`・`BooleanPool`）が、名前つきの値 `PoolValue<T>(Name, Value, Why)` の並びを返す。名前は生成の表の値の池の水準の名前にそのまま使う。
+  - `DateTimePool.Around(基準の日)`：0 時ちょうど・時刻つき・翌日の 1 tick 前・datetime の読み戻しの間（基準の日に依る）と、datetime の範囲の外の 2 つ（基準の日に依らない）。Kind はどれも Unspecified で、付け替えは `WithKind`。
+  - `IntegerPool.Around(当たる値, 列の型の上限)`・`DecimalPool.Around(当たる値, スケール)`・`DecimalPool.BeyondLong`・`DecimalPool.IntegralDecimalOf`：列の行に当たる値・小数の値・列の型の外の値・整数の値の decimal。
+  - `NarrowingPool.Around(当たる値, 範囲の外の値)`：値を変える明示の変換（縮める数値の変換・小数から整数）の元の値。変換で値が変わらない値（対照）・小数部が落ちる値・変換先の型の範囲の外の値。値の側の変換では変換する値、列の側の変換では変換される行の値の例で、比べる値はその値を同じ変換に通した値。
+  - `BooleanPool.Values`：真と偽（NULL 許容の bool の列の行に当たる値。区切り a のフェーズ 4 の XT5）。
+- 使うのは値の束縛の生成の表（`tests/QuickER.Tests.Integration/GeneratedRuntime/CLAUDE.md`「値の束縛の生成の表」）。手書きの述語の表の値（`legacyBetweenReadBacks` ほか）は、値の池の正本の区切りで池へ移す（今は移していない）。
+
 ## 既存エンジンの載せ替え
 
 - 既存の 7 エンジン（同期のモデル・同期計画・実装先の一致・簡易 DSL・名前・ツールの引数・Undo）は、核の部品を通す。変数名・既定の種の数・開始番号は変えていない。
@@ -119,7 +129,7 @@
   - 種類は既知の失敗と同じ `KnownKind`。Accepted は製品・DB・docs の事実で作らない形、Pending は水準を足す区切りがある形。Pending は直す区切りを持ち、Accepted は持たない（判定は `KnownFailureSet.KindProblem` を共有）。理由は因子の棚卸しと同じ `FactorInventoryGuard.IsVagueReason` で断る。
   - 受け持つ守りは CLAUDE.md の「ガード：」と同じ書き方（地図の名前・テストのクラスとメソッド・名前に続けた行 Id）。どこでも見ていない形は印 `NotGenerated.Unguarded` を書く。印の無い空は赤。
 - 置き場所：生成器の隣の `{生成器}NotGenerated.cs` の `internal static class {生成器}NotGenerated` に、静的なプロパティ `Declaration` で置く。既存の `*Dimensions.cs` には置かない。
-  - 今の宣言：Integration の `SyncPlanFuzzNotGenerated`（同期計画の総当たりと能力の組の網）・`SyncModelNotGenerated`・`BackendParityNotGenerated`・`BackendParitySqlServerSaveNotGenerated`・`BackendParitySqlServerValueNotGenerated`・`NameFuzzDdlRoundTripNotGenerated`、QuickER.Tests の `DslFuzzNotGenerated`（SQLite・MySQL と SQL Server）・`NameFuzzNotGenerated`・`CanvasInputNotGenerated`・`DocumentFileNotGenerated`・`ToolArgumentShapeFuzzNotGenerated`（網羅型）・`CodegenConfigNotGenerated`（網羅の配列の行の番号を種にするだけなので空の宣言）。
+  - 今の宣言：Integration の `SyncPlanFuzzNotGenerated`（同期計画の総当たりと能力の組の網）・`SyncModelNotGenerated`・`BackendParityNotGenerated`・`BackendParitySqlServerSaveNotGenerated`・`BackendParitySqlServerValueNotGenerated`・`BackendParityHookAssignedKeysNotGenerated`（Before のフックが新しい行のキーを決める保存の軸のシナリオ）・`TranslatorParityBindingRowsNotGenerated`（値の束縛の生成の表）・`NameFuzzDdlRoundTripNotGenerated`、QuickER.Tests の `DslFuzzNotGenerated`（SQLite・MySQL と SQL Server）・`NameFuzzNotGenerated`・`CanvasInputNotGenerated`・`DocumentFileNotGenerated`・`ToolArgumentShapeFuzzNotGenerated`（網羅型）・`CodegenConfigNotGenerated`（網羅の配列の行の番号を種にするだけなので空の宣言）。
   - Pending の直す区切りは、決まっている区切りの名前か「（未起動）」を添えた区切りの仮の名前を書く。区切りの一覧では照合しない（区切りは増えるので）。
   - **宣言のファイルは Engines の型と BCL だけを参照する純粋なデータにする。** Integration の宣言は QuickER.Tests へ逆向きに Compile のリンクで入る（QuickER.Tests の csproj の `..\QuickER.Tests.Integration\**\*NotGenerated.cs`）。Integration の型を参照すると QuickER.Tests のビルドが止まる。リンクの向きはほかの共有（QuickER.Tests の実体を Integration がリンクする）と逆で、受け持つ守りの照合の関数と影響の地図が QuickER.Tests にしか無いため。
   - QuickER.Tests の宣言のうち Integration も使う生成器のもの（`DslFuzzNotGenerated.cs`・`NameFuzzNotGenerated.cs`）は、既存の `DslFuzz*.cs`・`NameFuzz*.cs` のリンクで Integration にも入る。
@@ -144,7 +154,7 @@
 
 - 札の対象の表の Id を、減るだけの写し（各アセンブリの `row-baseline.json`・eol=lf）と比べる。写しに無い Id は札（`RowTag`）を持つ：台帳の項目の Id（`RowTag.Ledger`）か、種別つきの理由（`RowTag.Reason`。種別は改名・新機能の行・既存の水準の対照・文書の特性の固定・低の指摘＝`ReviewFinding`）。低の指摘の理由は「指摘の番号（記録）：軸を水準で交差させない理由」の形で書く（分岐の軸の台帳は中以上の直し残しの項目で、低の指摘の受け入れの行は台帳に載せない。形は `RowTag.Problems` が見る・自己検査の行は `ScenarioRowBaselineTests` の `new-row-with-review-finding`・`new-row-review-finding-without-record-number`・`new-row-review-finding-without-axis-reason`）。種別の無い理由（`Unspecified`）・空や具体的でない理由・台帳に無い Id は赤。
   - 手で書く表は行 Id に札を付ける（`ScenarioRow.Tag`・インターセプターの表の `InterceptRow` の最後の引数）。生成の表は行 Id でなく、因子の水準（`Level.Tag`・写しの Id は `因子=水準`）と必ず含む行（`RequiredRow`・Id は行の名前）に札を付ける。
-  - 札の対象の表の一覧は、各アセンブリに 1 か所（Integration の `RowBaselineTables`＝同期の期待の行・決定的な行〔形の行と来歴の行を除く〕・網羅の行の手で書いた行・述語の表・形の行の水準と必ず含む行、QuickER.Tests の `RowBaselineTables`＝インターセプターの表 2 つ）。QuickER.Tests から Integration の表は見えないので 2 つに分ける。
+  - 札の対象の表の一覧は、各アセンブリに 1 か所（Integration の `RowBaselineTables`＝同期の期待の行・決定的な行〔形の行と来歴の行を除く〕・網羅の行の手で書いた行・述語の表・形の行の水準と必ず含む行、QuickER.Tests の `RowBaselineTables`＝インターセプターの表 2 つと翻訳器の変換の表 `table:TranslatorConversions`）。QuickER.Tests から Integration の表は見えないので 2 つに分ける。
   - 一覧に入れない表と理由は、Integration の一覧の XmlDoc に書く（網羅の行の種の行＝Id が種の番号を含み生成器を変えるたびに選び直す・来歴の行＝全積の生成の行で水準を足すと行が増える形・方言の型の実 DB の表＝5 方言で共有する行を基底の 1 つの Fact が回す）。
 - 同期の期待の行の新しい行（写しに無い行）は、実方言を 1 つでも持つなら全実方言に流す（網の能力の鍵と、実 DB の段を持てば実 DB の段の方言の両方）。外す方言は札の `Except(方言, 理由)` に書く。実方言を持たない行（合成の能力の鍵だけの網の行）は規則の外。
 - 照合は各アセンブリの `RowBaselineDriftTests`。出力に「写しに無い行 N 本（台帳 M・理由 K）」と札の一覧を書く（review-gate が毎回読む）。
@@ -166,7 +176,10 @@
   - 判定役と地図（QuickER.Tests の `BranchAxisLedgerGuardTests`）：結び済みの判定役の実在・生成の表が影響の地図の守りにあること。
   - 指摘のセル（能力の組の網の方言の派生・`SyncPlanBranchEvidence.NetProblems`）：指摘のセルの行は範囲の方言で流れる（流れなければ赤）。修正済みなら証拠が出る。結び済み・未修正なら、その行は違反を持ち、違反はその項目の Id を指摘の名前に持つ既知の失敗の一覧の Pending（直す区切りが項目の直す区切りと同じ）に当たる。違反なしで流れたら赤（直ったのに状態を切り替えていない）。違反は DB なしの網で出る形にする（実 DB でしか出ない違反に頼ると、普段の CI で状態の切り替え忘れが見えない）。自己検査は `BranchAxisLedgerTests.NetProblems_FollowStatus`。網羅しない組は既存の一覧（網羅しない組・作らない形の宣言）で扱う。
   - 修正 AH の項目（`ah-move-first`）で配線を確かめた：製品の前寄せを外す mutation で、指摘のセル（Oracle の形の行）は静的な規則の違反 0 のまま、台帳の証拠だけが赤にした。
-- 今の項目：結び済み・修正済みの `ah-move-first`（配線の確かめ）と 3 項目（3 回目の効果測定の直し残し PA1・PE1・PE3＝区切り c で直した `pa1`・`pe1`・`pe3`。指摘のセルの行で分岐に入った証拠が出る）と、予定の 5 項目（HA1・HA2・HA4・XB1・XT4＝区切り a）。
+- 今の項目：結び済み・修正済みの `ah-move-first`（配線の確かめ）と 8 項目（3 回目の効果測定の直し残し PA1・PE1・PE3＝区切り c で直した `pa1`・`pe1`・`pe3` と、XB1・XT4・HA1・HA2・HA4＝区切り a で直した `xb1`・`xt4`・`ha1`・`ha2`・`ha4`。指摘のセルの行で分岐に入った証拠が出る）。結び済み・未修正の項目は無い。
+  - 値の束縛の 5 項目（ha1・ha2・ha4・xb1・xt4）は値の束縛の生成の表（`GeneratedRuntime/TranslatorParityBindings`）に水準と指摘のセルの必ず含む行を足して結ぶ。指摘のセルの行は、述語の表の基底の `TranslatorParityRuntimeTestsBase.LedgerCells_FollowStatus`・`TranslatorParityEfCoreRuntimeTestsBase.LedgerCells_FollowStatus` が範囲の実装先で流し、`TranslatorParityBindingEvidence.CellProblems` が形の行と同じ規則で照合する（未修正はセルの割れが項目の Pending に当たる・修正済みは証拠が出る・セルが流れなければ赤。今の 5 項目はどれも修正済み）。自己検査は `BranchAxisLedgerTests.BindingCellProblems_FollowStatus`。
+  - SQL Server の QuickER 版のセル（xb1・xt4 の片方）と PostgreSQL の EF Core 版のセル（ha1・ha2）は実コンテナでだけ流れる（普段の CI の ubuntu のジョブ）。SQLite の QuickER 版（xt4）と EF Core 版（ha4）のセルはコンテナなしで流れる。
+  - 修正済みの xt4 の証拠 `narrowing-cast-honoured` は、値の側の変換のセルでは C# との一致（と SQL Server で束縛した値が変換した値）、列の側の変換の行では変換を名指しした NotSupportedException を分岐に入った印とする。列の側の行は QuickER 版の既知の失敗の Accepted（`quicker-narrowing-column-cast`・docs の既知の割り切り）で受ける。
 
 #### 領域の標準の軸
 

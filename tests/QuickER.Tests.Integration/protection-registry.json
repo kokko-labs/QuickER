@@ -242,6 +242,43 @@
       ]
     },
     {
+      "id": "GeneratedRuntime",
+      "part": "TranslatorParityBindings",
+      "title": "値の束縛の生成の表（列の型・列の側の形・比べ方・値の数・値の池・Kind・値の形・クエリの経路を、QuickER 版・インメモリ・EF Core 版の 5 方言で C# の評価と照らす）",
+      "sourceFiles": [
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityBindingRows.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityBindingRun.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityBindingKnownFailures.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityBindingEvidence.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityRuntimeTestsBase.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityAdoSqlServerRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityAdoSqliteRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityInMemoryRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreRuntimeTestsBase.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreBinding.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreSqlServerRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreSqliteRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCorePostgreSqlRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreMySqlRuntimeTests.cs",
+        "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityEfCoreOracleRuntimeTests.cs",
+        "tests/QuickER.Tests/TestSupport/ValuePools/PoolValue.cs",
+        "tests/QuickER.Tests/TestSupport/ValuePools/DateTimePool.cs",
+        "tests/QuickER.Tests/TestSupport/ValuePools/IntegerPool.cs",
+        "tests/QuickER.Tests/TestSupport/ValuePools/DecimalPool.cs",
+        "tests/QuickER.Tests/TestSupport/ValuePools/NarrowingPool.cs"
+      ],
+      "covers": [
+        "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_05_QueryPipeline.scriban",
+        "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_06_RemoteSaveInfraAndDI.scriban",
+        "src/QuickER.CodeGen.CSharp/Templates/CSharpRuntime/_08_EfCore.scriban",
+        "src/QuickER.Runtime",
+        "src/QuickER.Runtime.EntityFrameworkCore",
+        "src/QuickER.Runtime.InMemory",
+        "src/QuickER.Runtime.SqlServer",
+        "src/QuickER.Runtime.Sqlite"
+      ]
+    },
+    {
       "id": "Dsl",
       "part": "SqlServer",
       "title": "簡易 DSL の条件の総当たり（SQL Server の QuickER 版 Repository と EF Core）",
