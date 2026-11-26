@@ -1,4 +1,5 @@
 using QuickER.Tests.CodeGen.CSharp;
+using QuickER.Tests.GeneratedFixture;
 using QuickER.Tests.TestSupport.Engines;
 
 namespace QuickER.Tests.TestSupport;
@@ -23,6 +24,10 @@ internal static class RowBaselineTables
             new(
                 nameof(PostgreSqlQueryParameterInterceptorTests),
                 PostgreSqlQueryParameterInterceptorTests.BaselineEntries
+            ),
+            new(
+                nameof(SqlExpressionTranslatorConversionTests),
+                SqlExpressionTranslatorConversionTests.BaselineEntries
             ),
             new(
                 nameof(SqlServerQueryParameterInterceptorTests),

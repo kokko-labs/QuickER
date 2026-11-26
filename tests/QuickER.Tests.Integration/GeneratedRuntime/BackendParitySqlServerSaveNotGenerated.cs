@@ -68,6 +68,14 @@ internal static class BackendParitySqlServerSaveNotGenerated
                     "飛ばした kit は書かれないので、部品の外部キーがどの実装先でも断られて保存の全体が止まり、ほかの行を比べなくなる。次元表の網羅しない組（H2）にも受け入れとして載る。code を変えない kit を飛ばす形と、飛ばす後回しの kit の部品の単独の削除は作る",
                     Cases + " の行 `hook-skip-parent-child-fk`"
                 ),
+                NotGenerated.Pending(
+                    "held-back-context-from-provider-data-source",
+                    "削除する行の代替キーを取る保存の 2 つめの文脈を、接続文字列でも接続でもなくプロバイダのオプション（PostgreSQL の UseNpgsql(dataSource)）から接続を作る文脈で使い回す形",
+                    "きっかけ待ち（EF Core 版の PostgreSQL の実装先どうしの一致）",
+                    "3 回目の効果測定の HB2。実装先どうしの一致と SQL Server の系統のケースは SQLite と SQL Server だけで、PostgreSQL の EF Core 版を流す置き場が無い。HeldBackContext は EF Core が破棄した接続を戻さず SetDbConnection(null) で作り直させるが、データソースから作る文脈で接続文字列を戻すか（Npgsql が作る前の接続文字列を返すか）は確かめていない。SQL Server の UseSqlServer()＋実行時の SetConnectionString の形はケース alternate-key-taken-from-deleted-twice-runtime-connection-string-reused が受け持つ",
+                    Cases
+                        + " の行 `alternate-key-taken-from-deleted-twice-runtime-connection-string-reused`"
+                ),
                 NotGenerated.Accepted(
                     "part-to-taker-of-its-code",
                     "消す kit か code を手放す kit の部品を、その code を取る kit へ外部キーの値のまま付け替える形",

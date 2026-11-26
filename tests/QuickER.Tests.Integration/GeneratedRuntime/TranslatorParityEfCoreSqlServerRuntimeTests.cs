@@ -49,6 +49,9 @@ public sealed class TranslatorParityEfCoreSqlServerRuntimeTests(SqlServerContain
         ["binary-in-list-with-null"] = BinaryPadding,
         ["binary-column-equals-column"] = BinaryPadding,
         ["binary-column-not-equals-column"] = BinaryPadding,
+        ["binary-equals-zero-excess-value"] = BinaryPadding,
+        ["binary-not-equals-zero-excess-value"] = BinaryPadding,
+        ["binary-in-zero-excess-values"] = BinaryPadding,
         ["time-out-of-day-equals"] = TimeOutOfDay,
         ["time-out-of-day-not-equals-negative"] = TimeOutOfDay,
         ["time-out-of-day-less"] = TimeOutOfDay,
@@ -59,7 +62,18 @@ public sealed class TranslatorParityEfCoreSqlServerRuntimeTests(SqlServerContain
         ["time-out-of-day-negated-equals"] = TimeOutOfDay,
         ["time-out-of-day-in-mixed"] = TimeOutOfDay,
         ["time-out-of-day-not-in-only"] = TimeOutOfDay,
+        ["int-column-sign-cast-equals-uint-beyond-int"] = SignOnlyCast,
+        ["int-column-sign-cast-greater-uint-max-int"] = SignOnlyCast,
+        ["in-uint-list-sign-cast-column"] = SignOnlyCast,
+        ["in-uint-array-sign-cast-column"] = SignOnlyCast,
+        ["bigint-column-ulong-cast-greater"] = SignOnlyCast,
+        ["int-column-ulong-cast-greater"] = SignOnlyCast,
     };
+
+    /// <summary>列の側の符号だけの変換の割り切りの理由</summary>
+    private const string SignOnlyCast =
+        "EF Core の SQL Server プロバイダは列の側の (uint)・(ulong) を負の値を折り返さない変換に書くので、C# が折り返して当てる行と黙って答えが割れる（例外にならない。縮める変換と違い、変換先の型の範囲に入らない行が無い）"
+        + ColumnCastFindingNote;
 
     /// <inheritdoc />
     /// <remarks>time の列と範囲の外の TimeSpan の行（SqlClient が SqlDbType.Time の範囲の外として断る）</remarks>
@@ -80,8 +94,8 @@ public sealed class TranslatorParityEfCoreSqlServerRuntimeTests(SqlServerContain
     protected override IReadOnlyDictionary<string, string> Known => KnownRows;
 
     /// <inheritdoc />
-    protected override IReadOnlyDictionary<string, int>? FixedBinaryLengths =>
-        TranslatorParityRuntimeTestsBase.SqlServerFixedBinaryLengths;
+    protected override IReadOnlyDictionary<string, BinaryColumnLength>? BinaryColumnLengths =>
+        TranslatorParityRuntimeTestsBase.SqlServerBinaryColumnLengths;
 
     /// <inheritdoc />
     protected override async Task<ServiceProvider> CreateProviderAsync()
@@ -92,7 +106,10 @@ public sealed class TranslatorParityEfCoreSqlServerRuntimeTests(SqlServerContain
 
         return new ServiceCollection()
             .AddGeneratedEfCoreRepositories(options =>
-                options.UseSqlServer(fixture.ConnectionString).IgnoreServiceProviderCacheLimit()
+                options
+                    .UseSqlServer(fixture.ConnectionString)
+                    .IgnoreServiceProviderCacheLimit()
+                    .AddInterceptors(BindingParameterCapture.EfCoreInterceptor)
             )
             .BuildServiceProvider();
     }

@@ -96,6 +96,118 @@ public sealed class TranslatorParityEfCoreBinding(Assembly assembly, string ns)
             .ToList();
     }
 
+    /// <summary>
+    /// <c>Query()</c> に述語を掛け、キーで並べ（<paramref name="descending"/> なら降順）、同じキーの行を主キーの昇順に並べて返す
+    /// （主キーのプロパティは probes の <c>ProbeId</c>）
+    /// </summary>
+    public static async Task<List<object>> QueryOrderedAsync(
+        object repository,
+        LambdaExpression predicate,
+        LambdaExpression key,
+        bool descending,
+        CancellationToken ct
+    )
+    {
+        var query = RepositoryMethods(repository)
+            .First(m => m.Name == "Query" && m.GetParameters().Length == 0)
+            .Invoke(repository, [])!;
+        query = query
+            .GetType()
+            .GetMethod("Where", [predicate.GetType()])!
+            .Invoke(query, [predicate])!;
+        query = query
+            .GetType()
+            .GetMethod(descending ? "OrderByDescending" : "OrderBy", [key.GetType()])!
+            .Invoke(query, [key])!;
+
+        var parameter = Expression.Parameter(key.Parameters[0].Type, "p");
+        var byKey = Expression.Lambda(
+            Expression.Convert(Expression.Property(parameter, "ProbeId"), typeof(object)),
+            parameter
+        );
+        query = query.GetType().GetMethod("OrderBy", [byKey.GetType()])!.Invoke(query, [byKey])!;
+
+        var task = (Task)
+            query
+                .GetType()
+                .GetMethod("ToListAsync", [typeof(CancellationToken)])!
+                .Invoke(query, [ct])!;
+        await task;
+
+        return ((IEnumerable)task.GetType().GetProperty("Result")!.GetValue(task)!)
+            .Cast<object>()
+            .ToList();
+    }
+
+    /// <summary><c>Query()</c> に述語を掛けて一括削除する（<c>ExecuteDeleteAsync</c>・cascadeDelete なし）</summary>
+    public static async Task<int> ExecuteDeleteAsync(
+        object repository,
+        LambdaExpression predicate,
+        CancellationToken ct
+    )
+    {
+        var query = RepositoryMethods(repository)
+            .First(m => m.Name == "Query" && m.GetParameters().Length == 0)
+            .Invoke(repository, [])!;
+        query = query
+            .GetType()
+            .GetMethod("Where", [predicate.GetType()])!
+            .Invoke(query, [predicate])!;
+
+        return await (Task<int>)
+            query
+                .GetType()
+                .GetMethod("ExecuteDeleteAsync", [typeof(bool), typeof(CancellationToken)])!
+                .Invoke(query, [false, ct])!;
+    }
+
+    /// <summary>
+    /// 生成の DbContext（<c>QuickErDbContext</c>）に書く ExecuteUpdate を流す（SET は <paramref name="column"/> を自分自身へ代入して値を変えず、
+    /// WHERE が当てた行の数を返す）
+    /// </summary>
+    public Task<int> ExecuteUpdateAsync(
+        IServiceProvider provider,
+        Type entityType,
+        LambdaExpression predicate,
+        string column,
+        CancellationToken ct
+    ) =>
+        (Task<int>)
+            typeof(TranslatorParityEfCoreBinding)
+                .GetMethod(
+                    nameof(ExecuteUpdateCoreAsync),
+                    BindingFlags.NonPublic | BindingFlags.Static
+                )!
+                .MakeGenericMethod(entityType, entityType.GetProperty(column)!.PropertyType)
+                .Invoke(null, [provider, Type("QuickErDbContext"), predicate, column, ct])!;
+
+    private static async Task<int> ExecuteUpdateCoreAsync<TRow, TColumn>(
+        IServiceProvider provider,
+        Type contextType,
+        LambdaExpression predicate,
+        string column,
+        CancellationToken ct
+    )
+        where TRow : class
+    {
+        var factoryType = typeof(IDbContextFactory<>).MakeGenericType(contextType);
+        var factory = provider.GetRequiredService(factoryType);
+        await using var context = (DbContext)
+            factoryType
+                .GetMethod(nameof(IDbContextFactory<DbContext>.CreateDbContext))!
+                .Invoke(factory, [])!;
+        var row = Expression.Parameter(typeof(TRow), "row");
+        var property = Expression.Lambda<Func<TRow, TColumn>>(
+            Expression.Property(row, column),
+            row
+        );
+
+        return await context
+            .Set<TRow>()
+            .Where((Expression<Func<TRow, bool>>)predicate)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(property, property), ct);
+    }
+
     private static IEnumerable<MethodInfo> RepositoryMethods(object repository) =>
         repository
             .GetType()

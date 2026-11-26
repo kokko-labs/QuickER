@@ -17,6 +17,19 @@ public sealed record ProbePredicate(Expression<Func<ProbeEntity, bool>> Predicat
     : TranslatorParityPredicate;
 
 /// <summary>
+/// probes の並び替え（述語で絞った行を、キーで並べ、同じキーの行は probe_id の昇順に並べる。シードは probes のシード）。期待は C# の
+/// <c>OrderBy</c>（<c>OrderByDescending</c>）と <c>ThenBy(probe_id)</c> で、並びまで比べる
+/// </summary>
+/// <param name="Predicate">述語</param>
+/// <param name="Key">並び替えのキー</param>
+/// <param name="Descending">降順か</param>
+public sealed record OrderedProbePredicate(
+    Expression<Func<ProbeEntity, bool>> Predicate,
+    Expression<Func<ProbeEntity, object?>> Key,
+    bool Descending
+) : TranslatorParityPredicate;
+
+/// <summary>
 /// small_child の述語（<c>big_parent_id</c> が NULL 許容の int。シードは親 3 行と子 4 行＝外部キー 1・1・2・NULL）
 /// </summary>
 /// <param name="Predicate">述語</param>
@@ -114,6 +127,25 @@ public static class TranslatorParityPredicateRows
         Expression<Func<ProbeEntity, bool>> predicate
     ) => new(id, null, description, new WideProbePredicate(predicate));
 
+    private static ScenarioRow<TranslatorParityPredicate> OrderedProbe(
+        string id,
+        string description,
+        Expression<Func<ProbeEntity, bool>> predicate,
+        Expression<Func<ProbeEntity, object?>> key,
+        bool descending
+    ) => new(id, null, description, new OrderedProbePredicate(predicate, key, descending));
+
+    /// <summary>低の指摘を直した行の札を付ける（3 回目の効果測定の記録 review-measure3-2026-11-26 の指摘）</summary>
+    private static ScenarioRow<TranslatorParityPredicate> Finding(
+        ScenarioRow<TranslatorParityPredicate> row,
+        string reason
+    ) => row with { Tag = RowTag.Reason(RowTagKind.ReviewFinding, reason) };
+
+    /// <summary>区切り a の XT4（列の側の符号だけの変換の折り返し）で足した行の札</summary>
+    private static ScenarioRow<TranslatorParityPredicate> Xt4(
+        ScenarioRow<TranslatorParityPredicate> row
+    ) => row with { Tag = RowTag.Ledger("xt4") };
+
     private static ScenarioTable<TranslatorParityPredicate> Build()
     {
         // 変数（クロージャの捕捉＝式の木では MemberExpression）で渡す値。リテラルの null とは木の形が違う
@@ -131,6 +163,8 @@ public static class TranslatorParityPredicateRows
         var numbersWithNull = new List<int?> { 1, null, 3 };
         var longsBeyondInt = new List<long?> { 1, 3000000000L };
         var uintsBeyondInt = new List<uint> { 10u, 3000000000u };
+        var uintsAcrossSign = new List<uint> { 2147483648u, 12u };
+        var uintArrayAcrossSign = new[] { 2147483647u, 2147483648u };
         var noonOfFirstDay = new DateTime(2024, 1, 1, 12, 0, 0);
         var finerThanCentisecond = new DateTime(2024, 1, 1, 10, 0, 0).AddTicks(1_200_001);
         var finerClock = new TimeSpan(0, 10, 0, 0, 120).Add(TimeSpan.FromTicks(1));
@@ -207,6 +241,12 @@ public static class TranslatorParityPredicateRows
         List<byte[]?> shortBinaries = [new byte[] { 0x01 }, new byte[] { 0x01, 0x00 }];
         List<byte[]?> binaries = [new byte[] { 0x01 }, new byte[] { 0xFF }];
         List<byte[]?> binariesWithNull = [new byte[] { 0x01 }, null];
+        List<byte[]?> zeroExcessBinaries =
+        [
+            new byte[] { 0x01, 0x00, 0x00, 0x00, 0x00 },
+            new byte[] { 0xFF, 0x00, 0x00, 0x00, 0x00 },
+        ];
+        const string Measure3 = "review-measure3-2026-11-26";
 
         List<ScenarioRow<TranslatorParityPredicate>> rows =
         [
@@ -815,6 +855,49 @@ public static class TranslatorParityPredicateRows
                 "int の列と decimal(10,2) の列の == は、同じ値の行に一致する",
                 x => x.ProbeId == x.Amount
             ),
+            // ---- 列の側の符号だけの変換（C# は負の値を折り返す。シードは int の上限と下限の行を持つ） ----
+            Xt4(
+                WideProbe(
+                    "int-column-sign-cast-equals-uint-beyond-int",
+                    "int の列を uint へ変換した == は、負の値を折り返して比べ、int の下限の行が 2147483648 に一致する",
+                    x => (uint)x.ProbeId == 2147483648u
+                )
+            ),
+            Xt4(
+                WideProbe(
+                    "int-column-sign-cast-greater-uint-max-int",
+                    "int の列を uint へ変換した > は、負の値を int の上限より大きい値へ折り返して比べる",
+                    x => (uint)x.ProbeId > 2147483647u
+                )
+            ),
+            Xt4(
+                WideProbe(
+                    "in-uint-list-sign-cast-column",
+                    "uint のリストと uint へ変換した int の列の IN は、負の値を折り返した行にも一致する",
+                    x => uintsAcrossSign.Contains((uint)x.ProbeId)
+                )
+            ),
+            Xt4(
+                WideProbe(
+                    "in-uint-array-sign-cast-column",
+                    "uint の配列と uint へ変換した int の列の Contains は、int の上限の行と折り返した下限の行に一致する",
+                    x => uintArrayAcrossSign.Contains((uint)x.ProbeId)
+                )
+            ),
+            Xt4(
+                BigParent(
+                    "bigint-column-ulong-cast-greater",
+                    "bigint の列を ulong へ変換した > は、負の値を long の上限より大きい値へ折り返して比べる（QuickER 版は断る）",
+                    p => (ulong)p.Id > 9223372036854775807ul
+                )
+            ),
+            Xt4(
+                WideProbe(
+                    "int-column-ulong-cast-greater",
+                    "int の列を ulong へ変換した > は、負の値を 64 ビットへ符号拡張して折り返して比べる（QuickER 版は断る）",
+                    x => (ulong)x.ProbeId > 4294967295ul
+                )
+            ),
             Probe(
                 "varchar-equals-non-ascii-variable",
                 "Unicode でない列と ASCII の外の文字の変数の == は、化けた '??' の行に一致しない",
@@ -958,6 +1041,147 @@ public static class TranslatorParityPredicateRows
                 "value-argument-ends-with",
                 "値引数の EndsWith(string) が LIKE へ翻訳される",
                 x => x.Name != null && x.Name.EndsWith("ce")
+            ),
+            // ---- 3 回目の効果測定の低の指摘（記録 review-measure3-2026-11-26 の v10・XB4／XT1／XT2／XT5） ----
+            Finding(
+                Probe(
+                    "binary-equals-zero-excess-value",
+                    "長さを宣言した可変長の列（varbinary(4)）と、列の長さを超えた分が 0x00 だけの値の == は、超えた分を切った値（保存したときの値）が同じ行に一致する（長さを宣言しない実装先では長さまで同じ行）",
+                    x => x.Bin == bin0100000000
+                ),
+                $"XB4（{Measure3} v10）：varbinary(n) の超過が 0x00 だけの値を保存の形へ切る。軸（演算子・IN・超過の中身）は binary-fixed の行と同じ並びで足し、列の型の軸は固定長と可変長の 2 つで尽きる"
+            ),
+            Finding(
+                Probe(
+                    "binary-not-equals-zero-excess-value",
+                    "長さを宣言した可変長の列と、超えた分が 0x00 だけの値の != は、保存したときの値と違う行と NULL の行に一致する",
+                    x => x.Bin != bin0100000000
+                ),
+                $"XB4（{Measure3} v10）：!= の腕。保存の形へ切る規則は == と同じ関数で、否定の補償は既存の binary の行が持つ"
+            ),
+            Finding(
+                Probe(
+                    "binary-in-zero-excess-values",
+                    "長さを宣言した可変長の列と、超えた分が 0x00 だけの値のリストの IN は、要素ごとに保存したときの値に直して比べる",
+                    x => zeroExcessBinaries.Contains(x.Bin)
+                ),
+                $"XB4（{Measure3} v10）：IN の腕。要素ごとの束縛は == と同じ関数を通り、NOT IN の否定は既存の binary-not-in-list が持つ"
+            ),
+            Finding(
+                Probe(
+                    "binary-equals-overlong-value",
+                    "長さを宣言した可変長の列と、超えた分が 0x00 でない値の == は、どの行にも一致しない（切らずに比べる）",
+                    x => x.Bin == bin0100000001
+                ),
+                $"XB4（{Measure3} v10）：切らない腕の対照。超過が 0x00 でない値は保存できないので、そのまま比べて長さで外れる"
+            ),
+            Finding(
+                Probe(
+                    "string-column-not-contains-column",
+                    "列どうしの Contains の否定は、肯定の LIKE を NOT で包む（どちらかが NULL の行は C# で例外になるので述語のガードで外す）",
+                    x => x.Name != null && x.Group != null && !x.Name.Contains(x.Group)
+                ),
+                $"XT1（{Measure3} v10）：列どうしの Contains の否定が IN の判定に取られていた。軸（Contains・StartsWith・EndsWith）は同じ判定を通るので 3 行で尽きる"
+            ),
+            Finding(
+                Probe(
+                    "string-column-not-starts-with-column",
+                    "列どうしの StartsWith の否定",
+                    x => x.Name != null && x.Group != null && !x.Name.StartsWith(x.Group)
+                ),
+                $"XT1（{Measure3} v10）：StartsWith の腕。IN の判定は Contains の名前でしか当たらないので、StartsWith は前から通る対照"
+            ),
+            Finding(
+                Probe(
+                    "string-column-not-ends-with-column",
+                    "列どうしの EndsWith の否定",
+                    x => x.Name != null && x.Group != null && !x.Name.EndsWith(x.Group)
+                ),
+                $"XT1（{Measure3} v10）：EndsWith の腕。StartsWith と同じく前から通る対照"
+            ),
+            Finding(
+                SmallChild(
+                    "int-key-equals-object-long",
+                    "int の列の Equals(object) と long の値は、C# ではどの行にも一致しない（実行時の型が違う）",
+                    c => c.Id.Equals(10L)
+                ),
+                $"XT2（{Measure3} v10）：Equals(object) の引数の型が列の型と違えば常に偽へ畳む。軸（否定・NULL 許容の列・同じ型の対照）は 4 行で尽きる"
+            ),
+            Finding(
+                SmallChild(
+                    "int-key-not-equals-object-long",
+                    "int の列の Equals(object) と long の値の否定は全行に一致する",
+                    c => !c.Id.Equals(10L)
+                ),
+                $"XT2（{Measure3} v10）：否定の腕。畳んだ常に偽を NOT で包む"
+            ),
+            Finding(
+                SmallChild(
+                    "nullable-int-equals-object-long",
+                    "NULL 許容の int の列の Equals(object) と long の値は、C# ではどの行にも一致しない（NULL の行も）",
+                    c => c.BigParentId.Equals(1L)
+                ),
+                $"XT2（{Measure3} v10）：NULL 許容の列の腕。Nullable を外した型と引数の型を比べる"
+            ),
+            Finding(
+                SmallChild(
+                    "nullable-int-equals-object-int",
+                    "NULL 許容の int の列の Equals(object) と同じ型の値は、等しい行に一致する（畳まない対照）",
+                    c => c.BigParentId.Equals(1)
+                ),
+                $"XT2（{Measure3} v10）：同じ型の値は畳まずに等値へ翻訳する対照"
+            ),
+            Finding(
+                SmallChild(
+                    "int-key-object-receiver-equals-long",
+                    "object へ箱詰めした int の列の Equals(object) と long の値は、C# ではどの行にも一致しない（箱詰めは実行時の型を保つ）",
+                    c => ((object)c.Id).Equals(10L)
+                ),
+                $"XT2（{Measure3} v10）：受け手の箱詰めの変換を外して列の型を読む腕。外さないと受け手が object で畳めず等値へ翻訳する。インターフェイスへの変換の項は EF Core が翻訳を断る形なので、翻訳器の変換の表（table:TranslatorConversions の行 equals-object-interface-receiver-folds）が持つ"
+            ),
+            Finding(
+                Probe(
+                    "nullable-bool-value",
+                    "NULL 許容の bool の列の .Value を素の述語に書くと col = 1 へ翻訳する（NULL の行はガードで外す）",
+                    x => x.Flag != null && x.Flag.Value
+                ),
+                $"XT5（{Measure3} v10）：.Value 越しの bool の列を素の述語に使えなかった。軸（肯定・否定・等値の対照・並び替えの昇順と降順）を 5 行で並べる"
+            ),
+            Finding(
+                Probe(
+                    "nullable-bool-value-not",
+                    "NULL 許容の bool の列の .Value の否定は col = 0 へ翻訳する",
+                    x => x.Flag != null && !x.Flag.Value
+                ),
+                $"XT5（{Measure3} v10）：否定の腕"
+            ),
+            Finding(
+                Probe(
+                    "nullable-bool-equals-true",
+                    "NULL 許容の bool の列と true の == は、true の行に一致する（.Value を通らない対照）",
+                    x => x.Flag == true
+                ),
+                $"XT5（{Measure3} v10）：.Value を通らない等値の対照"
+            ),
+            Finding(
+                OrderedProbe(
+                    "nullable-bool-value-ordering",
+                    "NULL 許容の bool の列の .Value で昇順に並べる（false が先）",
+                    x => x.Flag != null,
+                    x => x.Flag!.Value,
+                    descending: false
+                ),
+                $"XT5（{Measure3} v10）：並び替えのキーの .Value の腕"
+            ),
+            Finding(
+                OrderedProbe(
+                    "nullable-bool-value-ordering-descending",
+                    "NULL 許容の bool の列の .Value で降順に並べる（true が先）",
+                    x => x.Flag != null,
+                    x => x.Flag!.Value,
+                    descending: true
+                ),
+                $"XT5（{Measure3} v10）：降順の腕"
             ),
         ];
 

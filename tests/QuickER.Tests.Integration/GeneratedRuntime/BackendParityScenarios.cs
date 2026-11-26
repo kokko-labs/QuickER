@@ -1089,6 +1089,12 @@ public static partial class BackendParityScenarios
         .. NullIntoNotNullScenarios(),
         .. RemoteRuntimeScenarios(),
         .. KeyShapeScenarios(),
+        // 区切り a：Before のフックが新しい行のキーを決める保存を軸から組む（HB1）
+        .. HookAssignedKeyScenarios(),
+        .. HookSkippedNewRowScenarios(),
+        // 区切り a のフェーズ 4：変更の無い同じインスタンスに 2 つ以上の道で届き、その下に変更がある保存を軸から組む（HB8）
+        .. UnchangedTwiceScenarios(),
+        .. UnchangedTwiceDeletionScenarios(),
     ];
 
     /// <summary>

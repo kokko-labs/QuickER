@@ -30,6 +30,12 @@ public sealed partial class BackendParitySqlServerRuntimeTests
         /// <summary>接続文字列で構成した文脈を、破棄の後に同じインスタンスのまま貸し出し直す（プールの形）</summary>
         ConnectionStringReused,
 
+        /// <summary>
+        /// 接続なしで構成した文脈（<c>UseSqlServer()</c>）に実行時に接続文字列を付け（<c>SetConnectionString</c>）、破棄の後に同じインスタンスのまま
+        /// 貸し出し直す（プールの形。文脈が作った接続を EF Core が持ち主として破棄する。3 回目の効果測定の HB2）
+        /// </summary>
+        RuntimeConnectionStringReused,
+
         /// <summary>接続なしで構成した文脈に、利用者が持つ 2 本の接続を実行時に交互に付ける（<c>SetDbConnection</c>）</summary>
         RuntimeAttachedConnections,
 
@@ -46,6 +52,8 @@ public sealed partial class BackendParitySqlServerRuntimeTests
         {
             HeldBackFactory.ConnectionStringReused =>
                 "alternate-key-taken-from-deleted-twice-connection-string-reused",
+            HeldBackFactory.RuntimeConnectionStringReused =>
+                "alternate-key-taken-from-deleted-twice-runtime-connection-string-reused",
             HeldBackFactory.RuntimeAttachedConnections =>
                 "alternate-key-taken-from-deleted-twice-runtime-attached-connections",
             HeldBackFactory.PassedConnections =>
@@ -163,6 +171,23 @@ public sealed partial class BackendParitySqlServerRuntimeTests
                     );
                     _created.Add(created);
                     return created;
+
+                case HeldBackFactory.RuntimeConnectionStringReused:
+                    if (_returned.TryDequeue(out var reusedRuntime))
+                    {
+                        return reusedRuntime;
+                    }
+
+                    var runtime = new ReusedDbContext(
+                        new DbContextOptionsBuilder<QuickErDbContext>()
+                            .UseSqlServer()
+                            .IgnoreServiceProviderCacheLimit()
+                            .Options,
+                        _returned
+                    );
+                    runtime.Database.SetConnectionString(connectionString);
+                    _created.Add(runtime);
+                    return runtime;
 
                 case HeldBackFactory.RuntimeAttachedConnections:
                     var attached = new QuickErDbContext(

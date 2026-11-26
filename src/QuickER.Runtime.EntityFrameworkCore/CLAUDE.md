@@ -21,7 +21,11 @@ EF Core モード（`GenerateEfCoreRepositories`）の固定ランタイムと�
   - `TrackGraph` は親への逆参照を含む全ナビゲーションを辿るため、親と一緒に読んだ子を 1 件削除すると親と兄弟まで Deleted になる。別インスタンスの同じ親を 2 つ持つグラフは追跡の衝突で失敗し、保存を頼んでいない親を書いて RowState も戻さない。
   - 登録は `EntityBaseCore.EnumerateCascadeChildren` の閉包を `Entry(...).State` で 1 件ずつ行う（QuickER 版の `EntityGraphSaver` と同じ走査）。`Entry(...).State` はナビゲーションの先を追跡せず、追跡外の親は SaveChanges の変更検出でも拾われないことを実 DB で確認済み。
   - 削除の根の子孫は、`cascadeDelete` のとき `cascadeSave` に依らず削除対象とする（ADO と同じ）。
-- ガード：`BackendParityRuntimeTests` の `graph-include-*`・`graph-delete-root-without-cascade-save-attached`、`BackendParitySqlServerRuntimeTests` の `include-child-delete-keeps-parent-and-siblings`。mutation 実証済み。
+- 新しい行（Added）は、歩きで記録だけを取り（`TrackNode`。エントリは取るが状態は付けない＝Detached のまま）、Before のフックの後に `TrackedOperation.RegisterInsert` が Added にする。フックの無い保存は、外部キーを埋めた（`FillAll`）直後にまとめて登録する。Before が false を返した新しい行は登録しない（追跡に入らないので書かれない）。ほかの操作（更新・削除・変更なし）は歩きで登録する。
+  - 理由：Before のフックが新しい行のキーを決める保存で、キーが未設定（既定値）の同じ型の新しい行が 2 つ以上あると、フックより前に Added で登録した時点で EF Core の追跡がキーの重複で `InvalidOperationException` を出す（QuickER 版・インメモリは通る）。
+  - フックの順（記録の順）・飛ばし・例外・外部キーを親の今のキーで埋める順（`consistency.Fill` → Before → 登録）は変えない。登録の順だけが変わり、fix-up の差は `NavigationSnapshot` が戻す。
+  - 飛ばした新しい行を Unchanged で登録しない：キーが未設定の飛ばした行が 2 つあると、登録でぶつかる。追跡に入らない行は、親のコレクションに残っても変更検出が足さない（親の登録の時点の写しに含まれる）。
+- ガード：`BackendParityRuntimeTests` の `graph-include-*`・`graph-delete-root-without-cascade-save-attached`、`BackendParitySqlServerRuntimeTests` の `include-child-delete-keeps-parent-and-siblings`。新しい行の登録の順は `BackendParityRuntimeTests` の `n2-hook-assigned-keys-*`（新しい行の数・型・置き場所・保存の経路の軸＝`BackendParityScenarios.HookAssignedKeys.cs`）・`n2-hook-skipped-new-rows-*`（フックが飛ばすキーの未設定の新しい行が同じ型に 2 つ）・`h3-edit-then-skip-insert`・`graph-remove-children-one-skipped-by-hook`。mutation 実証済み。
 
 ## 渡したエンティティのナビゲーションを変えない
 
@@ -42,7 +46,7 @@ EF Core モード（`GenerateEfCoreRepositories`）の固定ランタイムと�
   - `NoAction` / `SetNull` だと EF Core は追跡中の子の外部キーを null にし、任意の NO ACTION では DB が断るはずの削除を UPDATE で通すため。
   - ガード：`BackendParityRuntimeTests` の `h5-*`・`contact-owner-delete-dependent-modified`・`contact-backup-delete-dependent-modified`・`contact-fallback-delete-dependent-modified`。
 - Save フックの文脈は `EfCoreSaveHookContext`（バイナリの書き込みは NotSupported・`ExecuteSql` は対応）。再試行する実行戦略では Before / After が試行の回数だけ走る。
-- Before が false を返した行は、Entry の元の値を今の値にそろえてから Unchanged にする。
+- Before が false を返した行は、Entry の元の値を今の値にそろえてから Unchanged にする（新しい行は登録の前なので登録しないだけ＝上の「グラフ保存の追跡」）。
   - 素の Unchanged は書き換えを元の値へ戻し、飛ばした削除・挿入を変更検出が UPDATE にする（挿入は NotFound）。Detached にすると、EF Core が飛ばした子を親のコレクションから外す。
   - ガード：`BackendParityRuntimeTests` の `h3-edit-then-skip-{update,delete,insert}`（EfCore・RemoteEfCoreOnly）・`graph-remove-children-one-skipped-by-hook`。mutation 実証済み。
 - EF Core の削除フックは子孫から順に走り、Added の子孫にも走る。`TrackDeletedNode` が後順で記録し、Added の子孫はエントリを持たないフックだけの記録とする（QuickER 版の DELETE が 0 行で走らせるのと同じ）。
@@ -67,7 +71,7 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
 
 - 代替キー（主キーでない一意制約を外部キーが参照する列＝`HasPrincipalKey`）は、EF Core が自分の `UPDATE` で書かず、追跡中に値が変わると変更検出が「part of a key」で例外にする（Save フックの Before が書き換えた場合）。
 - そのため `WriteOwnColumnsAsync`（`_08_EfCore.scriban`）が、代替キーを持つ表の更新する行ごとに `SaveChanges` の前で次を行う。
-  - 保存先のキーと行バージョンを読む。値が同じなら書かない。行が無い・Optimistic で版が古いなら書かず、下の「最初の当たらなかった行で止める」に従って知らせる。
+  - 保存先のキーと行バージョンを読む。値が同じなら書かない（比べ方は `StoredValueEquals`：バイト列は中身で、`DateTimeOffset`〔値オブジェクトの中も〕は瞬間とオフセットの両方で比べる。`DateTimeOffset` の等値は瞬間だけを比べるので、オフセットだけを変えた代替キーを書かずに成功を返していた＝3 回目の効果測定の HB6。ガード：`BackendParitySqlServerRuntimeTests` の `alternate-key-offset-only-update`・`alternate-key-offset-only-graph-save`＝ConcurrencyFixture の `slots.starts_at`）。行が無い・Optimistic で版が古いなら書かず、下の「最初の当たらなかった行で止める」に従って知らせる。
   - 変わった列だけを `ExecuteUpdate` で保存と同じトランザクションの中で書く（Optimistic は版も条件にする）。値はホルダー経由のパラメータで送り、リテラルを埋め込まない。
   - 書いたら版を読み直して並行性トークンの元の値に入れ、代替キーの元の値を今の値にする（変更検出がキーの変更と見ない）。
 - 最初の当たらなかった行で止める：行を保存の順（記録の順＝`GraphSaveOrder` の順）に書き、行が無い・Optimistic で版が古い行が最初に出たところで、その 1 行の `OwnWriteMissedException` を投げて後ろの行の代替キーを書かない（`SaveChanges` が書く行かに依らない）。呼び出し側は `SaveChanges` の `DbUpdateConcurrencyException` と同じに扱う（ロールバック → 試行の記録を戻す → 分類）。投げる前に、その行と書いていない後ろの行の代替キーの元の値を今の値にする（分類が走らせる変更検出がキーの変更と見ない）。
@@ -87,9 +91,9 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
   - 2 つめの文脈（`HeldBackContext`）は、破棄の前にトランザクションから外し、自分の接続を戻す。戻し方は接続の出どころ（オプションの `RelationalOptionsExtension`）で 3 つに分ける。ファクトリが両方の文脈に同じ接続を渡すなら差し替えない。
     - 接続文字列で構成した文脈（`Connection` が null で `ConnectionString` がある）：`SetDbConnection(null, true)` を挟んでから `SetConnectionString` で接続文字列を戻す。EF Core は別の接続を付けた時点で自分が作った接続を破棄し接続文字列も消すので（SQL Server の `SqlConnection` は破棄で接続文字列を失う。EF Core 10 で実測）、自分の接続を付け直すとプールの文脈が次の貸し出しで開けない。`SetConnectionString` だけを呼ぶと、その時点の接続＝共有の接続の文字列を書き換えようとする（開いていれば例外、閉じていれば利用者の接続を書き換える）。
     - オプションで渡した接続（`Connection` がある）：`IsConnectionOwned` のとおりの所有で戻す。`contextOwnsConnection: true` で渡した接続は差し替えた時点で EF Core が破棄するので戻す側では救えない（この保存の後に文脈ごと破棄されるので、使い回さない限り観測できない。XmlDoc に書く）。
-    - どちらも無い（ファクトリが実行時に `SetDbConnection` で付けた接続）：持ち主でないとして戻す。持ち主かは公開の API で読めないので、利用者の接続を破棄しない側に倒す（`contextOwnsConnection: true` で付けた接続は、付けた側が破棄する）。持ち主として戻すと、文脈の破棄が利用者の接続を破棄し、その接続を渡された次の文脈が開けない。
+    - どちらも無い（ファクトリが実行時に `SetDbConnection` で付けた接続か、実行時の `SetConnectionString`・プロバイダのオプション〔`UseNpgsql(dataSource)`〕から文脈が作った接続）：持ち主かは公開の API で読めないので、共有の接続へ差し替えたときに EF Core がその接続を破棄したか（`Component.Disposed`）で読む。破棄されなければ利用者の接続として持ち主でないものとして戻す（持ち主として戻すと、文脈の破棄が利用者の接続を破棄し、その接続を渡された次の文脈が開けない）。破棄されたら `SetDbConnection(null, true)` を挟み、差し替える前（接続を作る前）に読んだ接続文字列があれば `SetConnectionString` で戻し、文脈が次に使うときに接続を作り直させる。破棄された接続を戻すと、`UseSqlServer()`＋実行時の接続文字列の文脈は接続文字列を失った接続で次の貸し出しに開けない（3 回目の効果測定の HB2）。データソースから作る文脈で接続文字列を戻すかは確かめていない（作らない形の宣言 `BackendParitySqlServerSaveNotGenerated` の Pending）。
     - 作った文脈をコンストラクタが投げたら、破棄して投げ直す（プールへ戻らなくなる）。
-    - ガード：`BackendParityRuntimeTests` の `graph-updated-row-takes-alternate-key-of-deleted-row-user-connections`（`ParityScenario.EfCoreUserConnections`＝利用者が持つ 2 本の接続を交互に渡すファクトリ）と、`BackendParitySqlServerRuntimeTests` の `alternate-key-taken-from-deleted-twice-*`（接続文字列の文脈を使い回すファクトリ＝プールの形・実行時に付けた接続・オプションで渡した接続の対照。値オブジェクトありの生成コードは本物のプールを断るので、破棄を飛ばして同じインスタンスを貸し出し直す派生で作る）。mutation 実証済み（接続文字列の文脈を今の戻し方へ戻すと接続文字列の値だけが、実行時に付けた接続を持ち主として戻すと実行時に付けた接続の値だけが赤）。
+    - ガード：`BackendParityRuntimeTests` の `graph-updated-row-takes-alternate-key-of-deleted-row-user-connections`（`ParityScenario.EfCoreUserConnections`＝利用者が持つ 2 本の接続を交互に渡すファクトリ）と、`BackendParitySqlServerRuntimeTests` の `alternate-key-taken-from-deleted-twice-*`（接続文字列の文脈を使い回すファクトリ＝プールの形・実行時の接続文字列の文脈を使い回すファクトリ・実行時に付けた接続・オプションで渡した接続の対照。値オブジェクトありの生成コードは本物のプールを断るので、破棄を飛ばして同じインスタンスを貸し出し直す派生で作る）。mutation 実証済み（接続文字列の文脈を今の戻し方へ戻すと接続文字列の値だけが、実行時に付けた接続を持ち主として戻すと実行時に付けた接続の値だけが赤）。
   - 分けるかの判定は `GraphSaveOrder.TakesDeletedValue`（後回しの判定と同じ本体を、モデルの代替キーの列だけに絞る）。代替キーでない一意な値の後回しは分けず、1 回の SaveChanges の中で `HasIndex` が並べる（分けると下の `HasIndex` のガードが効かなくなる）。
   - 両方の文脈のエントリはコミットまで保留のまま（`acceptAllChangesOnSuccess: false`）。そのため、0 行の文の分類とやり直し（`IsRowGoneAsync`）・実行戦略の試行の組み直し・採番値のコミット後の反映は、1 つの文脈のときと同じに効く。競合のロールバックの後は、2 つめの文脈をトランザクションから外してから保存先を読む。
 - 代替キーを `SaveChanges` の前に書くので、保存が挿入する行（新しい行・insertWhenUpdateMissing の挿入）は、後ろに渡した更新する行が手放す代替キーを取れる。グラフの順に書く QuickER 版は断る。docs に受け入れた差として書き、実装先の一致の乱数の保存はこの順を作らず、決まった形のケース `alternate-key-new-takes-released-taker-first`・`alternate-key-gone-insert-takes-released-taker-first` が両方の値を固定する（既知の違いの一覧の Accepted・G3-B）。
@@ -180,12 +184,18 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
   - `ResetDbType()` が要る：EF Core はパラメータにプロバイダの型の名前（date）を刻み、Npgsql はそれを DbType より優先する。DbType だけを変えても効かない（実測）。
   - 判定は QuickER 版の `QueryValueFits` の date の枝（`src/QuickER.Runtime.SqlServer/CLAUDE.md`「SqlParameter の明示型」）と同じ規則。0 時ちょうどの値は列の型のまま（SQL・索引の使われ方を変えない）。
   - 小数・文字列の枝は持たない：PostgreSQL の EF Core 版は numeric（精度なし）と text で送り、桁・文字が落ちない（区切り D3 の実 DB の総当たりで測った）。
+  - IN のリスト（`date[]`）：EF Core はリストを 1 つの配列のパラメータで送り、型を `date[]` にする（DbType は Object なので、要素の型は Npgsql の `DataTypeName` を名前で読む＝`DataTypeNameOf`）。時刻つきの `DateTime` の要素を含むリストだけ、`ResetDbType()` の後に要素の Kind を外した配列（null を含めば `DateTime?[]`）へ入れ直す。Npgsql は値から timestamp の配列を選び（`DataTypeName` が `timestamp without time zone[]`）、PostgreSQL は列を timestamp と比べる。経路は単一の値と同じ 3 つ（SET にリストは来ず、`date[]` の列への SET も代入の変換で日付になる）。
+- Kind の枝：Npgsql は Kind=Utc の `DateTime` を timestamp without time zone として送らず `ArgumentException` で断る（C# は 2 つの `DateTime` を tick で比べ Kind を見ない）。timestamp で送る値は、同じ tick の `DateTimeKind.Unspecified` にして送る（`WithoutKind`。Local も同じ）。
+  - date の枝が timestamp へ送り直す値（単一の値・リスト）は、経路に依らず Kind を外す（送り直さなければ date のまま。Npgsql は Utc の値も date で送るので、0 時ちょうどの Utc の値は変えない）。
+  - EF Core が timestamp と型を付けた値（DbType が DateTime2 の単一の値と、`DataTypeName` が `timestamp without time zone[]` のリストで Kind が Unspecified でない要素を含むもの）は、LinqQuery と、文が DELETE で始まる ExecuteDelete のコマンド（見分け方は `SqlServerQueryParameterInterceptor.IsDeleteCommand` を共有。TagWith のコメントの行を飛ばす）でだけ Kind を外す。ExecuteUpdate の値は SET と WHERE を見分けられないので変えず、timestamp の列へ書く Utc の値は Npgsql の規則のまま断られる（docs の既知の割り切り。WHERE の Utc の値も断られる）。
+  - timestamptz（DbType が DateTime・`timestamp with time zone[]`）は Utc の値だけを受けるので触れない。
+  - 定数・行に依らないメソッド呼び出しの値は EF Core が SQL のリテラルで書き、Npgsql が Utc の値から timestamp のリテラルを作れずに断る。パラメータでないので直せない（docs の EF Core モードの PostgreSQL の列型の項：変数で渡す）。
 - `time` の枝：生成の DbContext は PostgreSQL の `time` の列に列の型 `time` を教える（範囲の外の値の書き込みを DB に断らせるため。教えないと interval で送られ、PostgreSQL が日の部分を黙って落として保存する＝`src/QuickER.Provider.PostgreSql/CLAUDE.md`「型マッパー」）。すると範囲の外の値との比較も `time` で送られて 22008 で断られるので、出どころが **LinqQuery のコマンドだけ**、DbType が Time で値が 0〜24:00:00 の外の `TimeSpan` のパラメータと、範囲の外の `TimeSpan` の要素を含む列挙のパラメータ（IN のリスト）を `ResetDbType()` する。Npgsql は値から interval を選び、PostgreSQL は列を interval と比べて C# と同じ答えになる。範囲の中の値は `time` のまま。
   - ExecuteDelete・ExecuteUpdate のコマンドには掛けない：EF Core 10 は ExecuteDelete のコマンドも出どころ `ExecuteUpdate`（`BulkUpdate` と同じ値）で報告し（実測）、ExecuteUpdate の SET の値を interval で送ると PostgreSQL の代入が日の部分を黙って落とす。だから、カスケードなしの `ExecuteDeleteAsync` と `ExecuteUpdate` の条件の範囲の外の値は 22008 で断られる（docs の既知の割り切り）。カスケードありの `ExecuteDeleteAsync` はキーを LinqQuery で読むので C# と同じ答え。
   - 値オブジェクトの列の IN のリストも同じ判定で外れる（総当たりの PostgreSQL の値オブジェクトの単位が範囲の外の値を含むリストを作る）。
-- SaveChanges のコマンドは変えない（`date` の列へ書く値は日付として保存され、`time` の列の範囲の外の値は断られる）。
+- SaveChanges のコマンドは変えない（`date` の列へ書く値は日付として保存され、`time` の列の範囲の外の値は断られ、`timestamp` の列へ書く Utc の値は断られる）。
 - 登録は `AddGeneratedEfCoreRepositories` が `SqliteBusyTimeoutInterceptor`・`SqlServerQueryParameterInterceptor` と並べて足す。DbContext を自分で組む利用者は `Instance` を足す（docs）。
-- ガード：`table:TranslatorParityPredicates`（EF Core の PostgreSQL の派生 `TranslatorParityEfCorePostgreSqlRuntimeTests`・行 `date-*-time-of-day`・`time-out-of-day-*`）・`table:PostgreSqlQueryParameters`（DB を使わない行の表＝どのコマンドのどのパラメータを直し、どれを直さないか）・`PostgreSqlDialectTypeRealDbTests`（書き込みの範囲の手順の ExecuteUpdate の経路＝生成と同じインターセプターを付けて流す）・`Dsl/PostgreSql`（time の列と範囲の外の値・その値オブジェクトのリスト）・`SqliteBusyTimeoutInterceptorTests.GeneratedRegistration_AddsInterceptorAfterConfigure`（生成の DI の登録）。mutation 実証済み（登録を外すと表の 2 行が赤。time の枝を外すと行の表 4 件・述語の表の負の値の 4 行・総当たりが赤、枝を ExecuteUpdate の出どころへも掛けると行の表 2 件と実 DB の段の ExecuteUpdate の経路が赤、IN のリストの枝を外すと行の表 1 件・述語の表 `time-out-of-day-not-in-only`・総当たりが赤）
+- ガード：`table:TranslatorParityPredicates`（EF Core の PostgreSQL の派生 `TranslatorParityEfCorePostgreSqlRuntimeTests`・行 `date-*-time-of-day`・`time-out-of-day-*`）・`GeneratedRuntime/TranslatorParityBindings`（EF Core の PostgreSQL の派生の束縛の行＝Kind・値の数・経路の水準と、分岐の軸の台帳の ha1・ha2 の指摘のセル `ha1-date-less-utc-time-of-day`・`ha2-date-in-list-time-of-day` の証拠 `utc-date-parameter-sent-without-kind`・`date-list-sent-as-timestamp-array`）・`table:PostgreSqlQueryParameters`（DB を使わない行の表＝どのコマンドのどのパラメータを直し、どれを直さないか。Kind の行 `date-utc-*`・`timestamp-*`・`timestamptz-*` とリストの行 `date-in-list-*`・`timestamp-in-list-*`・`date-in-nullable-list-with-null-keeps-null`）・`PostgreSqlDialectTypeRealDbTests`（書き込みの範囲の手順の ExecuteUpdate の経路＝生成と同じインターセプターを付けて流す）・`Dsl/PostgreSql`（time の列と範囲の外の値・その値オブジェクトのリスト）・`SqliteBusyTimeoutInterceptorTests.GeneratedRegistration_AddsInterceptorAfterConfigure`（生成の DI の登録）。mutation 実証済み（登録を外すと表の 2 行が赤。time の枝を外すと行の表 4 件・述語の表の負の値の 4 行・総当たりが赤、枝を ExecuteUpdate の出どころへも掛けると行の表 2 件と実 DB の段の ExecuteUpdate の経路が赤、IN のリストの枝を外すと行の表 1 件・述語の表 `time-out-of-day-not-in-only`・総当たりが赤）
 
 ### SQL Server と Oracle の既定の decimal の型
 
@@ -205,12 +215,15 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
   - 「sbyte・byte・short・ushort・int・uint・long（と null 許容）を decimal へ広げた `Convert`」と「ラムダの引数を読まない式」の `==` を `Matches(v) && (long?)x == KeyOf(v)` に、`!=` をその否定に、`Contains`（インスタンス・静的のどちらも、値の型が `IEnumerable`。C# 14 は式の木の中の配列の `Contains` を `MemoryExtensions.Contains(ReadOnlySpan<T>, T, null)` に結び付けるので、第 1 引数の `op_Implicit` を剥がした元の配列を値にする。既定でない比較器を渡した呼び出しは書き換えない）を `KeysOf(values).Contains((long?)x)` に書き換える。ulong は long に入らないので書き換えない。
   - `Matches`・`KeyOf`・`KeysOf` は値だけを見る（null は null・long の範囲の整数の値はその整数・それ以外はどの行にも一致しない）ので、EF Core はクライアントで評価してパラメータにする。書き換えた条件は null を含めて C# の条件と同じ意味（`!=` の NULL の行は EF Core の C# の null の意味論が補う）。
   - 順序比較と decimal の列の比較は書き換えない（今の翻訳が正しいので変えない）。小数との等値は書き換え、`Matches` が偽になってどの行にも一致しない（C# と同じ）。
+  - 値の並びは `KeysOf` へ `IEnumerable` への明示の `Convert` を通して渡す（値型のコレクション＝`ImmutableArray<decimal?>` は `Expression.Call` が自分でボックス化しない）。外すと値型のコレクションの `Contains` が書き換えの組み立てで `ArgumentException` になる（3 回目の効果測定の HA3。Npgsql の書き換えも同じく `Convert` を通す）。ガード：`GeneratedRuntime/TranslatorParityBindings`（値の形 `immutable-array`＝整数の列と整数の値の decimal の `ImmutableArray` の IN）。
 - 型は internal（公開 API 面を変えない）。式の木から呼ぶ補助のメソッドも private で、EF Core のクライアントの評価は呼べる（実測）。パッケージ用ソースは `System.Collections` を using しないので、非総称の `IEnumerable` は完全修飾で書く。
 - ほかのプロバイダには掛けない（ユーザーの決定）。書き換えた形は C# と同じ意味なので掛けても答えは変わらないが、PostgreSQL・MySQL・Oracle の EF Core は整数と decimal の等値をそのまま正しく翻訳する（区切り D3 の実 DB の述語の表と総当たりで測った）ので、SQL を変える理由が無い。
 - 届かないもの：利用者が DbContext を直接使う LINQ（Repository の `Query()` を通らない）。
 - SQLite の QuickER 版は decimal を TEXT のパラメータで送り、SQLite の型の親和性で REAL として比べるので、整数の列と極端な decimal（long の上限の decimal・小数 23 桁の 1 の近傍）の比較が C# と割れる（実測。docs に約束の無い領域で、この節の書き換えとは別の実装）。EF Core 版はこの書き換えで C# と同じになる。
 - ガード：`table:TranslatorParityPredicates`（EF Core の SQLite の派生 `TranslatorParityEfCoreSqliteRuntimeTests`＝SQL Server 方言で生成した `TranslatorParityEfCoreFixture` を `UseSqlite` で流す。行 `int-column-*-decimal-integral-*`・`in-decimal-list-int-column`・`in-decimal-array-int-column`・`bigint-column-equals-decimal-integral-variable`・`in-decimal-list-bigint-column`。`time-scaled-less-finer` は SQLite のプロバイダが TimeSpan の大小を翻訳できない事実として派生の `Known` に宣言）・`Dsl/SqliteMySql`（bigint の列と decimal の型トークンのパラメータの整数の値の池）。mutation 実証済み（書き換えを外すと表の 6 行と総当たりの EF Core〔SQLite〕の 2 件が赤、IN の書き換えだけを外すと表の IN の 2 行が赤、配列の `op_Implicit` を剥がさないと表の配列の行が赤。判定を常に真にする壊し方は SQL Server でも答えが変わらず、赤にできない）
 - 書き換えの共有の部品（ラムダの引数を読まない式の判定 `IsRowFree`・`Contains` の値と項目の取り出し `ContainsOperands`・`ParameterFinder`）は internal の `PredicateExpressionParts` に置き、下の Npgsql の書き換えと共有する（写しを作らない）。
+  - `IsRowFree` が数えるのは、走査する式の外のラムダの引数（行）だけ。走査する式の中のラムダが自分で宣言した引数（`prices.Select(p => p).ToList()` の `p`）は数えない（`ParameterFinder` が入れ子のラムダの引数を覚えて外す）。数えると、ラムダを含む行に依らない値の式が書き換えから漏れ、SQLite は文字列で比べてどの行にも当たらず、PostgreSQL は null を含む値オブジェクトの IN で `NullReferenceException` になる。中のラムダが行を読む値（`p => p + x.Id`）は行に依るので書き換えない。
+  - ガード：`GeneratedRuntime/TranslatorParityBindings`（EF Core の SQLite の派生の束縛の行の値の形 `lambda`・分岐の軸の台帳の ha4 の指摘のセル `ha4-int-in-decimal-lambda-list` の証拠 `row-free-lambda-rewritten`）・`CodegenCaseTests` の行 `exec-efcore-sqlite-integral-decimal-rewrite-values-with-own-lambda`・`exec-efcore-npgsql-value-object-list-nulls-rewrite-values-with-own-lambda`（生成物の 2 つの書き換えへ、中のラムダの引数だけを読む値と行を読む値を通し、書き換えたかと書き換えた述語の答えを見る。DB を使わない）。
 
 ### PostgreSQL の値オブジェクトの IN の null
 
@@ -221,7 +234,7 @@ EF Core で 3 段に従うのは記録の順（＝フックの順）だけで、
 - 型は internal（公開 API 面を変えない）。
 - 値変換の provider の型を null 許容にする案は採らない：全部の値オブジェクトの列（主キー・外部キーを含む）の EF Core のモデルが全方言で変わる。null を既定値へ写す案は、配列の要素が 0 などになって意味が変わる。
 - 届かないもの：利用者が DbContext を直接使う LINQ（docs）。
-- ガード：`Dsl/PostgreSql`（値オブジェクトの単位の IN の形 in-with-null・in-all-null を、int16・int32・int64・decimal・datetime・guid の列で実 PostgreSQL の EF Core 版と C# で比べる）。mutation 実証済み（書き換えを止めると総当たりの 64 件が赤）
+- ガード：`Dsl/PostgreSql`（値オブジェクトの単位の IN の形 in-with-null・in-all-null を、int16・int32・int64・decimal・datetime・guid の列で実 PostgreSQL の EF Core 版と C# で比べる）・`CodegenCaseTests` の行 `exec-efcore-npgsql-value-object-list-nulls-rewrite-values-with-own-lambda`（ラムダを含む値の式）。mutation 実証済み（書き換えを止めると総当たりの 64 件が赤）
 
 ### 値オブジェクトの文字列一致の LIKE
 

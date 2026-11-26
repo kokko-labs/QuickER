@@ -159,8 +159,11 @@ public abstract record ParityOp
         EntityBaseCore root,
         ParitySaveOptions options,
         CancellationToken ct
-    ) =>
-        root switch
+    )
+    {
+        ParityHookRecorder.BeginSave(backend.Hooks);
+
+        return root switch
         {
             CustomerEntity c => backend.Customers.SaveAsync(
                 c,
@@ -196,6 +199,7 @@ public abstract record ParityOp
             ),
             _ => throw new ArgumentException(root.GetType().Name, nameof(root)),
         };
+    }
 
     /// <summary>スロットの根を返す（無ければテストの書き誤り）</summary>
     protected static EntityBaseCore Root(ParityBackend backend, string slot) =>
@@ -557,6 +561,7 @@ public sealed record SaveManyOrdersOp(
     {
         var options = Options ?? new();
         var roots = SlotNames.Select(s => (OrderEntity)Root(backend, s)).ToList();
+        ParityHookRecorder.BeginSave(backend.Hooks);
         var rows = await backend.Orders.SaveAsync(
             roots,
             options.CascadeSave,
@@ -578,6 +583,7 @@ public sealed record SaveManyCustomersOp(IReadOnlyList<string> SlotNames) : Pari
     public override async Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
     {
         var roots = SlotNames.Select(s => (CustomerEntity)Root(backend, s)).ToList();
+        ParityHookRecorder.BeginSave(backend.Hooks);
         var rows = await backend.Customers.SaveAsync(roots, cancellationToken: ct);
 
         return $"rows={rows}";
@@ -1006,6 +1012,37 @@ public sealed record LinkContactOp(
         var parent = (CustomerEntity)Find(backend, Slot, ParentKey);
         var contact = (ContactEntity)Find(backend, Slot, ContactKey);
         ParityContactRelations.CollectionOf(parent, Relation).Add(contact);
+
+        return Task.FromResult("linked");
+    }
+}
+
+/// <summary>
+/// スロットのグラフの顧客（同じインスタンス）を、同じグラフの顧客の紹介先のコレクションへもう一度足す（保存が同じインスタンスに
+/// 2 つの道で届くグラフを作る。外部キーは変えない）
+/// </summary>
+public sealed record LinkChildCustomerOp(string Slot, string ParentKey, string ChildKey) : ParityOp
+{
+    public override Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var parent = (CustomerEntity)Find(backend, Slot, ParentKey);
+        var child = (CustomerEntity)Find(backend, Slot, ChildKey);
+        parent.Customers.Add(child);
+
+        return Task.FromResult("linked");
+    }
+}
+
+/// <summary>
+/// 別のスロット（<paramref name="RootSlot"/>）の根の顧客を、スロットのグラフの顧客の紹介先のコレクションへ足す（同じインスタンスを
+/// 2 つのグラフに置き、複数形の SaveAsync で 2 つの道から届かせる）
+/// </summary>
+public sealed record LinkRootCustomerOp(string Slot, string ParentKey, string RootSlot) : ParityOp
+{
+    public override Task<string> RunAsync(ParityBackend backend, CancellationToken ct)
+    {
+        var parent = (CustomerEntity)Find(backend, Slot, ParentKey);
+        parent.Customers.Add((CustomerEntity)Root(backend, RootSlot));
 
         return Task.FromResult("linked");
     }

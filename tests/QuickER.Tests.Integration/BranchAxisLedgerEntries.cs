@@ -305,18 +305,19 @@ internal static class BranchAxisLedgerEntries
                 "子の列の NOT NULL 化（ChildNotNull）・NULL 許容化（ChildNullability）・型の変更（ChildOnly ほか）× 列の既定値の有無（網羅の行）"
             )
         ),
-        Planned(
+        BoundFixed(
             "ha1",
             "PostgreSQL の EF Core 版で、date の列と Kind=Utc の時刻つき DateTime を比べると、インターセプターが timestamp で送り直し、Npgsql が ArgumentException で断る（区切り D3 の直し残し・再現は v7-efcore-repro.patch）",
             ValueBinding,
-            new PlannedBinding(
-                "述語の生成の表（区切り a）",
-                "列の型 × 値が時刻つきか × DateTimeKind",
-                "EF Core 版の PostgreSQL：date の列と Kind=Utc の時刻つき DateTime の比較",
-                "値を列の型へ落とした述語と C# の答えが違う（Kind は組になる値の水準の条件で数える）"
+            new BranchBinding(
+                BindingTable,
+                [new("ColumnType", "date"), new("DateTimeKind", "utc")],
+                "ha1-date-less-utc-time-of-day",
+                ["EfCorePostgreSql"],
+                "utc-date-parameter-sent-without-kind",
+                []
             ),
-            "C# の評価との一致（例外も不一致）",
-            "区切り a（未起動）",
+            EfCoreBindingJudge,
             AxisAnswer.Cross(
                 "column-type",
                 "date・timestamp・timestamptz の列（PostgreSQL）と、同じ判定を持つほかの方言の date の列"
@@ -344,18 +345,19 @@ internal static class BranchAxisLedgerEntries
                 "EF Core 版の PostgreSQL（指摘）× ほかの EF Core のプロバイダと QuickER 版・インメモリ（C# の評価との一致で同じ行を流す）"
             )
         ),
-        Planned(
+        BoundFixed(
             "ha2",
             "PostgreSQL の EF Core 版で、date の列への DateTime の IN のリストは配列のパラメータなので送り直されず、時刻が落ちて C# と違う行を返す（区切り D3 の直し残し＝time の枝はリストを扱うが date の枝は扱わない・再現は v7-efcore-repro.patch）",
             ValueBinding,
-            new PlannedBinding(
-                "述語の生成の表（区切り a）",
-                "列の型 × 値の数（リスト）× 値が時刻つきか",
-                "EF Core 版の PostgreSQL：date の列への時刻つき DateTime の IN・NOT IN",
-                "時刻を落とした述語と C# の答えが違う"
+            new BranchBinding(
+                BindingTable,
+                [new("ColumnType", "date"), new("ValueCount", "list")],
+                "ha2-date-in-list-time-of-day",
+                ["EfCorePostgreSql"],
+                "date-list-sent-as-timestamp-array",
+                []
             ),
-            "C# の評価との一致",
-            "区切り a（未起動）",
+            EfCoreBindingJudge,
             AxisAnswer.Cross(
                 "column-type",
                 "date・time の列（PostgreSQL）と、同じリストの判定を持つほかの方言の列"
@@ -377,18 +379,19 @@ internal static class BranchAxisLedgerEntries
                 "EF Core 版の PostgreSQL（指摘）× ほかの EF Core のプロバイダと QuickER 版・インメモリ"
             )
         ),
-        Planned(
+        BoundFixed(
             "ha4",
             "SQLite の EF Core 版で、比べる値の式がラムダを含むと IsRowFree が行に依ると数えて書き換えを飛ばし、整数の列と decimal の値の IN が C# の 3 行に対して 0 行を返す（区切り CT の直し残し・再現は v7-efcore-repro.patch）",
             ValueBinding,
-            new PlannedBinding(
-                "述語の生成の表（区切り a）",
-                "整数の列 × decimal の値 × 値の形（ラムダを含む式）",
-                "EF Core 版の SQLite：整数の列と、ラムダを含む式で作った decimal のリストの IN",
-                "整数へ切った述語と C# の答えが違う"
+            new BranchBinding(
+                BindingTable,
+                [new("ValueShape", "lambda"), new("ValuePool", "integral-decimal")],
+                "ha4-int-in-decimal-lambda-list",
+                ["EfCoreSqlite"],
+                "row-free-lambda-rewritten",
+                []
             ),
-            "C# の評価との一致",
-            "区切り a（未起動）",
+            EfCoreBindingJudge,
             AxisAnswer.Cross(
                 "column-type",
                 "整数の列（int・bigint）と decimal の列（書き換えない対照）"
@@ -413,18 +416,19 @@ internal static class BranchAxisLedgerEntries
                 "EF Core 版の SQLite（指摘）× 同じ IsRowFree を使う PostgreSQL の値オブジェクトの IN の書き換え・QuickER 版・インメモリ"
             )
         ),
-        Planned(
+        BoundFixed(
             "xb1",
             "SQL Server の QuickER 版で、日付部品（.Date）との比較は列名が取れないので値が AddWithValue に落ち、DateTime が datetime で束縛されて 1/300 秒へ丸められる（1753 年より前は例外）（修正 G2 の直し残し・再現は v10-xbind-xtranslator-repro.patch）",
             ValueBinding,
-            new PlannedBinding(
-                "述語の生成の表（区切り a）",
-                "日付部品 × 値が列の型に入らない（刻みの外・1753 年より前）",
-                "QuickER 版の SQL Server：日付部品との比較の値が datetime で束縛される",
-                "1/300 秒へ丸めた述語と C# の答えが違う"
+            new BranchBinding(
+                BindingTable,
+                [new("ColumnShape", "date-part")],
+                "xb1-date-part-equal-tick-before-midnight",
+                ["AdoSqlServer"],
+                "date-part-value-bound-as-datetime2",
+                []
             ),
-            "C# の評価との一致",
-            "区切り a（未起動）",
+            QuickErBindingJudge,
             AxisAnswer.Cross("column-type", "datetime・datetime2・date・smalldatetime の列"),
             AxisAnswer.Cross(
                 "value-pool",
@@ -443,18 +447,19 @@ internal static class BranchAxisLedgerEntries
                 "QuickER 版の SQL Server（指摘）× SQLite・インメモリ（一致の対照）・EF Core 版の SQL Server"
             )
         ),
-        Planned(
+        BoundFixed(
             "xt4",
             "式の翻訳器が値を変える明示の型変換を黙って外す（値の側の (int)ratio は小数のまま束縛し、列の側の (byte)x.Id は変換なしの列と比べる）。SQLite・SQL Server の QuickER 版が C# と違う行を返す（前からある新規・再現は v10-xbind-xtranslator-repro.patch）",
             ValueBinding,
-            new PlannedBinding(
-                "述語の生成の表（区切り a）",
-                "型変換で値が実際に変わるか × 値の側・列の側",
-                "QuickER 版の SQLite・SQL Server：値を変える明示の型変換を外した述語",
-                "変換を外した述語と C# の答えが違う"
+            new BranchBinding(
+                BindingTable,
+                [new("ValueShape", "narrowing-cast"), new("ValuePool", "fraction-cut-by-cast")],
+                "xt4-value-narrowing-cast-equal",
+                ["AdoSqlite", "AdoSqlServer"],
+                "narrowing-cast-honoured",
+                []
             ),
-            "C# の評価との一致",
-            "区切り a（未起動）",
+            QuickErBindingJudge,
             AxisAnswer.Cross("column-type", "整数の列（byte・int・long）と小数の値・範囲の外の値"),
             AxisAnswer.Cross(
                 "value-pool",
@@ -466,7 +471,7 @@ internal static class BranchAxisLedgerEntries
             AxisAnswer.Cross("comparison", "等値・順序・IN"),
             AxisAnswer.Cross(
                 "query-path",
-                "QuickER 版の翻訳器（LinqQuery・ExecuteDelete・ExecuteUpdate）"
+                "QuickER 版の翻訳器（LinqQuery・ExecuteDelete。QuickER 版に ExecuteUpdate の経路は無い）と、EF Core 版の LinqQuery・ExecuteDelete・ExecuteUpdate（対照）"
             ),
             AxisAnswer.Cross(
                 "backend",
@@ -475,16 +480,16 @@ internal static class BranchAxisLedgerEntries
         ),
     ];
 
-    /// <summary>予定の項目（因子の名前を文で持つ・表に未結び）</summary>
-    private static BranchAxisItem Planned(
-        string id,
-        string finding,
-        string area,
-        PlannedBinding plan,
-        string judge,
-        string fixedIn,
-        params AxisAnswer[] answers
-    ) => new(id, finding, area, BranchAxisStatus.Planned, plan, null, judge, answers, fixedIn);
+    /// <summary>値の束縛の生成の表の台帳の部分の名前</summary>
+    private const string BindingTable = "GeneratedRuntime/TranslatorParityBindings";
+
+    /// <summary>QuickER 版・インメモリの指摘のセルの判定役（値の束縛の生成の表と、指摘のセルの照合）</summary>
+    private const string QuickErBindingJudge =
+        "`GeneratedRuntime/TranslatorParityBindings`（`TranslatorParityRuntimeTestsBase.LedgerCells_FollowStatus`・`TranslatorParityRuntimeTestsBase.Binding_MatchesCSharp`）";
+
+    /// <summary>EF Core 版の指摘のセルの判定役（値の束縛の生成の表と、指摘のセルの照合）</summary>
+    private const string EfCoreBindingJudge =
+        "`GeneratedRuntime/TranslatorParityBindings`（`TranslatorParityEfCoreRuntimeTestsBase.LedgerCells_FollowStatus`・`TranslatorParityEfCoreRuntimeTestsBase.Binding_MatchesCSharp`）";
 
     /// <summary>結び済み・修正済みの項目（同期の計画の領域・区切り c で直した）</summary>
     private static BranchAxisItem BoundFixed(
@@ -493,16 +498,15 @@ internal static class BranchAxisLedgerEntries
         BranchBinding binding,
         string judge,
         params AxisAnswer[] answers
-    ) =>
-        new(
-            id,
-            finding,
-            SyncPlan,
-            BranchAxisStatus.BoundFixed,
-            null,
-            binding,
-            judge,
-            answers,
-            null
-        );
+    ) => BoundFixed(id, finding, SyncPlan, binding, judge, answers);
+
+    /// <summary>結び済み・修正済みの項目（領域を名指す。値の束縛の領域は区切り a で直した）</summary>
+    private static BranchAxisItem BoundFixed(
+        string id,
+        string finding,
+        string area,
+        BranchBinding binding,
+        string judge,
+        params AxisAnswer[] answers
+    ) => new(id, finding, area, BranchAxisStatus.BoundFixed, null, binding, judge, answers, null);
 }

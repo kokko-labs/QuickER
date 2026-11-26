@@ -1878,6 +1878,7 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
             plan.Skip,
             cancellationToken
         ).ConfigureAwait(false);
+
         if (roots.Count == 0)
         {
             return null;
@@ -2067,6 +2068,7 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
         var ordinals = metadata.SelectOrdinals(reader);
 
         var roots = new List<TEntity>();
+
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             roots.Add((TEntity)(object)metadata.MapEntityObject(reader, ordinals));
@@ -2105,6 +2107,7 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
     private static List<string> BuildOrderings(SqlQueryPlan<TEntity> plan)
     {
         var orderings = new List<string>(plan.Orderings.Count);
+
         foreach (var ordering in plan.Orderings)
         {
             orderings.Add(
@@ -2128,6 +2131,7 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
         }
 
         var conditions = new List<string>(plan.Predicates.Count);
+
         foreach (var predicate in plan.Predicates)
         {
             conditions.Add(SqlExpressionTranslator.ToCondition(predicate.Body, parameters));
@@ -2158,6 +2162,7 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
     )
     {
         var metadata = EntitySaveMetadata.For(typeof(TEntity));
+
         foreach (var parameter in parameters)
         {
             var value =
@@ -2248,10 +2253,12 @@ public sealed class IncludeLoader
         // The query binds a value per distinct key: the normalized key itself, except a binary key, whose normalized form is
         // text that matches nothing in the column, so the bytes are bound instead
         var boundByKey = new Dictionary<object, object>();
+
         foreach (var parent in parents)
         {
             var raw = _metadata.GetColumnValue((EntityBaseCore)parent, parentKeyColumn);
             var key = IncludeKeys.Normalize(raw);
+
             if (key is not null)
             {
                 boundByKey.TryAdd(key, SqlParameterValue.Unwrap(raw) is byte[] bytes ? bytes : key);
@@ -2259,6 +2266,7 @@ public sealed class IncludeLoader
         }
 
         var distinctKeys = boundByKey.Values.ToList();
+
         if (distinctKeys.Count == 0)
         {
             return;
@@ -2274,9 +2282,11 @@ public sealed class IncludeLoader
 
         // Group the children by FK value and bind them to their parents
         var childrenByKey = new Dictionary<object, List<EntityBaseCore>>();
+
         foreach (var child in children)
         {
             var fk = IncludeKeys.Normalize(childMetadata.GetColumnValue(child, childKeyColumn));
+
             if (fk is null)
             {
                 continue;
@@ -2323,6 +2333,7 @@ public sealed class IncludeLoader
         {
             var count = Math.Min(InClauseChunkSize, keys.Count - offset);
             var placeholders = new string[count];
+
             for (var i = 0; i < count; i++)
             {
                 placeholders[i] = "@i" + i;
@@ -2333,6 +2344,7 @@ public sealed class IncludeLoader
                 + $"WHERE {EntitySaveMetadata.QuoteIdentifier(childKeyColumn)} IN ({string.Join(", ", placeholders)});";
 
             await using var command = new SqliteCommand(sql, connection);
+
             for (var i = 0; i < count; i++)
             {
                 command.Parameters.AddWithValue(placeholders[i], keys[offset + i]);
@@ -2377,6 +2389,7 @@ public sealed class IncludeLoader
                 // Create a concrete List for ICollection<childType> and fill in each element
                 var listType = typeof(List<>).MakeGenericType(childType);
                 var list = (System.Collections.IList)Activator.CreateInstance(listType)!;
+
                 foreach (var child in matched)
                 {
                     list.Add(child);
@@ -2406,19 +2419,20 @@ public static class SqlExpressionTranslator
     ) => Visit(expression, parameters);
 
     /// <summary>Extracts the bracketed column name from a key-selecting lambda.</summary>
-    public static string ToColumn(LambdaExpression keySelector)
-    {
-        var member = Unwrap(keySelector.Body) as MemberExpression;
+    /// <remarks>
+    /// The key is resolved as a column operand of a comparison is: a plain column, or the column a <c>.Value</c> reads (a nullable column's
+    /// <c>x.Flag.Value</c> or a value object's <c>x.Code.Value</c>), with the casts around it handled as for a comparison
+    /// (see ColumnConversionsSql). A NULL column then sorts as SQL sorts NULL, where C# would throw on reading <c>.Value</c>.
+    /// </remarks>
+    public static string ToColumn(LambdaExpression keySelector) =>
+        TryColumnName(keySelector.Body)
+        ?? throw new NotSupportedException(
+            $"Only entity properties can be specified as an ordering: {keySelector}"
+        );
 
-        if (member is null || !IsColumn(member))
-        {
-            throw new NotSupportedException(
-                $"Only entity properties can be specified as an ordering: {keySelector}"
-            );
-        }
-
-        return ColumnName(member.Member);
-    }
+    /// <summary>The column a bare boolean operand reads (a bool column, or the <c>.Value</c> of a nullable bool column or of a bool value object); null for any other operand.</summary>
+    private static string? BoolColumn(Expression expression) =>
+        expression is MemberExpression member && member.Type == typeof(bool) ? TryColumnName(member) : null;
 
     /// <summary>The SQL a condition folded to true is written as.</summary>
     private const string AlwaysTrue = "1 = 1";
@@ -2590,15 +2604,25 @@ public static class SqlExpressionTranslator
                         : $"{eqColumn} = {eqArgColumn}";
                 }
 
+                var eqValue = Evaluate(eqArg);
+
+                // Equals(object) is false in C# for an argument of another type (int.Equals((object)10L), decimal?.Equals((object)10)),
+                // whatever the column holds, so it folds to the always-false condition (and its negation to always-true) instead of
+                // comparing the column with a value C# never treats as equal
+                if (IsOtherTypeForEqualsObject(call, eqValue))
+                {
+                    return AlwaysFalse;
+                }
+
                 // The value is unwrapped to the raw value on the AddParameters side (value-object support)
-                var eqParameter = AddParameter(Evaluate(eqArg), parameters, RawColumnName(eqColumn));
+                var eqParameter = AddParameter(eqValue, parameters, RawColumnName(eqColumn));
                 // Case-insensitive comparisons fold both sides with LOWER
                 return eqIgnoreCase
                     ? $"LOWER({eqColumn}) = LOWER({eqParameter})"
                     : $"{eqColumn} = {eqParameter}";
 
-            case MemberExpression member when member.Type == typeof(bool) && IsColumn(member):
-                return $"{ColumnName(member.Member)} = 1";
+            case MemberExpression member when BoolColumn(member) is { } boolColumn:
+                return $"{boolColumn} = 1";
 
             default:
                 throw new NotSupportedException($"This expression cannot be translated to SQL: {expression}");
@@ -2670,11 +2694,13 @@ public static class SqlExpressionTranslator
         var left = Unwrap(binary.Left);
         var right = Unwrap(binary.Right);
 
-        // Resolve both sides once: SQL-side operands keep their SQL text, value-side operands are evaluated here (and reused below)
-        var leftSql = OperandSql(left);
-        var rightSql = OperandSql(right);
-        var leftValue = leftSql is null ? Evaluate(left) : null;
-        var rightValue = rightSql is null ? Evaluate(right) : null;
+        // Resolve both sides once: SQL-side operands keep their SQL text, value-side operands are evaluated here (and reused below).
+        // Both start from the operand as written: the column side applies the casts around the column as C# does or refuses them
+        // (see ColumnConversionsSql), and the value side keeps every conversion that changes the bound value (see EvaluateValue)
+        var leftSql = OperandSql(binary.Left);
+        var rightSql = OperandSql(binary.Right);
+        var leftValue = leftSql is null ? EvaluateValue(binary.Left) : null;
+        var rightValue = rightSql is null ? EvaluateValue(binary.Right) : null;
 
         if (nodeType is ExpressionType.Equal or ExpressionType.NotEqual)
         {
@@ -2691,12 +2717,9 @@ public static class SqlExpressionTranslator
             }
         }
 
-        // An integer column that C# converts to float or double for the comparison is compared as a REAL (see AsFloatingColumn),
-        // and so is an integer value (see AsFloatingValue)
+        // An integer column that C# converts to float or double for the comparison is compared as a REAL (see AsFloatingColumn)
         leftSql = AsFloatingColumn(binary.Left, leftSql);
         rightSql = AsFloatingColumn(binary.Right, rightSql);
-        leftValue = AsFloatingValue(binary.Left, leftValue);
-        rightValue = AsFloatingValue(binary.Right, rightValue);
 
         // "not equal to a non-null value" also has to admit the rows whose column is NULL (see the remarks); the null
         // value cases have already returned above, so what reaches here is exactly the non-null comparison
@@ -2751,29 +2774,15 @@ public static class SqlExpressionTranslator
     /// SQLite compares an INTEGER with a REAL exactly, while C# first converts the integer to the floating-point type, which
     /// rounds an integer beyond 2^53 for a <c>double</c>; without the cast such a row would answer differently. SQLite has no
     /// single-precision type, so a comparison made in <c>float</c> is made in <c>double</c> here (only hand-written LINQ can
-    /// form one: a named query's float32 is a double on SQLite). The value side is bound as it is (Microsoft.Data.Sqlite binds
-    /// a <c>double</c> as a REAL), and losing the bare column name changes nothing, since SQLite binds every value with
-    /// AddWithValue.
+    /// form one: a named query's float32 is a double on SQLite). The value side needs nothing of the kind: an integer value that
+    /// C# would round on its way to <c>float</c> or <c>double</c> is converted before it is bound (see EvaluateValue), and an
+    /// integer that converts exactly compares with the REAL column as it is. Losing the bare column name changes nothing, since
+    /// SQLite binds every value with AddWithValue.
     /// </remarks>
     private static string? AsFloatingColumn(Expression operand, string? sql) =>
         sql is not null && IsFloatingType(operand.Type) && IsIntegerType(Unwrap(operand).Type)
             ? $"CAST({sql} AS REAL)"
             : sql;
-
-    /// <summary>
-    /// The value an operand is bound with: an integer value that C# converts to <c>float</c> or <c>double</c> for the comparison
-    /// is converted to <c>double</c> here, so it is bound as a REAL. Any other value is returned as it is.
-    /// </summary>
-    /// <remarks>
-    /// The translator evaluates a value operand with its conversions unwrapped, so <c>x.Ratio == count</c> (a <c>long</c>
-    /// compared with a <c>double</c> column) would otherwise bind the <c>long</c> as an INTEGER, which SQLite compares with the
-    /// REAL column exactly, while C# first rounds an integer beyond 2^53 to <c>double</c>. A comparison made in <c>float</c> is
-    /// made in <c>double</c> here too, for the reason given on <see cref="AsFloatingColumn"/>.
-    /// </remarks>
-    private static object? AsFloatingValue(Expression operand, object? value) =>
-        value is not null && IsFloatingType(operand.Type) && IsIntegerType(value.GetType())
-            ? Convert.ToDouble(value, CultureInfo.InvariantCulture)
-            : value;
 
     /// <summary>Whether the type is <c>float</c> or <c>double</c> (nullable forms included).</summary>
     private static bool IsFloatingType(Type type) =>
@@ -2849,7 +2858,11 @@ public static class SqlExpressionTranslator
     }
 
     /// <summary>Determines whether a collection Contains (arrays = static Enumerable.Contains; List/HashSet = instance Contains) is a target for IN translation.</summary>
-    /// <remarks>Only calls where the column is on the argument side are targeted (string.Contains with the column as the receiver is already handled by the LIKE path).</remarks>
+    /// <remarks>
+    /// Only calls where the column is on the argument side are targeted (string.Contains with the column as the receiver is already handled by the LIKE path).
+    /// The item is resolved as the operand of a comparison is: a column, or a date component of a date-time column
+    /// (<c>days.Contains(x.At.Value.Date)</c> becomes an IN over the date of the column), with the casts around it applied as for a comparison (see ColumnConversionsSql).
+    /// </remarks>
     private static bool TryGetIn(
         MethodCallExpression call,
         out string column,
@@ -2859,7 +2872,10 @@ public static class SqlExpressionTranslator
         column = string.Empty;
         collection = null!;
 
-        if (call.Method.Name != "Contains")
+        // A substring match on a column (x.Name.Contains(x.Other)) belongs to the LIKE path even when its argument is a column too:
+        // the receiver is a column, not a collection of values. Deciding it here keeps the answer the same wherever the call is
+        // reached from, the negation (!x.Name.Contains(x.Other)) included
+        if (call.Method.Name != "Contains" || TryGetLike(call, out _, out _))
         {
             return false;
         }
@@ -2878,9 +2894,9 @@ public static class SqlExpressionTranslator
                 return false;
             }
 
-            if (Unwrap(call.Arguments[1]) is MemberExpression staticItem && IsColumn(staticItem))
+            if (OperandSql(call.Arguments[1]) is { } staticItem)
             {
-                column = AsFloatingColumn(call.Arguments[1], ColumnName(staticItem.Member))!;
+                column = AsFloatingColumn(call.Arguments[1], staticItem)!;
                 collection = UnwrapCollection(call.Arguments[0]);
                 return true;
             }
@@ -2892,9 +2908,9 @@ public static class SqlExpressionTranslator
         // Arrays resolve to .NET's span-based Contains, where the receiver becomes op_Implicit(array) (UnwrapCollection restores the raw array)
         if (call.Object is not null && call.Arguments.Count == 1)
         {
-            if (Unwrap(call.Arguments[0]) is MemberExpression instanceItem && IsColumn(instanceItem))
+            if (OperandSql(call.Arguments[0]) is { } instanceItem)
             {
-                column = AsFloatingColumn(call.Arguments[0], ColumnName(instanceItem.Member))!;
+                column = AsFloatingColumn(call.Arguments[0], instanceItem)!;
                 collection = UnwrapCollection(call.Object);
                 return true;
             }
@@ -2909,6 +2925,7 @@ public static class SqlExpressionTranslator
         while (true)
         {
             expression = Unwrap(expression);
+
             if (
                 expression
                 is MethodCallExpression
@@ -2974,8 +2991,8 @@ public static class SqlExpressionTranslator
             {
                 (true, false) => $"{column} IS NULL",
                 (true, true) => $"{column} IS NOT NULL",
-                (false, false) => "1 = 0",
-                (false, true) => "1 = 1",
+                (false, false) => AlwaysFalse,
+                (false, true) => AlwaysTrue,
             };
         }
 
@@ -3033,6 +3050,43 @@ public static class SqlExpressionTranslator
         return false;
     }
 
+    /// <summary>Whether an <c>Equals(object)</c> call compares the column with a value of another runtime type, which C# never counts as equal.</summary>
+    /// <remarks>
+    /// Only the overload that takes <c>object</c> is concerned: a typed overload (<c>int.Equals(int)</c>) converts its argument at compile time.
+    /// The receiver's type is read with boxing and interface conversions stripped (they keep the runtime type), and the fold is limited to a sealed type (value types are sealed), where no other runtime type can be equal; a column of an unsealed type
+    /// (only a hand-written <c>[Column]</c> property can have one) is compared as usual. A null value is left to the ordinary path.
+    /// </remarks>
+    private static bool IsOtherTypeForEqualsObject(MethodCallExpression call, object? value)
+    {
+        if (
+            value is null
+            || call.Object is null
+            || call.Method.GetParameters() is not [{ ParameterType: var parameterType }]
+            || parameterType != typeof(object)
+        )
+        {
+            return false;
+        }
+
+        var receiver = call.Object;
+
+        while (
+            (receiver.Type == typeof(object) || receiver.Type.IsInterface)
+            && receiver
+                is UnaryExpression
+                {
+                    NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked
+                } conversion
+        )
+        {
+            receiver = conversion.Operand;
+        }
+
+        var receiverType = Nullable.GetUnderlyingType(receiver.Type) ?? receiver.Type;
+
+        return receiverType.IsSealed && value.GetType() != receiverType;
+    }
+
     /// <summary>
     /// The characters <see cref="char.IsWhiteSpace(char)"/> accepts, written as SQL that builds them
     /// (char(n, ...)) so the statement itself carries no control characters.
@@ -3042,6 +3096,7 @@ public static class SqlExpressionTranslator
     private static string BuildWhiteSpaceCharacters()
     {
         var codes = new List<int>();
+
         for (var code = 0; code <= char.MaxValue; code++)
         {
             if (char.IsWhiteSpace((char)code))
@@ -3132,6 +3187,274 @@ public static class SqlExpressionTranslator
         return expression;
     }
 
+    /// <summary>
+    /// The SQL of a column-side operand with the casts written around the column applied as C# applies them: a cast that only
+    /// reinterprets the sign of a signed value of 32 bits or less as an unsigned type (<c>(uint)x.Id</c>) is written with C#'s
+    /// wrap-around, and a cast that can change the value in a way SQL cannot repeat is refused.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Refused: a narrowing integral cast (<c>(short)x.Id</c>), a cast from a floating-point or decimal type to an integral type
+    /// (<c>(int)x.Amount</c>), a cast between floating-point and decimal types other than <c>float</c> to <c>double</c>, a cast
+    /// from an unsigned type to the signed type of the same size, and a cast from a signed type to <c>ulong</c>. C# applies such a
+    /// cast to the value of every row before the comparison (an integral cast wraps around, a cast to an integral type drops the
+    /// fraction), while a SQL CAST overflows, rounds, or does nothing, and the wrapped value of a cast to <c>ulong</c> does not fit
+    /// a <c>bigint</c>. Stripping the cast would compare the column as if it were not there. The refusal names the cast, so the
+    /// fix is plain: compare the column without the cast, and convert the value side instead (a value-side cast is applied as C#
+    /// applies it, see <see cref="EvaluateValue"/>).
+    /// </para>
+    /// <para>
+    /// Translated with the wrap-around: a cast from a signed type to an unsigned type of the same or a larger size other than
+    /// <c>ulong</c> (<c>int</c> to <c>uint</c>, <c>short</c> to <c>ushort</c> or <c>uint</c>, <c>sbyte</c> to <c>byte</c>). C# adds
+    /// 2^n (n the width of the target) to a negative value and keeps the others, which SQL writes as
+    /// <c>(CASE WHEN col &lt; 0 THEN CAST(col AS bigint) + 2^n ELSE col END)</c>; a NULL column takes the ELSE branch and stays NULL.
+    /// The compared value then has no column type to take (see <see cref="RawColumnName"/>).
+    /// </para>
+    /// <para>
+    /// The conversions that keep the column's value are stripped as before: boxing and reference conversions, nullable lifting
+    /// and unlifting, an enum and its underlying type, and C#'s implicit numeric conversions (which the dialect-specific parts
+    /// compensate where SQL compares differently, such as an integer column read as a REAL on SQLite). Conversions between other
+    /// types (a user-defined operator, DateTime to DateTimeOffset) are left as they were. The casts are applied from the one
+    /// nearest the column outwards.
+    /// </para>
+    /// </remarks>
+    /// <param name="expression">The column-side operand as written (Convert nodes around the column reference included).</param>
+    /// <param name="column">The SQL the operand resolved to with the casts stripped, named in the refusal.</param>
+    private static string ColumnConversionsSql(Expression expression, string column)
+    {
+        var casts = new List<UnaryExpression>();
+        var current = expression;
+
+        while (
+            current
+                is UnaryExpression
+                {
+                    NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked
+                } unary
+        )
+        {
+            casts.Add(unary);
+            current = unary.Operand;
+        }
+
+        var sql = column;
+
+        for (var i = casts.Count - 1; i >= 0; i--)
+        {
+            var cast = casts[i];
+
+            if (ChangesColumnValue(cast.Operand.Type, cast.Type))
+            {
+                throw new NotSupportedException(
+                    $"The cast from {NumericTypeName(cast.Operand.Type)} to {NumericTypeName(cast.Type)} on {column} can change the column's value "
+                        + "(C# wraps the value around or drops its fraction, and SQL does not), so it cannot be translated to SQL; "
+                        + $"compare the column without the cast and convert the value side instead: {expression}"
+                );
+            }
+
+            var modulus = SignWrapModulus(cast.Operand.Type, cast.Type);
+
+            if (modulus > 0)
+            {
+                sql = $"(CASE WHEN {sql} < 0 THEN CAST({sql} AS bigint) + {modulus.ToString(CultureInfo.InvariantCulture)} ELSE {sql} END)";
+            }
+        }
+
+        return sql;
+    }
+
+    /// <summary>Whether a conversion between two numeric types (nullable and enum forms included) changes the value in a way SQL cannot repeat (see <see cref="ColumnConversionsSql"/>).</summary>
+    private static bool ChangesColumnValue(Type source, Type target)
+    {
+        var from = NumericCode(source);
+        var to = NumericCode(target);
+
+        if (from is null || to is null || from == to)
+        {
+            return false;
+        }
+
+        var fromFractional = from is TypeCode.Single or TypeCode.Double or TypeCode.Decimal;
+
+        if (to is TypeCode.Single or TypeCode.Double or TypeCode.Decimal)
+        {
+            // An integral value converts implicitly; between the fractional types only float to double keeps the value
+            return fromFractional && !(from == TypeCode.Single && to == TypeCode.Double);
+        }
+
+        if (fromFractional || IntegralSize(to.Value) < IntegralSize(from.Value))
+        {
+            // To an integral type: a fraction is dropped, and a narrower size wraps the value around
+            return true;
+        }
+
+        // The wrapped value of a signed value cast to ulong does not fit a bigint, and an unsigned value cast to the signed type of
+        // the same size wraps its upper half below zero
+        return IsSigned(from.Value)
+            ? to == TypeCode.UInt64
+            : IsSigned(to.Value) && IntegralSize(to.Value) == IntegralSize(from.Value);
+    }
+
+    /// <summary>
+    /// 2^n when a conversion only reinterprets the sign of a signed integral value as an unsigned type of n bits other than
+    /// <c>ulong</c> (the amount C# adds to a negative value), otherwise 0 (see <see cref="ColumnConversionsSql"/>).
+    /// </summary>
+    private static long SignWrapModulus(Type source, Type target)
+    {
+        var from = NumericCode(source);
+        var to = NumericCode(target);
+
+        if (from is null || to is null || !IsSigned(from.Value) || to == TypeCode.UInt64)
+        {
+            return 0;
+        }
+
+        return to switch
+        {
+            TypeCode.Byte => 1L << 8,
+            TypeCode.Char or TypeCode.UInt16 => 1L << 16,
+            TypeCode.UInt32 => 1L << 32,
+            _ => 0,
+        };
+    }
+
+    /// <summary>Whether an integral type code is a signed type.</summary>
+    private static bool IsSigned(TypeCode code) =>
+        code is TypeCode.SByte or TypeCode.Int16 or TypeCode.Int32 or TypeCode.Int64;
+
+    /// <summary>The type code of a numeric type (char included; the nullable form is looked through, and an enum gives the code of its underlying type), or null for any other type.</summary>
+    private static TypeCode? NumericCode(Type type)
+    {
+        var code = Type.GetTypeCode(Nullable.GetUnderlyingType(type) ?? type);
+
+        return code is >= TypeCode.Char and <= TypeCode.Decimal ? code : null;
+    }
+
+    /// <summary>The size in bytes of an integral type code (char included).</summary>
+    private static int IntegralSize(TypeCode code) =>
+        code switch
+        {
+            TypeCode.SByte or TypeCode.Byte => 1,
+            TypeCode.Char or TypeCode.Int16 or TypeCode.UInt16 => 2,
+            TypeCode.Int32 or TypeCode.UInt32 => 4,
+            _ => 8,
+        };
+
+    /// <summary>The name of a type in a refusal (the nullable form named by its underlying type).</summary>
+    private static string NumericTypeName(Type type) => (Nullable.GetUnderlyingType(type) ?? type).Name;
+
+    /// <summary>
+    /// Evaluates a value operand with the conversions C# applies to it, so the value bound is the value C# compares
+    /// (<c>x.Qty == (int)ratio</c> binds the truncated integer, and a <c>char</c> compared with an integer column binds its code).
+    /// </summary>
+    /// <remarks>
+    /// Only the outer conversions that leave the bound value as it is are stripped first (see <see cref="KeepsBoundValue"/>), so the
+    /// common forms - a value lifted to the nullable type of the column, or widened to the column's type without loss - are read
+    /// directly and do not compile an expression tree. Any other conversion is evaluated as written.
+    /// </remarks>
+    private static object? EvaluateValue(Expression expression)
+    {
+        var current = expression;
+
+        while (
+            current
+                is UnaryExpression
+                {
+                    NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked
+                } unary
+            && KeepsBoundValue(unary.Operand.Type, unary.Type)
+        )
+        {
+            current = unary.Operand;
+        }
+
+        return Evaluate(current);
+    }
+
+    /// <summary>
+    /// Whether binding the operand of a value-type conversion compares as binding its result would: nullable lifting (not
+    /// unlifting, which fails on null in C#), and an implicit numeric conversion that loses nothing (judged from the types alone:
+    /// a conversion to <c>decimal</c> carries decimal's own operator method, and no user-defined operator converts between the
+    /// types accepted here).
+    /// </summary>
+    /// <remarks>
+    /// A conversion that can round (an integer to <c>float</c>, or a 64-bit integer to <c>double</c>), a <c>char</c> or an enum
+    /// turned into a number, and every explicit conversion change the value or its type in a way the database would not repeat,
+    /// so they are evaluated. A conversion to a reference type (boxing, an upcast) is left to <see cref="QueryValueEvaluator"/>,
+    /// which reads the value-preserving ones without compiling.
+    /// </remarks>
+    private static bool KeepsBoundValue(Type source, Type target)
+    {
+        if (!target.IsValueType)
+        {
+            return false;
+        }
+
+        var to = Nullable.GetUnderlyingType(target) ?? target;
+        var fromUnderlying = Nullable.GetUnderlyingType(source);
+
+        if (fromUnderlying is not null && to == target)
+        {
+            return false;
+        }
+
+        var from = fromUnderlying ?? source;
+
+        if (from == to)
+        {
+            return true;
+        }
+
+        if (from.IsEnum || to.IsEnum)
+        {
+            return false;
+        }
+
+        return Type.GetTypeCode(from) switch
+        {
+            TypeCode.SByte => Type.GetTypeCode(to)
+                is TypeCode.Int16
+                    or TypeCode.Int32
+                    or TypeCode.Int64
+                    or TypeCode.Single
+                    or TypeCode.Double
+                    or TypeCode.Decimal,
+            TypeCode.Byte => Type.GetTypeCode(to)
+                is TypeCode.Int16
+                    or TypeCode.UInt16
+                    or TypeCode.Int32
+                    or TypeCode.UInt32
+                    or TypeCode.Int64
+                    or TypeCode.UInt64
+                    or TypeCode.Single
+                    or TypeCode.Double
+                    or TypeCode.Decimal,
+            TypeCode.Int16 => Type.GetTypeCode(to)
+                is TypeCode.Int32
+                    or TypeCode.Int64
+                    or TypeCode.Single
+                    or TypeCode.Double
+                    or TypeCode.Decimal,
+            TypeCode.UInt16 => Type.GetTypeCode(to)
+                is TypeCode.Int32
+                    or TypeCode.UInt32
+                    or TypeCode.Int64
+                    or TypeCode.UInt64
+                    or TypeCode.Single
+                    or TypeCode.Double
+                    or TypeCode.Decimal,
+            TypeCode.Int32 => Type.GetTypeCode(to) is TypeCode.Int64 or TypeCode.Double or TypeCode.Decimal,
+            TypeCode.UInt32 => Type.GetTypeCode(to)
+                is TypeCode.Int64
+                    or TypeCode.UInt64
+                    or TypeCode.Double
+                    or TypeCode.Decimal,
+            TypeCode.Int64 or TypeCode.UInt64 => Type.GetTypeCode(to) is TypeCode.Decimal,
+            TypeCode.Single => Type.GetTypeCode(to) is TypeCode.Double,
+            _ => false,
+        };
+    }
+
     /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column). A navigation property, and a property without a [Column] mapping, are not columns and are rejected outright.</summary>
     /// <remarks>
     /// A navigation carries no column of its own, so treating one as a column would emit its property name as a column
@@ -3220,7 +3543,16 @@ public static class SqlExpressionTranslator
         );
 
     /// <summary>Extracts the bracketed column name from a column reference (a plain column x.Col, or a value object's x.Col.Value). Returns null when it is not a column.</summary>
+    /// <remarks>A cast written around the column reference is stripped when it keeps the column's value, written with C#'s wrap-around when it only reinterprets the sign, and refused when it can change the value otherwise (see <see cref="ColumnConversionsSql"/>).</remarks>
     private static string? TryColumnName(Expression expression)
+    {
+        var column = TryColumnNameCore(expression);
+
+        return column is null ? null : ColumnConversionsSql(expression, column);
+    }
+
+    /// <summary>Resolves a column reference to its bracketed column name, with every Convert node around it stripped.</summary>
+    private static string? TryColumnNameCore(Expression expression)
     {
         if (Unwrap(expression) is not MemberExpression member)
         {
@@ -3300,7 +3632,14 @@ public static class SqlExpressionTranslator
             _ => string.Empty,
         };
 
-        return sql.Length != 0;
+        if (sql.Length == 0)
+        {
+            return false;
+        }
+
+        // A cast written around the date component is applied as one around a column ((short)x.At.Year is refused)
+        sql = ColumnConversionsSql(expression, sql);
+        return true;
     }
 
     /// <summary>Whether the type is <see cref="DateTimeOffset"/> (or its nullable form).</summary>

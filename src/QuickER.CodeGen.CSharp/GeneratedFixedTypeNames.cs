@@ -359,6 +359,7 @@ public static class GeneratedFixedTypeNames
             "EnumeratorCancellation",
             "EnumeratorCancellationAttribute",
             "EqualityComparer",
+            "EventArgs",
             "EventHandler",
             "Exception",
             "ExceptionDispatchInfo",

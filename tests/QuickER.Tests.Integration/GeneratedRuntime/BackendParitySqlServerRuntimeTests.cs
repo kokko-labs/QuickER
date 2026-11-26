@@ -190,6 +190,11 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
             cases.Add(heldBackFactoryCase);
         }
 
+        foreach (var offsetOnlyCase in OffsetOnlyAlternateKeyCaseNames)
+        {
+            cases.Add(offsetOnlyCase);
+        }
+
         foreach (var keyShapeCase in SqlServerKeyShapeCase.All)
         {
             cases.Add(keyShapeCase.Name);
@@ -407,6 +412,10 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
         ],
         // 全要素が null のリストの IN / NOT IN は、NULL の行とそれ以外を二分する
         ["value-object-in-all-null-elements"] = ["in [null] ids=[12]", "not-in [null] ids=[10]"],
+        // 日時のオフセットを持つ代替キーのオフセットだけを変える保存は、新しいオフセットを書く（DateTimeOffset の等値は瞬間だけを比べるが、
+        // 列はオフセットを持つ＝3 回目の効果測定の HB6）。続けて別の列を変えた保存も通る
+        ["alternate-key-offset-only-update"] = OffsetOnlySaved,
+        ["alternate-key-offset-only-graph-save"] = OffsetOnlySaved,
         // 条件なしの Any は、空の表で false・行を入れた後で true（SQL Server の EXISTS の組み立て）
         ["any-without-condition"] = ["empty any=False", "seeded any=True"],
     };
@@ -837,6 +846,14 @@ public sealed partial class BackendParitySqlServerRuntimeTests(SqlServerContaine
             "move-stale-note-and-delete-old-gadget-no-hooks" => await MoveStaleNoteAsync(
                 efCore,
                 withHooks: false
+            ),
+            "alternate-key-offset-only-update" => await OffsetOnlyAlternateKeyAsync(
+                efCore,
+                graphSave: false
+            ),
+            "alternate-key-offset-only-graph-save" => await OffsetOnlyAlternateKeyAsync(
+                efCore,
+                graphSave: true
             ),
             "alternate-key-referenced-update" => await AlternateKeyAsync(
                 efCore,

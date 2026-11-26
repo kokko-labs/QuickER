@@ -35,7 +35,18 @@ public sealed class TranslatorParityEfCoreMySqlRuntimeTests(MySqlContainerFixtur
         ["datetime2-scaled-less-finer"] = SubMicrosecond,
         ["time-scaled-equals-finer"] = SubMicrosecond,
         ["time-scaled-less-finer"] = SubMicrosecond,
+        ["int-column-sign-cast-equals-uint-beyond-int"] = SignOnlyCast,
+        ["int-column-sign-cast-greater-uint-max-int"] = SignOnlyCast,
+        ["in-uint-list-sign-cast-column"] = SignOnlyCast,
+        ["in-uint-array-sign-cast-column"] = SignOnlyCast,
+        ["bigint-column-ulong-cast-greater"] = SignOnlyCast,
+        ["int-column-ulong-cast-greater"] = SignOnlyCast,
     };
+
+    /// <summary>列の側の符号だけの変換の割り切りの理由（縮める変換と同じ形）</summary>
+    private const string SignOnlyCast =
+        "EF Core の MySQL プロバイダは列の側の (uint)・(ulong) を値を変えない形で比べ、負の値を折り返さない（MySQL の CAST(… AS unsigned) の 64 ビットの折り返しも起きない）ので、C# が折り返して当てる行と黙って答えが割れる（例外にならない）"
+        + ColumnCastFindingNote;
 
     private const string SubMicrosecond =
         "MySQL の datetime・time はマイクロ秒までしか持たず、ドライバが 1 マイクロ秒より細かい値を切り詰めて比べる（docs の EF Core の節の既知の割り切り）";
@@ -85,7 +96,10 @@ public sealed class TranslatorParityEfCoreMySqlRuntimeTests(MySqlContainerFixtur
         await fixture.ExecuteAsync(Generated.Ddl, Ct);
 
         return Binding.CreateProvider(options =>
-            options.UseMySQL(fixture.ConnectionString).IgnoreServiceProviderCacheLimit()
+            options
+                .UseMySQL(fixture.ConnectionString)
+                .IgnoreServiceProviderCacheLimit()
+                .AddInterceptors(BindingParameterCapture.EfCoreInterceptor)
         );
     }
 }

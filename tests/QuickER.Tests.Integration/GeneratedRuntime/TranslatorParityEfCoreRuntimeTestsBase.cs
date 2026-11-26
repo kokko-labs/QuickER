@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using QuickER.Tests.TestSupport;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -47,6 +48,16 @@ public abstract class TranslatorParityEfCoreRuntimeTestsBase
         new Dictionary<string, string>();
 
     /// <summary>
+    /// 述語の表の列の側の符号だけの変換の行（int → uint・ulong への変換ほか）の割れの理由の後ろに付ける、指摘の名前と扱い。
+    /// 縮める変換と同じく変換が C# のように折り返さないので、指摘 <see cref="TranslatorParityBindingKnownFailures.EfCoreNarrowingColumnCastFinding"/>
+    /// （Pending・きっかけ待ち）が受ける
+    /// </summary>
+    protected const string ColumnCastFindingNote =
+        "（指摘 "
+        + TranslatorParityBindingKnownFailures.EfCoreNarrowingColumnCastFinding
+        + "・Pending・きっかけ待ち。docs の EF Core 版の Known limitation に、列は変換せずに値の側を変換する回避を書いた）";
+
+    /// <summary>
     /// EF Core の答えが C# と割れると分かっている行と、その理由。宣言した行は C# と割れることを表明する（一致したら赤）。
     /// </summary>
     protected abstract IReadOnlyDictionary<string, string> Known { get; }
@@ -74,7 +85,7 @@ public abstract class TranslatorParityEfCoreRuntimeTestsBase
     /// 固定長のバイナリの列（プロパティ名 → 長さ）。期待を作るとき、これらの列と比べる値をその列へ保存したときの値へ直す
     /// （<see cref="TranslatorParityRuntimeTestsBase.ComparingBytes"/>。SQL Server の派生だけが持つ）
     /// </summary>
-    protected virtual IReadOnlyDictionary<string, int>? FixedBinaryLengths => null;
+    protected virtual IReadOnlyDictionary<string, BinaryColumnLength>? BinaryColumnLengths => null;
 
     /// <summary>宣言した行が表に実在し、割れる行と流せない行が重ならないことを表明する（行の改名で宣言が黙って効かなくなるのを防ぐ）</summary>
     [Fact(DisplayName = "[翻訳パリティ/EF Core] 割れる・流せないと宣言した行は述語の表に実在する")]
@@ -172,9 +183,191 @@ public abstract class TranslatorParityEfCoreRuntimeTestsBase
             return;
         }
 
+        if (TranslatorParityPredicateRows.Table[id].Input is OrderedProbePredicate)
+        {
+            actual.Should().Equal(expected, "行 {0} の並びは C# の並びと同じであるべき", id);
+
+            return;
+        }
+
         actual
             .Should()
             .BeEquivalentTo(expected, "条件 {0} は C# の意味論と同じ行を返すべき", predicate);
+    }
+
+    // ===== 値の束縛の生成の表 =====
+
+    /// <summary>派生が担う実装先（属性 <see cref="RuntimeCellAttribute"/> の述語の一致の実装先）</summary>
+    private RuntimeTarget BindingTarget =>
+        GetType()
+            .GetCustomAttributes<RuntimeCellAttribute>(inherit: false)
+            .Single(cell => cell.Feature == RuntimeFeatures.TranslatorParity)
+            .Target;
+
+    /// <summary>
+    /// 値の束縛の生成の表（<see cref="TranslatorParityBindingRows"/>）の 1 行が、EF Core 版でも C# の評価と同じ答えを返すことを検証する
+    /// （例外は不一致。既知の失敗は <see cref="TranslatorParityBindingKnownFailures"/> と厳密に照合する）。
+    /// </summary>
+    /// <remarks>
+    /// Query は当たる行のキーを、ExecuteDelete は消した数と残った行のキーを、ExecuteUpdate（QuickErDbContext に書く・SET は列を自分自身へ代入して
+    /// 値を変えない）は WHERE が当てた行の数を比べる。派生は DbContext の構成に <see cref="BindingParameterCapture.EfCoreInterceptor"/> を足し、
+    /// 経路の操作のコマンドのパラメータを結果に残す。
+    /// </remarks>
+    [Theory(DisplayName = "[翻訳パリティ/EF Core] 値の束縛の生成の表の行が C# と同じ答えを返す")]
+    [MemberData(
+        nameof(TranslatorParityBindingRows.EfCoreIds),
+        MemberType = typeof(TranslatorParityBindingRows)
+    )]
+    public async Task Binding_MatchesCSharp(string id)
+    {
+        await using var provider = await CreateProviderAsync();
+        var outcome = await RunBindingRowAsync(provider, id);
+
+        TranslatorParityBindingKnownFailures.AssertRow(BindingTarget, id, outcome);
+    }
+
+    /// <summary>
+    /// 分岐の軸の台帳の指摘のセル（この実装先を範囲に持つ、値の束縛の生成の表に結んだ項目の必ず含む行）を流し、未修正の項目はセルが C# と割れて
+    /// 項目の Pending に当たり、修正済みの項目はセルで証拠が出ることを照合する（<see cref="TranslatorParityBindingEvidence.CellProblems"/>）
+    /// </summary>
+    [Fact(
+        DisplayName = "[翻訳パリティ/EF Core] 値の束縛の台帳の指摘のセルは、未修正なら項目の Pending に当たり、修正済みなら証拠が出る"
+    )]
+    public async Task LedgerCells_FollowStatus()
+    {
+        var outcomes = new Dictionary<string, BindingRunOutcome>(StringComparer.Ordinal);
+
+        foreach (var id in TranslatorParityBindingEvidence.CellRowIdsFor(BindingTarget))
+        {
+            await using var provider = await CreateProviderAsync();
+            outcomes[id] = await RunBindingRowAsync(provider, id);
+        }
+
+        TranslatorParityBindingEvidence.CellProblems(BindingTarget, outcomes).Should().BeEmpty();
+    }
+
+    /// <summary>値の束縛の生成の表の既知の失敗の項目は、この実装先が流す行を名指す</summary>
+    [Fact(
+        DisplayName = "[翻訳パリティ/EF Core] 値の束縛の既知の失敗は、この実装先が流す生成の表の行を名指す"
+    )]
+    public void BindingKnown_NamesRowsTheTargetRuns() =>
+        TranslatorParityBindingKnownFailures.Problems(BindingTarget).Should().BeEmpty();
+
+    /// <summary>値の束縛の生成の表の 1 行のシードを写して入れ、経路を流して C# の評価と比べた結果を返す</summary>
+    private async Task<BindingRunOutcome> RunBindingRowAsync(ServiceProvider provider, string id)
+    {
+        var row = TranslatorParityBindingRows.Rows[id].Input;
+        var (entityName, repositoryName, seeds, setColumn) = row.Entity switch
+        {
+            BindingEntity.Probe => (
+                "ProbeEntity",
+                "IProbeRepository",
+                (IEnumerable)TranslatorParityRuntimeTestsBase.SeedProbes(),
+                "Name"
+            ),
+            BindingEntity.SmallChild => (
+                "SmallChildEntity",
+                "ISmallChildRepository",
+                TranslatorParityRuntimeTestsBase.CrossTypeChildren(),
+                "BigParentId"
+            ),
+            _ => (
+                "BigParentEntity",
+                "IBigParentRepository",
+                TranslatorParityRuntimeTestsBase.WideBigParents(),
+                "Label"
+            ),
+        };
+        var entityType = Binding.Type(entityName);
+        var (predicate, problem) = Retarget(row.Predicate, entityType);
+
+        if (predicate is null)
+        {
+            throw new InvalidOperationException($"行 {id} を付け替えられない: {problem}");
+        }
+
+        // small_child の外部キーは big_parent を指すので、親を先に入れる
+        if (row.Entity == BindingEntity.SmallChild)
+        {
+            var parents = provider.GetRequiredService(Binding.Type("IBigParentRepository"));
+
+            foreach (var parent in TranslatorParityRuntimeTestsBase.CrossTypeParents())
+            {
+                await TranslatorParityEfCoreBinding.InsertAsync(
+                    parents,
+                    Copy(parent, Binding.Type("BigParentEntity")),
+                    Ct
+                );
+            }
+        }
+
+        var repository = provider.GetRequiredService(Binding.Type(repositoryName));
+
+        foreach (var seed in seeds)
+        {
+            await TranslatorParityEfCoreBinding.InsertAsync(repository, Copy(seed, entityType), Ct);
+        }
+
+        var stored = await TranslatorParityEfCoreBinding.QueryAsync(repository, null, Ct);
+        var compiled = predicate.Compile();
+        var hits = stored.Where(e => (bool)compiled.DynamicInvoke(e)!).Select(KeyOf).ToList();
+        var path = row.QueryPath;
+        var expected = path switch
+        {
+            TranslatorParityBindingRows.ExecuteDelete =>
+                $"deleted={hits.Count} remaining={BindingRunOutcome.Keys(stored.Select(KeyOf).Except(hits))}",
+            TranslatorParityBindingRows.ExecuteUpdate => $"rows={hits.Count}",
+            _ => BindingRunOutcome.Keys(hits),
+        };
+        IReadOnlyList<CapturedParameter> parameters;
+        IReadOnlyList<string> commandTexts;
+        string actual;
+
+        using (var capture = BindingParameterCapture.Begin())
+        {
+            try
+            {
+                actual = path switch
+                {
+                    TranslatorParityBindingRows.ExecuteDelete =>
+                        $"deleted={await TranslatorParityEfCoreBinding.ExecuteDeleteAsync(repository, predicate, Ct)}",
+                    TranslatorParityBindingRows.ExecuteUpdate =>
+                        $"rows={await Binding.ExecuteUpdateAsync(provider, entityType, predicate, setColumn, Ct)}",
+                    _ => BindingRunOutcome.Keys(
+                        (
+                            await TranslatorParityEfCoreBinding.QueryAsync(
+                                repository,
+                                predicate,
+                                Ct
+                            )
+                        ).Select(KeyOf)
+                    ),
+                };
+            }
+            catch (Exception exception)
+            {
+                return BindingRunOutcome.Threw(path, expected, exception, capture.Parameters) with
+                {
+                    CommandTexts = capture.CommandTexts,
+                };
+            }
+
+            parameters = capture.Parameters;
+            commandTexts = capture.CommandTexts;
+        }
+
+        if (path == TranslatorParityBindingRows.ExecuteDelete)
+        {
+            var remaining = (
+                await TranslatorParityEfCoreBinding.QueryAsync(repository, null, Ct)
+            ).Select(KeyOf);
+            actual += $" remaining={BindingRunOutcome.Keys(remaining)}";
+        }
+
+        return BindingRunOutcome.Compared(path, expected, actual, parameters) with
+        {
+            CommandTexts = commandTexts,
+        };
     }
 
     /// <summary>行の入力：対象のエンティティとリポジトリの名前・シード・述語</summary>
@@ -191,6 +384,12 @@ public abstract class TranslatorParityEfCoreRuntimeTestsBase
                 "IProbeRepository",
                 TranslatorParityRuntimeTestsBase.SeedProbes(),
                 probe.Predicate
+            ),
+            OrderedProbePredicate ordered => (
+                "ProbeEntity",
+                "IProbeRepository",
+                TranslatorParityRuntimeTestsBase.SeedProbes(),
+                ordered.Predicate
             ),
             SmallChildPredicate child => (
                 "SmallChildEntity",
@@ -262,9 +461,46 @@ public abstract class TranslatorParityEfCoreRuntimeTestsBase
 
         // バイナリは docs のとおりバイトの列で比べる（TranslatorParityRuntimeTestsBase.ComparingBytes）
         var compiled = TranslatorParityRuntimeTestsBase
-            .ComparingBytes(predicate, FixedBinaryLengths)
+            .ComparingBytes(predicate, BinaryColumnLengths)
             .Compile();
-        var expected = stored.Where(e => (bool)compiled.DynamicInvoke(e)!).Select(KeyOf).ToList();
+        var matched = stored.Where(e => (bool)compiled.DynamicInvoke(e)!);
+
+        // 並び替えの行は、C# の OrderBy（OrderByDescending）と ThenBy(キー) の並びを期待にし、同じ並べ方の Query() と比べる
+        if (TranslatorParityPredicateRows.Table[id].Input is OrderedProbePredicate ordered)
+        {
+            var (key, keyProblem) = Retarget(ordered.Key, entityType);
+
+            if (key is null)
+            {
+                throw new InvalidOperationException(
+                    $"行 {id} のキーを付け替えられない: {keyProblem}"
+                );
+            }
+
+            var keyOf = key.Compile();
+            var sortKey = (Func<object, object?>)(e => keyOf.DynamicInvoke(e));
+            var orderedExpected = (
+                ordered.Descending ? matched.OrderByDescending(sortKey) : matched.OrderBy(sortKey)
+            )
+                .ThenBy(KeyOf)
+                .Select(KeyOf)
+                .ToList();
+            var orderedActual = (
+                await TranslatorParityEfCoreBinding.QueryOrderedAsync(
+                    repository,
+                    predicate,
+                    key,
+                    ordered.Descending,
+                    Ct
+                )
+            )
+                .Select(KeyOf)
+                .ToList();
+
+            return (orderedExpected, orderedActual, predicate);
+        }
+
+        var expected = matched.Select(KeyOf).ToList();
         var actual = (await TranslatorParityEfCoreBinding.QueryAsync(repository, predicate, Ct))
             .Select(KeyOf)
             .ToList();
