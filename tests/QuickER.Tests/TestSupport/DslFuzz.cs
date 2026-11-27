@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using QuickER.Model;
+using QuickER.Tests.TestSupport.ValuePools;
 
 namespace QuickER.Tests.TestSupport;
 
@@ -107,7 +108,7 @@ public sealed record DslColumn(
         || Clr is DslClr.Decimal or DslClr.DateTime or DslClr.TimeSpan or DslClr.DateTimeOffset;
 
     /// <summary>
-    /// 数値のリテラルの綴りの候補（浮動小数点の列だけ。null なら種類ごとの綴りの池 <see cref="DslFuzz.LiteralPool(DslClr)"/>）。
+    /// 数値のリテラルの綴りの候補（浮動小数点の列だけ。null なら種類ごとの綴りのプール <see cref="DslFuzz.LiteralPool(DslClr)"/>）。
     /// 綴りをそのまま DSL に書き、オラクルの値は綴りを列の型で読んだ値にする（DSL のパーサは指数表記を読まないので、値から綴りを作らない）
     /// </summary>
     public IReadOnlyList<string>? LiteralValues { get; init; }
@@ -118,7 +119,7 @@ public sealed record DslColumn(
     /// </summary>
     public bool NonUnicode { get; init; }
 
-    /// <summary>列の値の候補（null なら種類ごとの値の池 <see cref="DslFuzz.ValuePool(DslClr)"/>）</summary>
+    /// <summary>列の値の候補（null なら種類ごとの値のプール <see cref="DslFuzz.ValuePool(DslClr)"/>）</summary>
     public IReadOnlyList<object>? Values { get; init; }
 
     /// <summary>
@@ -143,7 +144,7 @@ public sealed record DslColumn(
             : null;
 
     /// <summary>
-    /// 数のリテラルを負の値にしないか（値の池から選んだ負の値は符号を外す。乱数の引き方・行の値・パラメータの値は変えない）
+    /// 数のリテラルを負の値にしないか（値のプールから選んだ負の値は符号を外す。乱数の引き方・行の値・パラメータの値は変えない）
     /// </summary>
     public bool NonNegativeLiterals { get; init; }
 
@@ -251,10 +252,10 @@ public sealed record DslTimeRange(TimeSpan Min, TimeSpan Max)
 {
     /// <summary>SQL Server の time（00:00:00〜23:59:59.9999999）</summary>
     public static DslTimeRange SqlServerTime { get; } =
-        new(TimeSpan.Zero, TimeSpan.FromDays(1) - TimeSpan.FromTicks(1));
+        new(TimeSpan.Zero, TimeSpanEdges.OneDay - TimeSpan.FromTicks(1));
 
     /// <summary>PostgreSQL の time（00:00:00〜24:00:00）</summary>
-    public static DslTimeRange PostgreSqlTime { get; } = new(TimeSpan.Zero, TimeSpan.FromDays(1));
+    public static DslTimeRange PostgreSqlTime { get; } = new(TimeSpan.Zero, TimeSpanEdges.OneDay);
 
     /// <summary>MySQL の time（-838:59:59〜838:59:59）</summary>
     public static DslTimeRange MySqlTime { get; } =
@@ -676,11 +677,12 @@ public enum DslCaseRule
     Indeterminate,
 
     /// <summary>
-    /// 列の照合順序（SQL Server。既定の <c>..._CI_AS</c> は大文字小文字を区別せず、<c>=</c> は末尾の空白を無視する）。
-    /// 大文字小文字か末尾の空白だけで結果が変わる行は判定しない（NULL の行と、照合順序に依らず決まる行は判定する）
+    /// 列の照合順序（SQL Server。既定の <c>..._CI_AS</c> は大文字小文字と全角・半角を区別せず、<c>=</c> は末尾の空白を無視する）。
+    /// 大文字小文字・全角と半角・末尾の空白だけで結果が変わる行は判定しない（NULL の行と、照合順序に依らず決まる行は判定する）
     /// </summary>
     /// <remarks>
-    /// docs の表の SQL Server の行（「列の照合順序に従う」）と、同じ節の「<c>= ''</c> は末尾の空白を無視する」の写し。
+    /// docs の表の SQL Server の行（「列の照合順序に従う」・既定の照合順序は全角と半角を区別せず、全角の空白を半角の空白と同じに扱う）と、
+    /// 同じ節の「<c>= ''</c> は末尾の空白を無視する」（末尾の全角の空白も含む）の写し。
     /// 文字列一致（LIKE のワイルドカードつき・Contains / StartsWith / EndsWith）は Unicode の列では末尾の空白を区別するので、
     /// 大文字小文字だけを畳む（同じ節の「<c>EndsWith</c> は詰めた値に対して比べる」）。Unicode でない列（<c>char</c>・<c>varchar</c>）の
     /// 文字列一致は列の値の末尾の空白を数えない（同じ表の SQL Server の行。<c>MatchValue</c>）。
@@ -700,7 +702,8 @@ public enum DslCaseRule
 
     /// <summary>
     /// MySQL（EF Core・既定の照合順序 <c>utf8mb4_0900_ai_ci</c>）。大文字小文字・アクセント・合成済みの文字と分解形・<c>ß</c> と
-    /// <c>ss</c> を畳むと結果が変わる行を判定しない（<c>=</c>・<c>&lt;&gt;</c>・IN・LIKE・Contains / StartsWith / EndsWith のどれも）。
+    /// <c>ss</c>・全角と半角（全角の空白と半角の空白を含む）を畳むと結果が変わる行を判定しない（<c>=</c>・<c>&lt;&gt;</c>・IN・LIKE・
+    /// Contains / StartsWith / EndsWith のどれも）。末尾の空白は比べる（NO PAD）。
     /// StartsWith / EndsWith はパターンの末尾の空白を外すと結果が変わる行も判定しない
     /// </summary>
     /// <remarks>
@@ -1275,18 +1278,47 @@ public static class DslFuzz
         };
     }
 
-    /// <summary>照合順序で同じとみなされる形（大文字小文字を畳み、等号の比較なら末尾の空白も除く）</summary>
+    /// <summary>
+    /// 照合順序で同じとみなされる形（全角を半角へ畳み・大文字小文字を畳み、等号の比較なら末尾の空白も除く。全角の空白は半角の空白に
+    /// 畳んでから除くので、末尾の全角の空白も除かれる）
+    /// </summary>
     private static string CollationKey(string value, bool trimTrailing) =>
-        trimTrailing ? value.ToLowerInvariant().TrimEnd(' ') : value.ToLowerInvariant();
+        trimTrailing
+            ? FoldWidth(value).ToLowerInvariant().TrimEnd(' ')
+            : FoldWidth(value).ToLowerInvariant();
 
     /// <summary>
-    /// MySQL の既定の照合順序 <c>utf8mb4_0900_ai_ci</c> で同じとみなされる形の近似（<c>ß</c> を <c>ss</c> へ・分解して結合文字を外し・
-    /// 大文字へ）。オラクルは畳んだ形で結果が変わる行を判定しないだけなので、近似で足りる（docs の表の EF Core（MySQL）の行）
+    /// 全角の形を半角の形へ畳む（全角の空白 U+3000 を半角の空白へ、全角の ASCII の形 U+FF01〜U+FF5E を ASCII の U+0021〜U+007E へ）。
+    /// docs の表の SQL Server の既定の照合順序と MySQL の既定の照合順序が、全角と半角を区別しないことの写し
+    /// </summary>
+    private static string FoldWidth(string value) =>
+        string.Create(
+            value.Length,
+            value,
+            (span, source) =>
+            {
+                for (var i = 0; i < source.Length; i++)
+                {
+                    var c = source[i];
+                    span[i] = c switch
+                    {
+                        '\u3000' => ' ',
+                        >= '\uFF01' and <= '\uFF5E' => (char)(c - 0xFEE0),
+                        _ => c,
+                    };
+                }
+            }
+        );
+
+    /// <summary>
+    /// MySQL の既定の照合順序 <c>utf8mb4_0900_ai_ci</c> で同じとみなされる形の近似（全角を半角へ・<c>ß</c> を <c>ss</c> へ・分解して
+    /// 結合文字を外し・大文字へ）。オラクルは畳んだ形で結果が変わる行を判定しないだけなので、近似で足りる（docs の表の EF Core（MySQL）の行）。
+    /// 末尾の空白は外さない（NO PAD の照合順序なので、末尾の空白も比べる）
     /// </summary>
     private static string MySqlKey(string value) =>
         string.Concat(
-                value
-                    .Replace("ß", "ss", StringComparison.Ordinal)
+                FoldWidth(value)
+                    .Replace(TextEdges.LatinSmallSharpS, "ss", StringComparison.Ordinal)
                     .Normalize(NormalizationForm.FormD)
                     .Where(c =>
                         CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark
@@ -1484,7 +1516,7 @@ public static class DslFuzz
     /// float へ変換して比べる。整数は浮動小数点へ変換するので、float は 2^24・double は 2^53 を超える整数を丸める。-0.0 と 0.0 は等しい）
     /// </summary>
     /// <remarks>
-    /// docs の浮動小数点の比較の写し。NaN と無限大は値の池に入れない（扱わない）。decimal と浮動小数点の混在は型の検査が断るので来ない。
+    /// docs の浮動小数点の比較の写し。NaN と無限大は値のプールに入れない（扱わない）。decimal と浮動小数点の混在は型の検査が断るので来ない。
     /// </remarks>
     private static int CompareFloating(object value, object other) =>
         value is double || other is double
@@ -1514,9 +1546,9 @@ public static class DslFuzz
                 "a_b",
                 "%",
                 "_",
-                "ä",
-                "Ä",
-                "日本",
+                TextEdges.LatinSmallAUmlaut,
+                TextEdges.LatinCapitalAUmlaut,
+                TextEdges.KanjiNihon,
                 "a b",
                 "abc ",
                 "ab",
@@ -1591,20 +1623,20 @@ public static class DslFuzz
         };
 
     /// <summary>
-    /// double の値の池（NaN・無限大は入れない＝docs の既知の割り切り）：負・-0.0・0・2 進で正確でない値（0.1・0.30000000000000004）・
+    /// double の値のプール（NaN・無限大は入れない＝docs の既知の割り切り）：負・-0.0・0・2 進で正確でない値（0.1・0.30000000000000004）・
     /// 2^53・最小の正規化数・非正規化数（double.Epsilon・1e-310）・最大・最小・1e20
     /// </summary>
     public static IReadOnlyList<object> DoublePool { get; } =
     [
         -2.5d,
-        -0.0d,
+        FloatingEdges.NegativeZeroDouble,
         0.0d,
         0.1d,
         0.30000000000000004d,
         1.5d,
-        9007199254740992d,
+        (double)PowerOfTwoEdges.TwoPow53,
         2.2250738585072014E-308d,
-        double.Epsilon,
+        FloatingEdges.DoubleEpsilon,
         1e-310d,
         double.MaxValue,
         double.MinValue,
@@ -1612,20 +1644,20 @@ public static class DslFuzz
     ];
 
     /// <summary>
-    /// float の値の池（NaN・無限大は入れない）：負・-0.0・0・2 進で正確でない値（0.1・0.3）・2^24・最小の正規化数・非正規化数
+    /// float の値のプール（NaN・無限大は入れない）：負・-0.0・0・2 進で正確でない値（0.1・0.3）・2^24・最小の正規化数・非正規化数
     /// （float.Epsilon・1e-40）・最大・最小・100
     /// </summary>
     public static IReadOnlyList<object> FloatPool { get; } =
     [
         -2.5f,
-        -0.0f,
+        FloatingEdges.NegativeZeroSingle,
         0.0f,
         0.1f,
         0.3f,
         1.5f,
-        16777216f,
+        (float)PowerOfTwoEdges.TwoPow24,
         1.17549435E-38f,
-        float.Epsilon,
+        FloatingEdges.SingleEpsilon,
         1e-40f,
         float.MaxValue,
         float.MinValue,
@@ -1633,11 +1665,11 @@ public static class DslFuzz
     ];
 
     /// <summary>
-    /// MySQL の float の列の値の池（2 進で正確で 6 桁以内の値だけ）。MySQL の float の列は値を 6 桁に丸めて読み戻し、最大・最小を書けず、
+    /// MySQL の float の列の値のプール（2 進で正確で 6 桁以内の値だけ）。MySQL の float の列は値を 6 桁に丸めて読み戻し、最大・最小を書けず、
     /// 単精度で丸まる値の等値と IN が一致しない（docs の既知の割り切り）
     /// </summary>
     public static IReadOnlyList<object> MySqlFloatPool { get; } =
-    [-2.5f, -0.0f, 0.0f, 0.25f, 0.5f, 1.5f, 100f, 1024f];
+    [-2.5f, FloatingEdges.NegativeZeroSingle, 0.0f, 0.25f, 0.5f, 1.5f, 100f, 1024f];
 
     /// <summary>
     /// float の列と比べる double の値（float に入らない値＝2 進で丸まる値・float の範囲の外・非正規化数と、float に正確に入る
@@ -1670,16 +1702,16 @@ public static class DslFuzz
     public static IReadOnlyList<string> MySqlFloatLiteralTexts { get; } =
     ["0", "0.25", "0.5", "1.5", "-2.5", "100", "1024"];
 
-    /// <summary>種類ごとの数値のリテラルの綴りの池（浮動小数点の列だけ）</summary>
+    /// <summary>種類ごとの数値のリテラルの綴りのプール（浮動小数点の列だけ）</summary>
     public static IReadOnlyList<string> LiteralPool(DslClr clr) =>
         clr switch
         {
             DslClr.Single => FloatLiteralTexts,
             DslClr.Double => DoubleLiteralTexts,
-            _ => throw new ArgumentOutOfRangeException(nameof(clr), clr, "綴りの池の無い種類"),
+            _ => throw new ArgumentOutOfRangeException(nameof(clr), clr, "綴りのプールの無い種類"),
         };
 
-    /// <summary>列の数値のリテラルの綴りの候補（列が綴りの池を持てばそれ、無ければ種類ごとの綴りの池）</summary>
+    /// <summary>列の数値のリテラルの綴りの候補（列が綴りのプールを持てばそれ、無ければ種類ごとの綴りのプール）</summary>
     public static IReadOnlyList<string> LiteralPool(DslColumn column) =>
         column.LiteralValues ?? LiteralPool(column.Clr);
 
@@ -1704,22 +1736,30 @@ public static class DslFuzz
         };
 
     /// <summary>
-    /// 浮動小数点の列の相方の int の列の値の池（2^24 の前後・0・-1・型の端。float へ変換すると 16777217 は 16777216 に、100000001 は
+    /// 浮動小数点の列の相方の int の列の値のプール（2^24 の前後・0・-1・型の端。float へ変換すると 16777217 は 16777216 に、100000001 は
     /// 1e8 に丸まる）
     /// </summary>
     public static IReadOnlyList<object> FloatingPartnerInt32Pool { get; } =
-    [16777216, 16777217, 0, -1, int.MinValue, int.MaxValue, 100000001];
+    [
+        PowerOfTwoEdges.TwoPow24,
+        PowerOfTwoEdges.TwoPow24Plus1,
+        0,
+        -1,
+        int.MinValue,
+        int.MaxValue,
+        100000001,
+    ];
 
     /// <summary>
-    /// 浮動小数点の列の相方の bigint の列の値の池（2^24・2^53 の前後・0・-1・型の端。double へ変換すると 2^53+1 は 2^53 に、
+    /// 浮動小数点の列の相方の bigint の列の値のプール（2^24・2^53 の前後・0・-1・型の端。double へ変換すると 2^53+1 は 2^53 に、
     /// 10000000000000001 は 1e16 に丸まる）
     /// </summary>
     public static IReadOnlyList<object> FloatingPartnerInt64Pool { get; } =
     [
-        16777216L,
-        16777217L,
-        9007199254740992L,
-        9007199254740993L,
+        (long)PowerOfTwoEdges.TwoPow24,
+        (long)PowerOfTwoEdges.TwoPow24Plus1,
+        PowerOfTwoEdges.TwoPow53,
+        PowerOfTwoEdges.TwoPow53Plus1,
         10000000000000001L,
         0L,
         -1L,
@@ -1728,18 +1768,18 @@ public static class DslFuzz
     ];
 
     /// <summary>
-    /// MySQL の浮動小数点の列の相方の整数の列の値の池（2^24 の内側だけ）。MySQL の EF Core 版は整数の列と浮動小数点の値を丸めずに比べる
+    /// MySQL の浮動小数点の列の相方の整数の列の値のプール（2^24 の内側だけ）。MySQL の EF Core 版は整数の列と浮動小数点の値を丸めずに比べる
     /// （docs の既知の割り切り）
     /// </summary>
     public static IReadOnlyList<object> MySqlFloatingPartnerInt32Pool { get; } =
     [0, -1, 1, 1000, 16777215, -16777215];
 
-    /// <summary>MySQL の浮動小数点の列の相方の bigint の列の値の池（2^24 の内側だけ）</summary>
+    /// <summary>MySQL の浮動小数点の列の相方の bigint の列の値のプール（2^24 の内側だけ）</summary>
     public static IReadOnlyList<object> MySqlFloatingPartnerInt64Pool { get; } =
     [0L, -1L, 1L, 1000L, 16777215L, -16777215L];
 
     /// <summary>
-    /// 時差の混ざった DateTimeOffset の値の池（マイクロ秒の粒度）：同じ瞬間で時差の違う組（03:00Z・12:00+09:00・前日 22:00-05:00）、局所の
+    /// 時差の混ざった DateTimeOffset の値のプール（マイクロ秒の粒度）：同じ瞬間で時差の違う組（03:00Z・12:00+09:00・前日 22:00-05:00）、局所の
     /// 時刻の順と瞬間の順が逆の組（12:00+09:00＝03:00Z と 05:00Z）、日付をまたぐ時差（+14:00・-12:00）、小数秒、端
     /// </summary>
     public static IReadOnlyList<object> MixedOffsetPool { get; } =
@@ -1752,22 +1792,38 @@ public static class DslFuzz
         new DateTimeOffset(2024, 1, 1, 3, 0, 0, TimeSpan.Zero).AddTicks(10),
         new DateTimeOffset(2024, 2, 29, 23, 59, 59, TimeSpan.FromHours(14)).AddTicks(9_999_990),
         new DateTimeOffset(2024, 3, 1, 0, 0, 0, TimeSpan.FromHours(-12)),
-        new DateTimeOffset(1, 1, 1, 0, 0, 0, TimeSpan.Zero),
-        new DateTimeOffset(9999, 12, 31, 23, 59, 59, TimeSpan.Zero).AddTicks(9_999_990),
+        new DateTimeOffset(DateTimeEdges.CalendarFirstYear, 1, 1, 0, 0, 0, TimeSpan.Zero),
+        new DateTimeOffset(
+            DateTimeEdges.CalendarLastYear,
+            12,
+            31,
+            23,
+            59,
+            59,
+            TimeSpan.Zero
+        ).AddTicks(9_999_990),
     ];
 
     /// <summary>
-    /// 時差の混ざった池に、100 ナノ秒の端数を持つ値（上の端の 7 桁を含む）を足したもの（SQL Server の datetimeoffset は 7 桁の端数を持つ）
+    /// 時差の混ざったプールに、100 ナノ秒の端数を持つ値（上の端の 7 桁を含む）を足したもの（SQL Server の datetimeoffset は 7 桁の端数を持つ）
     /// </summary>
     public static IReadOnlyList<object> MixedOffsetTickPool { get; } =
     [
         .. MixedOffsetPool,
-        new DateTimeOffset(2024, 1, 1, 12, 0, 0, TimeSpan.FromHours(9)).AddTicks(1),
-        new DateTimeOffset(9999, 12, 31, 23, 59, 59, TimeSpan.Zero).AddTicks(9_999_999),
+        DateTimeEdges.OneTickAfter(new DateTimeOffset(2024, 1, 1, 12, 0, 0, TimeSpan.FromHours(9))),
+        new DateTimeOffset(
+            DateTimeEdges.CalendarLastYear,
+            12,
+            31,
+            23,
+            59,
+            59,
+            TimeSpan.Zero
+        ).AddTicks(9_999_999),
     ];
 
     /// <summary>
-    /// 時差をそろえた DateTimeOffset の値の池（時差の混ざった池の局所の時刻を +09:00 にしたもの＝上の端を除く）。SQLite は値を TEXT で持ち、
+    /// 時差をそろえた DateTimeOffset の値のプール（時差の混ざったプールの局所の時刻を +09:00 にしたもの＝上の端を除く）。SQLite は値を TEXT で持ち、
     /// 同じ時差の値どうしでだけ TEXT の順が瞬間の順と一致する（docs の DateTimeOffset の既知の割り切り）
     /// </summary>
     public static IReadOnlyList<object> SameOffsetPool { get; } =
@@ -1777,11 +1833,11 @@ public static class DslFuzz
             .Where(value => value.Year < 9999 && value.Year > 1)
             .Select(value => (object)new DateTimeOffset(value.DateTime, TimeSpan.FromHours(9)))
             .Distinct(),
-        new DateTimeOffset(2024, 1, 1, 12, 0, 0, TimeSpan.FromHours(9)).AddTicks(1),
+        DateTimeEdges.OneTickAfter(new DateTimeOffset(2024, 1, 1, 12, 0, 0, TimeSpan.FromHours(9))),
     ];
 
     /// <summary>
-    /// 時差 0（UTC）の DateTimeOffset の値の池（時差の混ざった池を UTC にしたもの・マイクロ秒の粒度）。PostgreSQL の timestamptz は時差 0 の値
+    /// 時差 0（UTC）の DateTimeOffset の値のプール（時差の混ざったプールを UTC にしたもの・マイクロ秒の粒度）。PostgreSQL の timestamptz は時差 0 の値
     /// だけを書け、比べられる（docs の DateTimeOffset の既知の割り切り）
     /// </summary>
     public static IReadOnlyList<object> UtcOffsetPool { get; } =
@@ -1793,7 +1849,7 @@ public static class DslFuzz
     ];
 
     /// <summary>
-    /// 日の中（0〜24 時間未満）の TimeSpan の値の池（マイクロ秒の粒度＝PostgreSQL・MySQL が端数を落とさない値。docs の
+    /// 日の中（0〜24 時間未満）の TimeSpan の値のプール（マイクロ秒の粒度＝PostgreSQL・MySQL が端数を落とさない値。docs の
     /// マイクロ秒の既知の割り切りに当たらない）
     /// </summary>
     public static IReadOnlyList<object> TimeOfDayPool { get; } =
@@ -1810,22 +1866,22 @@ public static class DslFuzz
     ];
 
     /// <summary>
-    /// 日の中の値の池に、100 ナノ秒の端数を持つ値（SQL Server の time の上限を含む）を足したもの（SQL Server・SQLite は 7 桁の端数を持つ）
+    /// 日の中の値のプールに、100 ナノ秒の端数を持つ値（SQL Server の time の上限を含む）を足したもの（SQL Server・SQLite は 7 桁の端数を持つ）
     /// </summary>
     public static IReadOnlyList<object> TimeOfDayTickPool { get; } =
     [
         .. TimeOfDayPool,
         TimeSpan.FromHours(10).Add(TimeSpan.FromTicks(1)),
-        TimeSpan.FromDays(1) - TimeSpan.FromTicks(1),
+        TimeSpanEdges.OneDay - TimeSpan.FromTicks(1),
     ];
 
     /// <summary>
-    /// 日の中の値の池に、負の値と 1 日以上の値を足したもの（MySQL の time の範囲 ±838:59:59 の中・マイクロ秒の粒度）
+    /// 日の中の値のプールに、負の値と 1 日以上の値を足したもの（MySQL の time の範囲 ±838:59:59 の中・マイクロ秒の粒度）
     /// </summary>
     public static IReadOnlyList<object> WideTimeSpanPool { get; } =
     [
         .. TimeOfDayPool,
-        TimeSpan.FromDays(1),
+        TimeSpanEdges.OneDay,
         new TimeSpan(1, 1, 0, 0),
         -TimeSpan.FromTicks(10),
         -TimeSpan.FromHours(1),
@@ -1839,20 +1895,20 @@ public static class DslFuzz
     /// </summary>
     public static IReadOnlyList<object> OutOfDayPool { get; } =
     [
-        TimeSpan.FromDays(1),
-        TimeSpan.FromDays(1) + TimeSpan.FromTicks(10),
+        TimeSpanEdges.OneDay,
+        TimeSpanEdges.OneDay + TimeSpan.FromTicks(10),
         -TimeSpan.FromTicks(10),
         -TimeSpan.FromHours(1),
         new TimeSpan(2, 3, 4, 5),
-        TimeSpan.FromTicks(TimeSpan.MaxValue.Ticks / 10 * 10),
-        TimeSpan.FromTicks(TimeSpan.MinValue.Ticks / 10 * 10),
+        TimeSpanEdges.MaxWholeMicroseconds,
+        TimeSpanEdges.MinWholeMicroseconds,
     ];
 
-    /// <summary>列の値の候補（列が値の池を持てばそれ、無ければ種類ごとの値の池）</summary>
+    /// <summary>列の値の候補（列が値のプールを持てばそれ、無ければ種類ごとの値のプール）</summary>
     public static IReadOnlyList<object> ValuePool(DslColumn column) =>
         column.Values ?? ValuePool(column.Clr);
 
-    /// <summary>パラメータと IN のリストの値の候補（列がパラメータだけの値の池を持てばそれ、無ければ列の値の池）</summary>
+    /// <summary>パラメータと IN のリストの値の候補（列がパラメータだけの値のプールを持てばそれ、無ければ列の値のプール）</summary>
     public static IReadOnlyList<object> OperandPool(DslColumn column) =>
         column.OperandValues ?? ValuePool(column);
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using QuickER.Tests.TestSupport.ValuePools;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
@@ -130,6 +131,27 @@ public static class SqlServerValueShapes
     /// <summary>型の範囲の外（断られる）</summary>
     public const string OutOfRange = "OutOfRange";
 
+    /// <summary>型の範囲の最初の側の外（断られる。datetime は 1753 年より前・smalldatetime は 1900 年より前）</summary>
+    public const string BeforeRange = "BeforeRange";
+
+    /// <summary>範囲の最初の端ちょうど（smalldatetime の 1900-01-01。丸めずにそのまま書ける）</summary>
+    public const string EdgeFirst = "EdgeFirst";
+
+    /// <summary>範囲の最後の端ちょうど（smalldatetime の 2079-06-06 23:59。丸めずにそのまま書ける）</summary>
+    public const string EdgeLast = "EdgeLast";
+
+    /// <summary>1 日の最後（24 時間の 1 tick 前。小数秒 2 桁へ丸めると 24:00 になり、範囲の端で止まる）</summary>
+    public const string DayEnd = "DayEnd";
+
+    /// <summary>1 日を超える値（断られる）</summary>
+    public const string BeyondDay = "BeyondDay";
+
+    /// <summary>負の値（time の範囲の最初の側の外。断られる）</summary>
+    public const string Negative = "Negative";
+
+    /// <summary>負のオフセット</summary>
+    public const string OffsetNegative = "OffsetNegative";
+
     /// <summary>Kind が Utc の DateTime</summary>
     public const string KindUtc = "KindUtc";
 
@@ -224,8 +246,20 @@ public static class SqlServerValueShapes
                 KindLocal,
             ],
             SqlServerValueColumn.At => [Exact, RangeEnd, KindUtc, KindLocal],
-            SqlServerValueColumn.Clock => [Exact, RoundDown, RoundUp, Half, RangeEnd, OutOfRange],
-            SqlServerValueColumn.AtOffset => [Exact, RangeEnd, Offset],
+            SqlServerValueColumn.Clock =>
+            [
+                Exact,
+                RoundDown,
+                RoundUp,
+                Half,
+                RangeEnd,
+                DayEnd,
+                Zero,
+                OutOfRange,
+                BeyondDay,
+                Negative,
+            ],
+            SqlServerValueColumn.AtOffset => [Exact, RangeEnd, Offset, OffsetNegative],
             SqlServerValueColumn.AtOffset2 =>
             [
                 Exact,
@@ -235,6 +269,7 @@ public static class SqlServerValueShapes
                 CarryDay,
                 RangeEnd,
                 Offset,
+                OffsetNegative,
             ],
             SqlServerValueColumn.Day => [Exact, TimeOfDay, KindUtc, KindLocal],
             SqlServerValueColumn.Amount =>
@@ -283,6 +318,7 @@ public static class SqlServerValueShapes
                 RoundUp,
                 RangeEnd,
                 OutOfRange,
+                BeforeRange,
                 KindUtc,
             ],
             SqlServerValueColumn.SmallAt =>
@@ -292,7 +328,10 @@ public static class SqlServerValueShapes
                 RoundUp,
                 CarryDay,
                 RangeEnd,
+                EdgeFirst,
+                EdgeLast,
                 OutOfRange,
+                BeforeRange,
             ],
             SqlServerValueColumn.Price or SqlServerValueColumn.Fee =>
             [
@@ -310,7 +349,15 @@ public static class SqlServerValueShapes
 
     /// <summary>断られる値の形（乱数の行で混ぜる割合を抑えるために分ける）</summary>
     public static bool IsRefusing(string shape) =>
-        shape is OutOfRange or RoundsToOverflow or Overflow or OverContent or OverOtherSpace;
+        shape
+            is OutOfRange
+                or BeforeRange
+                or BeyondDay
+                or Negative
+                or RoundsToOverflow
+                or Overflow
+                or OverContent
+                or OverOtherSpace;
 
     /// <summary>形から書く値を作る（<paramref name="random"/> が null なら代表の値）</summary>
     public static object Value(SqlServerValueColumn column, string shape, Random? random) =>
@@ -336,7 +383,7 @@ public static class SqlServerValueShapes
         };
 
     /// <summary>datetime の 1 単位（1/300 秒）の tick（端数を持つ）</summary>
-    private const double LegacyUnitTicks = TimeSpan.TicksPerSecond / 300.0;
+    private const double LegacyUnitTicks = DateTimeEdges.LegacyStepTicks;
 
     /// <summary>datetime の最小の値（1753-01-01）</summary>
     public static readonly DateTime LegacyMin = new(1753, 1, 1);
@@ -360,14 +407,14 @@ public static class SqlServerValueShapes
                 100_000 * Pick(random, 0, 99, 12) + Pick(random, 1, half, 12_345)
             ),
             RoundUp => BaseTime.AddTicks(
-                100_000 * Pick(random, 0, 99, 12) + Pick(random, half + 1, 33_332, 23_456)
+                100_000 * Pick(random, 0, 99, 12)
+                    + Pick(random, half + 1, 33_332, DateTimeEdges.LegacyWindowAfterReadBackTicks)
             ),
             RangeEnd => LegacyMax.AddTicks(-Pick(random, 0, half, 0)),
-            OutOfRange => Pick(random, 0, 1, 1) == 0
-                ? LegacyMin.AddTicks(
-                    -Pick(random, 33_334, TimeSpan.TicksPerDay, TimeSpan.TicksPerDay)
-                )
-                : LegacyMax.AddTicks(Pick(random, half + 1, 29_999, half + 1)),
+            OutOfRange => LegacyMax.AddTicks(Pick(random, half + 1, 29_999, half + 1)),
+            BeforeRange => LegacyMin.AddTicks(
+                -Pick(random, 33_334, TimeSpan.TicksPerDay, TimeSpan.TicksPerDay)
+            ),
             KindUtc => DateTime.SpecifyKind(LegacyDateTime(Exact, random), DateTimeKind.Utc),
             _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, null),
         };
@@ -398,9 +445,10 @@ public static class SqlServerValueShapes
                 .AddMinutes(-1)
                 .AddMilliseconds(Pick(random, 29_999, 59_999, 30_000)),
             RangeEnd => SmallMax.AddMilliseconds(Pick(random, 0, 29_998, 29_998)),
-            OutOfRange => Pick(random, 0, 1, 1) == 0
-                ? SmallMin.AddMinutes(-1).AddMilliseconds(Pick(random, 0, 29_998, 0))
-                : SmallMax.AddMilliseconds(Pick(random, 29_999, 59_999, 29_999)),
+            EdgeFirst => SmallMin,
+            EdgeLast => SmallMax,
+            OutOfRange => SmallMax.AddMilliseconds(Pick(random, 29_999, 59_999, 29_999)),
+            BeforeRange => SmallMin.AddMinutes(-1).AddMilliseconds(Pick(random, 0, 29_998, 0)),
             _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, null),
         };
     }
@@ -481,19 +529,25 @@ public static class SqlServerValueShapes
             Exact or RoundDown or RoundUp or Half => TimeSpan.FromTicks(
                 ScaledDateTime(shape, random).TimeOfDay.Ticks
             ),
-            RangeEnd => TimeSpan.FromDays(1)
+            RangeEnd => TimeSpanEdges.OneDay
                 - TimeSpan.FromTicks(Pick(random, 1, Scale2Unit / 2, Scale2Unit / 2)),
-            OutOfRange => Pick(random, 0, 1, 0) == 0
-                ? TimeSpan.FromDays(1)
-                    + TimeSpan.FromTicks(Pick(random, 0, TimeSpan.TicksPerHour, 0))
-                : TimeSpan.FromTicks(
-                    -Pick(random, 1, TimeSpan.TicksPerHour, TimeSpan.TicksPerSecond)
-                ),
+            Zero => TimeSpan.Zero,
+            DayEnd => TimeSpanEdges.OneDay - TimeSpan.FromTicks(1),
+            OutOfRange => TimeSpanEdges.OneDay,
+            BeyondDay => TimeSpanEdges.OneDay
+                + TimeSpan.FromTicks(Pick(random, 1, TimeSpan.TicksPerHour, TimeSpan.TicksPerHour)),
+            Negative => TimeSpan.FromTicks(
+                -Pick(random, 1, TimeSpan.TicksPerHour, TimeSpan.TicksPerSecond)
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, null),
         };
 
     private static TimeSpan OffsetOf(Random? random) =>
         TimeSpan.FromMinutes(15 * Pick(random, -14 * 4, 14 * 4, 9 * 4));
+
+    /// <summary>負のオフセット（決まった形は -05:00）</summary>
+    private static TimeSpan NegativeOffsetOf(Random? random) =>
+        TimeSpan.FromMinutes(15 * Pick(random, -14 * 4, -1, -5 * 4));
 
     private static DateTimeOffset FullOffset(string shape, Random? random) =>
         shape switch
@@ -501,6 +555,10 @@ public static class SqlServerValueShapes
             Exact => new DateTimeOffset(FullDateTime(Exact, random), TimeSpan.Zero),
             RangeEnd => DateTimeOffset.MaxValue.AddTicks(-Pick(random, 0, 9, 0)),
             Offset => new DateTimeOffset(FullDateTime(Exact, random), OffsetOf(random)),
+            OffsetNegative => new DateTimeOffset(
+                FullDateTime(Exact, random),
+                NegativeOffsetOf(random)
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, null),
         };
 
@@ -513,6 +571,10 @@ public static class SqlServerValueShapes
             ),
             RangeEnd => DateTimeOffset.MaxValue.AddTicks(-Pick(random, 0, Scale2Unit / 2, 0)),
             Offset => new DateTimeOffset(ScaledDateTime(RoundUp, random), OffsetOf(random)),
+            OffsetNegative => new DateTimeOffset(
+                ScaledDateTime(RoundUp, random),
+                NegativeOffsetOf(random)
+            ),
             _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, null),
         };
 
@@ -553,22 +615,48 @@ public static class SqlServerValueShapes
     }
 
     /// <summary>コードページ 1252 が表せる非 ASCII</summary>
-    private static readonly string[] HeldCharacters = ["é", "€", "ÿ", "ñ"];
+    private static readonly string[] HeldCharacters =
+    [
+        TextEdges.LatinSmallEAcute,
+        TextEdges.EuroSign,
+        TextEdges.LatinSmallYDiaeresis,
+        TextEdges.LatinSmallNTilde,
+    ];
 
     /// <summary>コードページ 1252 が表せない文字（近い文字も無い）</summary>
-    private static readonly string[] MissingCharacters = ["日", "本", "ア"];
+    private static readonly string[] MissingCharacters =
+    [
+        TextEdges.KanjiNichi,
+        TextEdges.KanjiHon,
+        TextEdges.KatakanaA,
+    ];
 
     /// <summary>コードページ 1252 で近い文字へ置き換わる文字</summary>
-    private static readonly string[] BestFitCharacters = ["Ā", "ō", "Ł"];
+    private static readonly string[] BestFitCharacters =
+    [
+        TextEdges.LatinCapitalAMacron,
+        TextEdges.LatinSmallOMacron,
+        TextEdges.LatinCapitalLStroke,
+    ];
 
     /// <summary>BMP の非 ASCII（Unicode の列）</summary>
-    private static readonly string[] NonAsciiCharacters = ["日", "é", "Ā", "ア"];
+    private static readonly string[] NonAsciiCharacters =
+    [
+        TextEdges.KanjiNichi,
+        TextEdges.LatinSmallEAcute,
+        TextEdges.LatinCapitalAMacron,
+        TextEdges.KatakanaA,
+    ];
 
     /// <summary>サロゲートペア</summary>
-    private static readonly string[] SurrogateCharacters = ["😀", "𠀋"];
+    private static readonly string[] SurrogateCharacters =
+    [
+        TextEdges.GrinningFace,
+        TextEdges.CjkExtensionBCharacter,
+    ];
 
     /// <summary>半角の空白でない空白類</summary>
-    private static readonly string[] OtherSpaces = ["\u0009", " "];
+    private static readonly string[] OtherSpaces = ["\u0009", TextEdges.NoBreakSpace];
 
     private static string Text(string shape, int length, bool unicode, Random? random)
     {

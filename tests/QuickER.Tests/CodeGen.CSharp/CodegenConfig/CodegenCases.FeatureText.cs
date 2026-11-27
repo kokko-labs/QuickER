@@ -2316,6 +2316,176 @@ internal static partial class CodegenCases
     private const string RemoteClientExtensions =
         "GeneratedHttpRemoteRepositoryServiceCollectionExtensions";
 
+    /// <summary>リモートの転送の DateTime の行の図（Order に NOT NULL と NULL 許容の datetime2 の列）</summary>
+    private static ErDiagram FeatureText_RemoteDateTimeDiagram()
+    {
+        var order = new Entity { TableName = "Order" };
+        order.Columns.Add(
+            new Column
+            {
+                Name = "OrderId",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+        order.Columns.Add(
+            new Column
+            {
+                Name = "PlacedAt",
+                DataType = "datetime2",
+                IsNullable = false,
+            }
+        );
+        order.Columns.Add(new Column { Name = "ShippedAt", DataType = "datetime2" });
+
+        return new ErDiagram { Entities = { order } };
+    }
+
+    /// <summary>
+    /// 生成した <c>RemoteJson.Options</c> で DateTime を書いて読む。Kind（Local・Utc・Unspecified）と暦の端に依らず、書いた文字列が
+    /// 時差の文字（<c>Z</c>・<c>+09:00</c> など）を持たず、読んだ値の tick が同じで Kind が Unspecified になる（DateTime?・配列・
+    /// 値オブジェクトの中の DateTime も）。この機の時差に依らない（既定の変換器は Local の値にこの機の時差を、Utc の値に <c>Z</c> を書く）
+    /// </summary>
+    /// <param name="valueObjects">値オブジェクトを生成した生成物か（列 PlacedAt の値オブジェクトも書いて読む）</param>
+    private static ExecCheck FeatureText_RemoteJsonDateTimeTravelsWithoutKind(bool valueObjects) =>
+        new(
+            valueObjects
+                ? "remote-json-datetime-travels-without-kind-value-objects"
+                : "remote-json-datetime-travels-without-kind",
+            assembly =>
+            {
+                var problems = new List<string>();
+                var options = (System.Text.Json.JsonSerializerOptions)
+                    ProbeKit.GetStatic(ProbeKit.Type(assembly, "RemoteJson"), "Options")!;
+                var middle = new DateTime(2024, 2, 29, 10, 30, 15).AddTicks(1234567);
+                DateTime[] values =
+                [
+                    DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Local),
+                    DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Local),
+                    DateTime.SpecifyKind(middle, DateTimeKind.Local),
+                    DateTime.SpecifyKind(middle, DateTimeKind.Utc),
+                    DateTime.SpecifyKind(middle, DateTimeKind.Unspecified),
+                    DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc),
+                    DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc),
+                ];
+
+                // 書いた JSON の文字列の値が時差の文字を持たないか
+                static bool HasOffset(string text) =>
+                    text.EndsWith('Z')
+                    || System.Text.RegularExpressions.Regex.IsMatch(
+                        text,
+                        "[+-][0-9]{2}:[0-9]{2}$",
+                        System.Text.RegularExpressions.RegexOptions.CultureInvariant
+                    );
+
+                void Expect(string label, DateTime written, string json, DateTime read)
+                {
+                    var text = System.Text.Json.JsonSerializer.Deserialize<string>(json)!;
+
+                    if (HasOffset(text))
+                    {
+                        problems.Add(
+                            $"{label}: {written.Kind} の {written:O} を時差の文字つきで書いた（{text}）"
+                        );
+                    }
+
+                    if (read.Ticks != written.Ticks || read.Kind != DateTimeKind.Unspecified)
+                    {
+                        problems.Add(
+                            $"{label}: {written.Kind} の {written:O} を {read.Kind} の {read:O} で読んだ（tick を保って Unspecified で読むこと）"
+                        );
+                    }
+                }
+
+                foreach (var value in values)
+                {
+                    var json = System.Text.Json.JsonSerializer.Serialize(value, options);
+                    Expect(
+                        "DateTime",
+                        value,
+                        json,
+                        System.Text.Json.JsonSerializer.Deserialize<DateTime>(json, options)
+                    );
+
+                    DateTime? nullable = value;
+                    var nullableJson = System.Text.Json.JsonSerializer.Serialize(nullable, options);
+                    Expect(
+                        "DateTime?",
+                        value,
+                        nullableJson,
+                        System
+                            .Text.Json.JsonSerializer.Deserialize<DateTime?>(nullableJson, options)!
+                            .Value
+                    );
+
+                    if (valueObjects)
+                    {
+                        var voType = ProbeKit.Type(assembly, "PlacedAtValue");
+                        var vo = ProbeKit.CallStatic(voType, "Create", value)!;
+                        var voJson = System.Text.Json.JsonSerializer.Serialize(vo, voType, options);
+                        var voRead = System.Text.Json.JsonSerializer.Deserialize(
+                            voJson,
+                            voType,
+                            options
+                        )!;
+                        Expect(
+                            "値オブジェクト",
+                            value,
+                            voJson,
+                            (DateTime)ProbeKit.Get(voRead, "Value")!
+                        );
+                    }
+                }
+
+                var arrayRead = System.Text.Json.JsonSerializer.Deserialize<DateTime[]>(
+                    System.Text.Json.JsonSerializer.Serialize(values, options),
+                    options
+                )!;
+
+                for (var i = 0; i < values.Length; i++)
+                {
+                    if (
+                        arrayRead[i].Ticks != values[i].Ticks
+                        || arrayRead[i].Kind != DateTimeKind.Unspecified
+                    )
+                    {
+                        problems.Add(
+                            $"配列の {i} 番目: {values[i].Kind} の {values[i]:O} を {arrayRead[i].Kind} の {arrayRead[i]:O} で読んだ"
+                        );
+                    }
+                }
+
+                // 変換器が書かない Z つきの文字列（UTC の値）も、tick を保って Unspecified で読む
+                var utcText = System.Text.Json.JsonSerializer.Serialize(
+                    DateTime.SpecifyKind(middle, DateTimeKind.Utc)
+                );
+                var utcRead = System.Text.Json.JsonSerializer.Deserialize<DateTime>(
+                    utcText,
+                    options
+                );
+
+                if (utcRead.Ticks != middle.Ticks || utcRead.Kind != DateTimeKind.Unspecified)
+                {
+                    problems.Add(
+                        $"Z つきの {utcText} を {utcRead.Kind} の {utcRead:O} で読んだ（tick を保って Unspecified で読むこと）"
+                    );
+                }
+
+                var nullRead = System.Text.Json.JsonSerializer.Deserialize<DateTime?>(
+                    System.Text.Json.JsonSerializer.Serialize((DateTime?)null, options),
+                    options
+                );
+
+                if (nullRead is not null)
+                {
+                    problems.Add($"null の DateTime? を {nullRead:O} で読んだ");
+                }
+
+                return problems;
+            }
+        );
+
     /// <summary>リモートサービスの標準の入力（Order に名前付きクエリ 2 件）で、出力名を指定するもの</summary>
     private static CodeGenerationOptions FeatureText_RemoteOptions(string? outputFileName = null) =>
         new()
@@ -2345,6 +2515,25 @@ internal static partial class CodegenCases
 
     private static IEnumerable<ScenarioRow<CodegenCase>> FeatureTextRemoteRestRows() =>
         [
+            FeatureTextRow(
+                "exec-remote-json-datetime-travels-without-kind",
+                RemoteClass,
+                "RemoteJson_DateTime_TravelsWithoutKind（リモートの転送の設定は、DateTime を Kind に依らず時差の文字なしで書き、tick を保って Unspecified で読む。値オブジェクトなし）",
+                FeatureText_RemoteDateTimeDiagram,
+                FeatureText_RemoteOptions(),
+                exec: [FeatureText_RemoteJsonDateTimeTravelsWithoutKind(valueObjects: false)]
+            ),
+            FeatureTextRow(
+                "exec-remote-json-datetime-travels-without-kind-value-objects",
+                RemoteClass,
+                "RemoteJson_DateTime_TravelsWithoutKind_ValueObjects（同じ。値オブジェクトありで、値オブジェクトの中の DateTime も同じに運ぶ）",
+                FeatureText_RemoteDateTimeDiagram,
+                FeatureText_RemoteOptions() with
+                {
+                    GenerateValueObjects = true,
+                },
+                exec: [FeatureText_RemoteJsonDateTimeTravelsWithoutKind(valueObjects: true)]
+            ),
             FeatureTextRow(
                 "code-remote-service-main-client-and-server-engine-declarations",
                 RemoteClass,

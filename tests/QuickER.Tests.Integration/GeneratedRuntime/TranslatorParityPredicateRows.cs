@@ -4,6 +4,7 @@ using System.Linq;
 using System.Linq.Expressions;
 using QuickER.Tests.GeneratedTranslatorParityFixture;
 using QuickER.Tests.TestSupport.Engines;
+using QuickER.Tests.TestSupport.ValuePools;
 using Xunit;
 
 namespace QuickER.Tests.Integration.GeneratedRuntime;
@@ -141,10 +142,14 @@ public static class TranslatorParityPredicateRows
         string reason
     ) => row with { Tag = RowTag.Reason(RowTagKind.ReviewFinding, reason) };
 
-    /// <summary>区切り a の XT4（列の側の符号だけの変換の折り返し）で足した行の札</summary>
-    private static ScenarioRow<TranslatorParityPredicate> Xt4(
+    /// <summary>P1（整数の列と REAL へ丸めると行に重なる decimal の値）の受け入れで足した行の札</summary>
+    private static ScenarioRow<TranslatorParityPredicate> P1Finding(
         ScenarioRow<TranslatorParityPredicate> row
-    ) => row with { Tag = RowTag.Ledger("xt4") };
+    ) =>
+        Finding(
+            row,
+            "P1（value-pool-canon-phase3a-stop）：QuickER 版の SQLite で整数の列と比べる decimal の値が REAL へ丸まって行に重なる。値が左の比較は値の束縛の生成の表の述語の形に無い（列を左に置く形だけ）ので、比べ方の隣の形をこの表の行で持つ"
+        );
 
     private static ScenarioTable<TranslatorParityPredicate> Build()
     {
@@ -163,12 +168,9 @@ public static class TranslatorParityPredicateRows
         var numbersWithNull = new List<int?> { 1, null, 3 };
         var longsBeyondInt = new List<long?> { 1, 3000000000L };
         var uintsBeyondInt = new List<uint> { 10u, 3000000000u };
-        var uintsAcrossSign = new List<uint> { 2147483648u, 12u };
-        var uintArrayAcrossSign = new[] { 2147483647u, 2147483648u };
-        var noonOfFirstDay = new DateTime(2024, 1, 1, 12, 0, 0);
         var finerThanCentisecond = new DateTime(2024, 1, 1, 10, 0, 0).AddTicks(1_200_001);
         var finerClock = new TimeSpan(0, 10, 0, 0, 120).Add(TimeSpan.FromTicks(1));
-        var oneDay = TimeSpan.FromDays(1);
+        var oneDay = TimeSpanEdges.OneDay;
         var negativeHour = TimeSpan.FromHours(-1);
         var clocksWithOutOfDay = new List<TimeSpan?> { oneDay, new TimeSpan(0, 10, 0, 0, 120) };
         var onlyOutOfDayClocks = new List<TimeSpan?> { oneDay, negativeHour };
@@ -178,10 +180,9 @@ public static class TranslatorParityPredicateRows
         var legacyBase = TranslatorParityRuntimeTestsBase.LegacyAtBase;
         var legacyReadBack = legacyBase.AddMilliseconds(3);
         var legacyBetweenReadBacks = legacyBase.AddMilliseconds(4);
-        var legacyAfterReadBack = legacyBase.AddTicks(31_000);
-        var legacyBeforeReadBack = legacyBase.AddTicks(68_000);
-        var legacyPastMax = new DateTime(9999, 12, 31, 23, 59, 59, 999);
-        var legacyBeforeMin = new DateTime(1752, 12, 31);
+        var legacyBeforeReadBack = legacyBase.AddTicks(
+            DateTimeEdges.LegacyWindowBeforeReadBackTicks
+        );
         var legacyMixed = new List<DateTime?>
         {
             legacyReadBack,
@@ -194,9 +195,7 @@ public static class TranslatorParityPredicateRows
         var smallBase = TranslatorParityRuntimeTestsBase.SmallAtBase;
         var smallNextMinute = smallBase.AddMinutes(1);
         var smallHalfMinute = smallBase.AddSeconds(30);
-        var smallRoundsDown = smallBase.AddSeconds(30).AddMilliseconds(-2);
         var smallPastLast = TranslatorParityRuntimeTestsBase.SmallAtLast.AddSeconds(30);
-        var smallBeforeFirst = TranslatorParityRuntimeTestsBase.SmallAtFirst.AddSeconds(-1);
         var smallMixed = new List<DateTime?> { smallNextMinute, smallHalfMinute, smallPastLast };
         // probes の at_offset：id 1＝2024-01-01 05:00+09:00（12/31 20:00Z）・id 2＝2023-12-31 22:00-03:00（1/1 01:00Z）・
         // id 3＝2024-06-30 23:30Z・id 5＝2024-01-01 00:00+09:00（12/31 15:00Z）・ほかは NULL。局所の時刻の順と瞬間の順が逆の組を持つ
@@ -222,14 +221,14 @@ public static class TranslatorParityPredicateRows
             null,
         };
         var amountBeyondScale = 100.004m;
-        var amountBeyondPrecision = 123456789.5m;
+        var belowLong = DecimalPool.BelowLong.Value;
+        var nearLongMaxFraction = DecimalPool.NearLongMaxFractionValue.Value;
+        var beyondDoubleFraction = DecimalPool.BeyondDoubleFractionValue.Value;
+        var beyondDoubleIntegral = DecimalPool.BeyondDoubleIntegralValue.Value;
+        var uintSignBoundary = (decimal)IntegerPool.SignBoundaryOf(typeof(uint)).Value;
         var amountsBeyondScale = new List<decimal?> { 100.004m, 300m };
-        decimal? fractionBelowOne = 0.999m;
-        var nonAscii = "日本";
-        var nonAsciiPart = "本";
-        var fraction = 1.5m;
-        var integralDecimal = 1m;
-        var beyondLong = 100000000000000000000m;
+        var nonAscii = TextEdges.KanjiNihon;
+        var nonAsciiPart = TextEdges.KanjiHon;
         var decimalsForBigint = new List<decimal> { 1m, 1.5m, 10000000000000000m };
         var decimalsForInt = new List<decimal?> { 2m, 1.5m, null };
         decimal?[] decimalArrayForInt = [2m, 1.5m, null];
@@ -476,6 +475,8 @@ public static class TranslatorParityPredicateRows
                 c => numbersWithNull.Contains(c.BigParentId)
             ),
             // ---- 列の型に入らない値との比較（整数の列と小数・int の範囲の外・decimal の桁の外）は、C# と同じく数として比べる ----
+            //      単一の値と同じ種類の 2 つの値のリストは、値の束縛の生成の表の必ず含む行（同じ Id）へ移した（値のプールの正本）。ここに
+            //      残すのは、生成の表の水準で表せない形（double の値・.Value 越しの比較・要素の種類を混ぜたリスト・null を含むリスト）
             SmallChild(
                 "int-column-equals-fraction",
                 "int の列と小数の == はどの行にも一致しない（値を列の型へ切り捨てない）",
@@ -502,16 +503,6 @@ public static class TranslatorParityPredicateRows
                 c => !(c.Id < 10.5)
             ),
             SmallChild(
-                "int-column-less-long-beyond-int",
-                "int の列と int の範囲の外の long の < は数として比べる（例外にしない）",
-                c => c.BigParentId < 3000000000L
-            ),
-            SmallChild(
-                "int-column-equals-long-beyond-int",
-                "int の列と int の範囲の外の long の == はどの行にも一致しない",
-                c => c.BigParentId == 3000000000L
-            ),
-            SmallChild(
                 "in-long-list-beyond-int",
                 "int の列と long のリストの IN は、int の範囲の外の要素があっても数として比べる",
                 c => longsBeyondInt.Contains(c.BigParentId)
@@ -527,24 +518,9 @@ public static class TranslatorParityPredicateRows
                 c => c.Id.Equals(3000000000L)
             ),
             Probe(
-                "decimal-equals-beyond-scale",
-                "decimal(10,2) の列と桁の多い decimal の == は値を列の桁へ丸めない",
-                x => x.Amount == 100.004m
-            ),
-            Probe(
                 "decimal-greater-or-equal-beyond-scale",
                 "decimal(10,2) の列と桁の多い decimal の >= は値を列の桁へ丸めない",
                 x => x.Amount != null && x.Amount.Value >= 100.004m
-            ),
-            Probe(
-                "date-less-time-of-day",
-                "date の列と時刻つきの DateTime の < は時刻を落とさずに比べる",
-                x => x.Day < noonOfFirstDay
-            ),
-            Probe(
-                "date-equals-time-of-day",
-                "date の列と時刻つきの DateTime の == はどの行にも一致しない",
-                x => x.Day == noonOfFirstDay
             ),
             Probe(
                 "datetime2-scaled-equals-finer",
@@ -568,86 +544,11 @@ public static class TranslatorParityPredicateRows
             ),
             // ---- datetime の列（1/300 秒を .000・.003・.007 で読み戻す）と、読み戻せない値・範囲の外の値 ----
             Probe(
-                "legacy-equals-read-back",
-                "datetime の列と読み戻した値（.003）の == はその行に一致する",
-                x => x.LegacyAt == legacyReadBack
-            ),
-            Probe(
-                "legacy-equals-between-read-backs",
-                "datetime の列と読み戻せない値（.004）の == はどの行にも一致しない",
-                x => x.LegacyAt == legacyBetweenReadBacks
-            ),
-            Probe(
-                "legacy-less-between-read-back-and-step",
-                "datetime の列と、読み戻した値 .003 と 1/300 秒 .0033333 の間の値の < は読み戻した値で比べる",
-                x => x.LegacyAt < legacyAfterReadBack
-            ),
-            Probe(
-                "legacy-greater-between-step-and-read-back",
-                "datetime の列と、2/300 秒 .0066667 と読み戻した値 .007 の間の値の > は読み戻した値で比べる",
-                x => x.LegacyAt > legacyBeforeReadBack
-            ),
-            Probe(
-                "legacy-less-or-equal-between-step-and-read-back",
-                "datetime の列と、2/300 秒 .0066667 と読み戻した値 .007 の間の値の <= は読み戻した値で比べる",
-                x => x.LegacyAt <= legacyBeforeReadBack
-            ),
-            Probe(
-                "legacy-less-past-max",
-                "datetime の列と、範囲の最後の値を超え丸めると範囲の外になる値の < は範囲の最後の値の行を含む",
-                x => x.LegacyAt < legacyPastMax
-            ),
-            Probe(
-                "legacy-greater-before-min",
-                "datetime の列と、範囲の最初の値より前の値の > は NULL でない全行に一致する",
-                x => x.LegacyAt > legacyBeforeMin
-            ),
-            Probe(
                 "legacy-in-mixed",
                 "datetime の列の IN は、読み戻した値の要素だけに一致し、読み戻せない要素はどの行にも一致しない",
                 x => legacyMixed.Contains(x.LegacyAt)
             ),
             // ---- smalldatetime の列（分ちょうど）と、秒のある値・範囲の外の値 ----
-            Probe(
-                "small-equals-exact",
-                "smalldatetime の列と分ちょうどの値の == はその行に一致する",
-                x => x.SmallAt == smallNextMinute
-            ),
-            Probe(
-                "small-equals-half-minute",
-                "smalldatetime の列と 30 秒のある値の == はどの行にも一致しない（分へ丸めて比べない）",
-                x => x.SmallAt == smallHalfMinute
-            ),
-            Probe(
-                "small-not-equals-half-minute",
-                "smalldatetime の列と 30 秒のある値の != は NULL の行を含む全行に一致する",
-                x => x.SmallAt != smallHalfMinute
-            ),
-            Probe(
-                "small-greater-half-minute",
-                "smalldatetime の列と 30 秒のある値の > は次の分の行を含む（切り上げた分と比べない）",
-                x => x.SmallAt > smallHalfMinute
-            ),
-            Probe(
-                "small-greater-or-equal-rounding-down-seconds",
-                "smalldatetime の列と 29.998 秒の値の >= は基準の分の行を含まない（切り下げた分と比べない）",
-                x => x.SmallAt >= smallRoundsDown
-            ),
-            Probe(
-                "small-less-past-last",
-                "smalldatetime の列と、範囲の最後の値より後ろの値の < は範囲の最後の値の行を含む",
-                x => x.SmallAt < smallPastLast
-            ),
-            Probe(
-                "small-greater-past-last",
-                "smalldatetime の列と、範囲の最後の値より後ろの値の > はどの行にも一致しない",
-                x => x.SmallAt > smallPastLast
-            ),
-            Probe(
-                "small-greater-before-first",
-                "smalldatetime の列と、範囲の最初の値より前の値の > は NULL でない全行に一致する",
-                x => x.SmallAt > smallBeforeFirst
-            ),
             Probe(
                 "small-in-mixed",
                 "smalldatetime の列の IN は、分ちょうどの要素だけに一致し、秒のある要素・範囲の外の要素はどの行にも一致しない",
@@ -748,12 +649,12 @@ public static class TranslatorParityPredicateRows
             Probe(
                 "varchar-equals-non-ascii",
                 "Unicode でない列と ASCII の外の文字の == は、化けた '??' の行に一致しない",
-                x => x.Ansi == "日本"
+                x => x.Ansi == TextEdges.KanjiNihon
             ),
             Probe(
                 "varchar-not-equals-non-ascii",
                 "Unicode でない列と ASCII の外の文字の != は NULL の行を含む全行に一致する",
-                x => x.Ansi != "日本"
+                x => x.Ansi != TextEdges.KanjiNihon
             ),
             Probe(
                 "varchar-equals-ascii",
@@ -763,46 +664,16 @@ public static class TranslatorParityPredicateRows
             // ---- 同じ値を変数で渡す形（EF Core は定数を SQL のリテラルにし、変数をパラメータにするので、
             //      列の型で束縛するかの判定はこちらの形にだけ掛かる） ----
             Probe(
-                "decimal-equals-beyond-scale-variable",
-                "decimal(10,2) の列と桁の多い decimal の変数の == は値を列の桁へ丸めない",
-                x => x.Amount == amountBeyondScale
-            ),
-            Probe(
                 "decimal-greater-or-equal-beyond-scale-variable",
                 "decimal(10,2) の列と桁の多い decimal の変数の >= は値を列の桁へ丸めない",
                 x => x.Amount != null && x.Amount.Value >= amountBeyondScale
-            ),
-            Probe(
-                "decimal-equals-beyond-precision-variable",
-                "decimal(10,2) の列と整数部の桁が列に入らない decimal の変数の == はどの行にも一致しない（例外にしない）",
-                x => x.Amount == amountBeyondPrecision
             ),
             Probe(
                 "in-decimal-list-beyond-scale",
                 "decimal(10,2) の列と桁の多い要素を持つ decimal のリストの IN は要素を列の桁へ丸めない",
                 x => amountsBeyondScale.Contains(x.Amount)
             ),
-            SmallChild(
-                "int-column-less-or-equal-decimal-fraction-variable",
-                "int の列と 1 未満の decimal の変数の <= は値を丸めずに数として比べる",
-                c => c.BigParentId <= fractionBelowOne
-            ),
             // ---- 整数の列と整数の値の decimal の等値・IN（C# は列の値を decimal へ広げ、数として比べる） ----
-            SmallChild(
-                "int-column-equals-decimal-integral-variable",
-                "int の列と整数の値の decimal の変数の == は、同じ値の行に一致する",
-                c => c.BigParentId == integralDecimal
-            ),
-            SmallChild(
-                "int-column-not-equals-decimal-integral-variable",
-                "int の列と整数の値の decimal の変数の != は、同じ値の行を除き NULL の行を含める",
-                c => c.BigParentId != integralDecimal
-            ),
-            SmallChild(
-                "int-column-equals-decimal-integral-constant",
-                "int の列と整数の値の decimal の定数の == は、同じ値の行に一致する",
-                c => c.BigParentId == 2m
-            ),
             SmallChild(
                 "in-decimal-list-int-column",
                 "int の列と、整数の値・小数・null を持つ decimal のリストの IN は、整数の値の行と NULL の行に一致する",
@@ -815,34 +686,47 @@ public static class TranslatorParityPredicateRows
             ),
             // ---- bigint の列と decimal の値（C# は列の値を decimal へ広げる。シードは整数部が 16 桁を超える行を持つ） ----
             BigParent(
-                "bigint-column-greater-decimal-fraction-variable",
-                "bigint の列と小数の decimal の変数の > は、整数部の大きい行も数として比べる",
-                p => p.Id > fraction
-            ),
-            BigParent(
-                "bigint-column-equals-decimal-integral-variable",
-                "bigint の列と整数の値の decimal の変数の == は、同じ値の行に一致する",
-                p => p.Id == integralDecimal
-            ),
-            BigParent(
-                "bigint-column-not-equals-decimal-fraction-variable",
-                "bigint の列と小数の decimal の変数の != は全行に一致する",
-                p => p.Id != fraction
-            ),
-            BigParent(
-                "bigint-column-less-decimal-beyond-long-variable",
-                "bigint の列と long の範囲の外の decimal の変数の < は全行に一致する",
-                p => p.Id < beyondLong
-            ),
-            BigParent(
-                "bigint-column-greater-decimal-fraction-constant",
-                "bigint の列と小数の decimal の定数の > は、整数部の大きい行も数として比べる",
-                p => p.Id > 1.5m
-            ),
-            BigParent(
                 "in-decimal-list-bigint-column",
                 "bigint の列と decimal のリストの IN は、整数部の大きい行も数として比べる",
                 p => decimalsForBigint.Contains(p.Id)
+            ),
+            // P1：値が左の比較（値の束縛の生成の表の述語は列を左に置く形だけ）
+            P1Finding(
+                BigParent(
+                    "bigint-column-value-left-not-equal-below-long",
+                    "long の下限の 1 つ下の decimal と bigint の列の !=（値が左）は、long の下限の行を含む全行に一致する",
+                    p => belowLong != p.Id
+                )
+            ),
+            P1Finding(
+                BigParent(
+                    "bigint-column-value-left-greater-near-long-max-fraction",
+                    "long の上限の近くの小数と bigint の列の >（値が左）は、long の上限の行を含まない",
+                    p => nearLongMaxFraction > p.Id
+                )
+            ),
+            P1Finding(
+                BigParent(
+                    "bigint-column-value-left-less-or-equal-beyond-double-fraction",
+                    "2^53 を超える整数の間の小数と bigint の列の <=（値が左）は、10^16 の行から上に一致する",
+                    p => beyondDoubleFraction <= p.Id
+                )
+            ),
+            P1Finding(
+                BigParent(
+                    "bigint-column-value-left-equals-beyond-double-integral",
+                    "2^53 を超える整数でスケールを持つ decimal と bigint の列の ==（値が左）は、その整数の行だけに一致する（小数部つきの綴りのまま比べると隣の 10^16 の行に当たる）",
+                    p => beyondDoubleIntegral == p.Id
+                )
+            ),
+            // P1：uint への符号だけの変換の値の範囲（int の範囲の外の decimal の値が、折り返した int.MinValue の行に当たる）。生成の表の
+            // 値のプールは、符号だけの変換と組む値を変換先の型の値（uint）で作るので、int の範囲の外の decimal の値を作れない
+            P1Finding(
+                WideProbe(
+                    "int-key-sign-cast-equals-decimal-sign-boundary",
+                    "int の列の (uint) と uint の符号の境目の decimal の == は、折り返した int.MinValue の行に一致する",
+                    x => (decimal)(uint)x.ProbeId == uintSignBoundary
+                )
             ),
             // ---- 整数の列と decimal の列（列どうし。シードは整数部の桁が decimal(10,2) の整数部に入らない行を持つ） ----
             WideProbe(
@@ -855,49 +739,7 @@ public static class TranslatorParityPredicateRows
                 "int の列と decimal(10,2) の列の == は、同じ値の行に一致する",
                 x => x.ProbeId == x.Amount
             ),
-            // ---- 列の側の符号だけの変換（C# は負の値を折り返す。シードは int の上限と下限の行を持つ） ----
-            Xt4(
-                WideProbe(
-                    "int-column-sign-cast-equals-uint-beyond-int",
-                    "int の列を uint へ変換した == は、負の値を折り返して比べ、int の下限の行が 2147483648 に一致する",
-                    x => (uint)x.ProbeId == 2147483648u
-                )
-            ),
-            Xt4(
-                WideProbe(
-                    "int-column-sign-cast-greater-uint-max-int",
-                    "int の列を uint へ変換した > は、負の値を int の上限より大きい値へ折り返して比べる",
-                    x => (uint)x.ProbeId > 2147483647u
-                )
-            ),
-            Xt4(
-                WideProbe(
-                    "in-uint-list-sign-cast-column",
-                    "uint のリストと uint へ変換した int の列の IN は、負の値を折り返した行にも一致する",
-                    x => uintsAcrossSign.Contains((uint)x.ProbeId)
-                )
-            ),
-            Xt4(
-                WideProbe(
-                    "in-uint-array-sign-cast-column",
-                    "uint の配列と uint へ変換した int の列の Contains は、int の上限の行と折り返した下限の行に一致する",
-                    x => uintArrayAcrossSign.Contains((uint)x.ProbeId)
-                )
-            ),
-            Xt4(
-                BigParent(
-                    "bigint-column-ulong-cast-greater",
-                    "bigint の列を ulong へ変換した > は、負の値を long の上限より大きい値へ折り返して比べる（QuickER 版は断る）",
-                    p => (ulong)p.Id > 9223372036854775807ul
-                )
-            ),
-            Xt4(
-                WideProbe(
-                    "int-column-ulong-cast-greater",
-                    "int の列を ulong へ変換した > は、負の値を 64 ビットへ符号拡張して折り返して比べる（QuickER 版は断る）",
-                    x => (ulong)x.ProbeId > 4294967295ul
-                )
-            ),
+            // ---- Unicode でない列と ASCII の外の文字の変数 ----
             Probe(
                 "varchar-equals-non-ascii-variable",
                 "Unicode でない列と ASCII の外の文字の変数の == は、化けた '??' の行に一致しない",
@@ -1154,14 +996,6 @@ public static class TranslatorParityPredicateRows
                     x => x.Flag != null && !x.Flag.Value
                 ),
                 $"XT5（{Measure3} v10）：否定の腕"
-            ),
-            Finding(
-                Probe(
-                    "nullable-bool-equals-true",
-                    "NULL 許容の bool の列と true の == は、true の行に一致する（.Value を通らない対照）",
-                    x => x.Flag == true
-                ),
-                $"XT5（{Measure3} v10）：.Value を通らない等値の対照"
             ),
             Finding(
                 OrderedProbe(

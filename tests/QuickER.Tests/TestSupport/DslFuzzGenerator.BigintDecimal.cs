@@ -8,7 +8,7 @@ namespace QuickER.Tests.TestSupport;
 /// <remarks>
 /// <para>
 /// 作る形：NULL を許す bigint の列と、decimal の型トークンのパラメータ（小数・<c>long</c> の範囲の外の値・<c>long</c> の範囲の中の整数）の
-/// 比較。C# は列の値を decimal へ広げて比べる。行の値の池は <c>long</c> の上限と下限を持つので、整数部が 16 桁を超える行がいつもある
+/// 比較。C# は列の値を decimal へ広げて比べる。行の値のプールは <c>long</c> の上限と下限を持つので、整数部が 16 桁を超える行がいつもある
 /// （SQL Server の EF Core 版が整数の式を decimal へ変換するときの CAST の型の桁を、どの値でも試す）。
 /// </para>
 /// <para>
@@ -26,7 +26,7 @@ public sealed partial class DslFuzzGenerator
     /// <summary>bigint の列と decimal のパラメータのパラメータ名の接頭辞（<c>p</c>・<c>q</c>・<c>r</c> と重ねない）</summary>
     public const string BigintDecimalParameterPrefix = "w";
 
-    /// <summary><c>long</c> の範囲の中の整数の decimal の値（行の値の池の 0・1・-1・10 に重なる）</summary>
+    /// <summary><c>long</c> の範囲の中の整数の decimal の値（行の値のプールの 0・1・-1・10 に重なる）</summary>
     private static readonly object[] IntegralDecimals = [0m, 1m, -1m, 10m];
 
     /// <summary>種の単位の末尾に足す原子のクエリ <c>Y{i}</c>（綴りは番号で回す）</summary>

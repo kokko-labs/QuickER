@@ -9042,14 +9042,38 @@ public static class RemoteJson
     /// get-only properties, so setting it would serialize an empty JSON body). Derived entity flags (get-only bools
     /// such as IsAdded) are serialized redundantly, but they have no setter and are ignored on read, so the
     /// round-trip semantics (RowState included) are unchanged.
+    /// A DateTime (also inside a nullable, a collection or a value object) travels without its kind (see <see cref="KindlessDateTimeConverter"/>).
     /// </remarks>
     public static JsonSerializerOptions Options { get; } =
         new()
         {
             ReferenceHandler = ReferenceHandler.IgnoreCycles,
             PropertyNameCaseInsensitive = true,
-            Converters = { new ValueObjectJsonConverterFactory() },
+            Converters = { new KindlessDateTimeConverter(), new ValueObjectJsonConverterFactory() },
         };
+
+    /// <summary>Writes a DateTime with its ticks and without its kind, and reads it back as <see cref="DateTimeKind.Unspecified"/>.</summary>
+    /// <remarks>
+    /// The default System.Text.Json converter writes a Local value with the writer's UTC offset and reads such a value back in the
+    /// reader's time zone, so a client and a server in different time zones would store a different time, and a Local value near
+    /// <see cref="DateTime.MinValue"/> or <see cref="DateTime.MaxValue"/> could not be read at all. The database backends read a
+    /// DateTime back as Unspecified with the same ticks, so the transport carries the same: no offset and no "Z" on the wire, the
+    /// ticks unchanged for every kind. A string that carries an offset (not written by this converter) is read with the default rules.
+    /// DateTimeOffset is not affected.
+    /// </remarks>
+    private sealed class KindlessDateTimeConverter : JsonConverter<DateTime>
+    {
+        /// <summary>Reads the value and drops its kind (the ticks are kept).</summary>
+        public override DateTime Read(
+            ref Utf8JsonReader reader,
+            Type typeToConvert,
+            JsonSerializerOptions options
+        ) => DateTime.SpecifyKind(reader.GetDateTime(), DateTimeKind.Unspecified);
+
+        /// <summary>Writes the value in the round-trip form without an offset (the ticks are kept).</summary>
+        public override void Write(Utf8JsonWriter writer, DateTime value, JsonSerializerOptions options) =>
+            writer.WriteStringValue(DateTime.SpecifyKind(value, DateTimeKind.Unspecified));
+    }
 }
 
 /// <summary>Represents a remote call that failed with a server-side error (carries the HTTP status and the server's message).</summary>

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Numerics;
 using QuickER.Model;
+using QuickER.Tests.TestSupport.ValuePools;
 
 namespace QuickER.Tests.TestSupport;
 
@@ -686,7 +687,7 @@ public sealed partial class DslFuzzGenerator(
 
     /// <summary>
     /// byte・int・long の列（主キーでなく、どの方言の網羅の単位にもある型）の範囲の両端との等値を OR でつないだ条件
-    /// （元の QueryConditionTypeCheckTests の受理の形 PlainEdges・LongEdges・値オブジェクトの VoEdges。値の池の乱数で選ぶ
+    /// （元の QueryConditionTypeCheckTests の受理の形 PlainEdges・LongEdges・値オブジェクトの VoEdges。値のプールの乱数で選ぶ
     /// 境界値は種ごとに当たるとは限らないので、決まった形で毎回流す）
     /// </summary>
     private static DslNode EdgeLiterals(IReadOnlyList<DslColumn> columns)
@@ -738,7 +739,7 @@ public sealed partial class DslFuzzGenerator(
     public const string OrdinalDecomposed = "\u304B\u3099";
 
     /// <summary>ソフトハイフン（U+00AD。カルチャで比べると無視される）</summary>
-    public const string OrdinalSoftHyphen = "\u00AD";
+    public const string OrdinalSoftHyphen = TextEdges.SoftHyphen;
 
     /// <summary>
     /// 形・自身の否定・列の種類のまだ出していない水準を足す原子を貪欲に選び、<see cref="CoverageAtomsPerQuery"/> 個ずつ
@@ -801,12 +802,12 @@ public sealed partial class DslFuzzGenerator(
     /// <summary>列に使える全ての形の原子（値は乱数）</summary>
     /// <param name="column">列</param>
     /// <param name="bothQuotes">
-    /// 文字列のリテラルの原子を、<c>'</c> を含む値と含まない値の 2 つずつ作るか（網羅の単位だけ。種の単位は値の池から
+    /// 文字列のリテラルの原子を、<c>'</c> を含む値と含まない値の 2 つずつ作るか（網羅の単位だけ。種の単位は値のプールから
     /// 乱数で選ぶ）
     /// </param>
     private IEnumerable<DslAtom> AllAtoms(DslColumn column, bool bothQuotes = false)
     {
-        // 文字列のリテラルの値の選び方（null は値の池全体から選ぶ）
+        // 文字列のリテラルの値の選び方（null は値のプール全体から選ぶ）
         bool?[] quotes = bothQuotes && column.IsString ? [false, true] : [null];
 
         foreach (var negated in new[] { false, true })
@@ -928,7 +929,7 @@ public sealed partial class DslFuzzGenerator(
 
     /// <summary>列の型の範囲内のリテラル</summary>
     /// <param name="column">列</param>
-    /// <param name="quote">文字列のリテラルの値に <c>'</c> を含めるか（null は値の池全体から選ぶ）</param>
+    /// <param name="quote">文字列のリテラルの値に <c>'</c> を含めるか（null は値のプール全体から選ぶ）</param>
     private DslOperand Literal(DslColumn column, bool? quote = null)
     {
         if (column.IsString)
@@ -936,7 +937,7 @@ public sealed partial class DslFuzzGenerator(
             return StringLiteral(column, likeSafe: false, quote);
         }
 
-        // 浮動小数点の列は綴りの池から選び、綴りをそのまま書く（値は綴りを列の型で読んだもの）
+        // 浮動小数点の列は綴りのプールから選び、綴りをそのまま書く（値は綴りを列の型で読んだもの）
         if (column.IsFloating)
         {
             var text = Pick(DslFuzz.LiteralPool(column));
@@ -1159,7 +1160,7 @@ public sealed partial class DslFuzzGenerator(
                 return new DslCompare(op, FractionalLiteral()) { Column = column };
             }
 
-            // 値の池から選ぶ（列の印 NonNegativeLiterals があれば負の値の符号を外す＝Literal と同じ）
+            // 値のプールから選ぶ（列の印 NonNegativeLiterals があれば負の値の符号を外す＝Literal と同じ）
             return new DslCompare(op, Literal(column)) { Column = column };
         }
 
@@ -1221,7 +1222,7 @@ public sealed partial class DslFuzzGenerator(
     /// <summary>文字列のリテラル（LIKE のパターンの芯なら % と _ を含まず空でないもの）</summary>
     /// <param name="column">列</param>
     /// <param name="likeSafe">LIKE のパターンの芯か</param>
-    /// <param name="quote">値に ' を含めるか（null は値の池全体から選ぶ）</param>
+    /// <param name="quote">値に ' を含めるか（null は値のプール全体から選ぶ）</param>
     private DslOperand StringLiteral(DslColumn column, bool likeSafe, bool? quote = null)
     {
         var pool = DslFuzz
@@ -1239,7 +1240,7 @@ public sealed partial class DslFuzzGenerator(
 
     /// <summary>
     /// DateTime と DateTimeOffset の混在のパラメータ（DateTimeOffset の列には DateTime の型トークン、DateTime の列には DateTimeOffset の
-    /// 型トークンで型付けし、値はその型の値の池から選ぶ。型の検査が断るので実行しない）
+    /// 型トークンで型付けし、値はその型の値のプールから選ぶ。型の検査が断るので実行しない）
     /// </summary>
     private DslParam MixedDateParam(DslColumn column, bool isList)
     {
@@ -1275,7 +1276,7 @@ public sealed partial class DslFuzzGenerator(
     }
 
     /// <summary>
-    /// 浮動小数点の列のパラメータ。float の列の比べる値の池の double の値（<see cref="DslFuzz.FloatOperandDoubles"/>）は
+    /// 浮動小数点の列のパラメータ。float の列の比べる値のプールの double の値（<see cref="DslFuzz.FloatOperandDoubles"/>）は
     /// <c>float64</c> の型トークンで型付けする（C# は列を double へ広げて比べる）。値オブジェクトの float の列は double のパラメータを
     /// 型の検査が断るので、列の型の値だけを選ぶ
     /// </summary>
@@ -1297,7 +1298,7 @@ public sealed partial class DslFuzzGenerator(
     }
 
     /// <summary>
-    /// 比べる値の池のうち、列の型の値だけ（float の列の double の値を除く。ほかの列は比べる値の池のまま）
+    /// 比べる値のプールのうち、列の型の値だけ（float の列の double の値を除く。ほかの列は比べる値のプールのまま）
     /// </summary>
     private static List<object> SameTypeOperands(DslColumn column) =>
         column.Clr == DslClr.Single

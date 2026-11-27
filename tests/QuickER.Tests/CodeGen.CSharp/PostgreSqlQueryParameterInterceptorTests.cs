@@ -16,6 +16,7 @@ using Npgsql;
 using QuickER.Runtime.EntityFrameworkCore;
 using QuickER.Tests.TestSupport;
 using QuickER.Tests.TestSupport.Engines;
+using QuickER.Tests.TestSupport.ValuePools;
 using Xunit;
 
 namespace QuickER.Tests.CodeGen.CSharp;
@@ -99,6 +100,15 @@ public class PostgreSqlQueryParameterInterceptorTests
                 Where(Noon, v => x => x.Day < v.Value),
                 ["2026-01-02T12:00:00 DateTime2 timestamp without time zone"]
             ),
+            // 値のプールの正本：翌日の 1 tick 前は date へ落とすと同じ日で、timestamp では翌日の直前。時刻つきなので timestamp で束縛し、tick を落とさない
+            ["date-tick-before-next-day-is-bound-as-timestamp"] = new(
+                Where(DateTimeEdges.OneTickBefore(Midnight.AddDays(1)), v => x => x.Day < v.Value),
+                ["2026-01-02T23:59:59.9999999 DateTime2 timestamp without time zone"],
+                RowTag.Reason(
+                    RowTagKind.ExistingLevelControl,
+                    "値のプールの正本（決定 value-pool-canon-phase3-decisions）：date の枝の時刻の有無の判定（その日の最後の tick は時刻あり）"
+                )
+            ),
             ["date-execute-delete-condition-is-bound-as-timestamp"] = new(
                 (c, ct) =>
                 {
@@ -121,7 +131,7 @@ public class PostgreSqlQueryParameterInterceptorTests
                 ["10:00:00 Time time without time zone"]
             ),
             ["time-24-hours-keeps-column-type"] = new(
-                Where(TimeSpan.FromDays(1), v => x => x.Clock <= v.Value),
+                Where(TimeSpanEdges.OneDay, v => x => x.Clock <= v.Value),
                 ["1.00:00:00 Time time without time zone"]
             ),
             ["time-beyond-day-is-bound-as-interval"] = new(
@@ -133,7 +143,7 @@ public class PostgreSqlQueryParameterInterceptorTests
                 ["-01:00:00 Object interval"]
             ),
             ["time-just-beyond-24-hours-is-bound-as-interval"] = new(
-                Where(TimeSpan.FromDays(1) + TimeSpan.FromTicks(10), v => x => x.Clock > v.Value),
+                Where(TimeSpanEdges.OneDay + TimeSpan.FromTicks(10), v => x => x.Clock > v.Value),
                 ["1.00:00:00.0000010 Object interval"]
             ),
             // ---- IN のリストは 1 つの配列のパラメータ：範囲の外の要素を含むときだけ値から決まる型にする ----
@@ -467,6 +477,11 @@ public class PostgreSqlQueryParameterInterceptorTests
         value switch
         {
             DateTime d => d.ToString("s", CultureInfo.InvariantCulture)
+                + (
+                    d.Ticks % TimeSpan.TicksPerSecond == 0
+                        ? ""
+                        : d.ToString(".fffffff", CultureInfo.InvariantCulture)
+                )
                 + (d.Kind == DateTimeKind.Unspecified ? "" : $"({d.Kind})"),
             TimeSpan t => t.ToString("c", CultureInfo.InvariantCulture),
             IEnumerable items and not string => "["
@@ -557,12 +572,64 @@ public class PostgreSqlQueryParameterInterceptorTests
             return ValueTask.FromResult(InterceptionResult<int>.SuppressWithResult(0));
         }
 
-        private void Record(DbCommand command) =>
-            LastParameters = [
+        /// <summary>最後に止めたコマンドの、値が null でないパラメータそのもの（値のプールの観測が読む）</summary>
+        public IReadOnlyList<DbParameter> LastRaw { get; private set; } = [];
+
+        private void Record(DbCommand command)
+        {
+            LastRaw =
+            [
                 .. command
                     .Parameters.Cast<DbParameter>()
-                    .Where(parameter => parameter.Value is not (null or DBNull))
-                    .Select(Describe),
+                    .Where(parameter => parameter.Value is not (null or DBNull)),
             ];
+            LastParameters = [.. LastRaw.Select(Describe)];
+        }
+    }
+
+    /// <summary>
+    /// 値のプールの観測：表の行の操作を、インターセプターを外して（直す前の値と型で）流し、コマンドのパラメータの値と、EF Core が比べる列から
+    /// 決めた Npgsql の型の名前を列の相として読む（DB は使わない。値は変えない）
+    /// </summary>
+    /// <remarks>
+    /// PostgreSQL の time・timestamp の小数秒の既定の桁は 6（宣言の型の名前から読む相の既定は SQL Server の 7 なので付け直す）。
+    /// </remarks>
+    /// <param name="ct">取り消し</param>
+    internal static async Task<
+        IReadOnlyList<TestSupport.ValuePools.ValueObservation>
+    > ObserveValuesAsync(CancellationToken ct)
+    {
+        var observations = new List<TestSupport.ValuePools.ValueObservation>();
+
+        foreach (var (id, row) in Rows)
+        {
+            var recorder = new CommandRecorder();
+            var options = new DbContextOptionsBuilder<ProbeContext>()
+                .UseNpgsql("Host=unused;Database=unused")
+                .IgnoreServiceProviderCacheLimit()
+                .AddInterceptors(recorder)
+                .Options;
+            await using var context = new ProbeContext(options);
+            await row.Act(context, ct);
+
+            foreach (var parameter in recorder.LastRaw)
+            {
+                var name = parameter is NpgsqlParameter { DataTypeName: { Length: > 0 } typeName }
+                    ? typeName
+                    : parameter.DbType.ToString();
+                var column = TestSupport.ValuePools.ValueColumn.FromSqlType(name);
+
+                if (name.StartsWith("time", StringComparison.Ordinal) && !name.Contains('('))
+                {
+                    column = column with { Scale = 6 };
+                }
+
+                observations.Add(
+                    new TestSupport.ValuePools.ValueObservation(parameter.Value, column, $"行 {id}")
+                );
+            }
+        }
+
+        return observations;
     }
 }

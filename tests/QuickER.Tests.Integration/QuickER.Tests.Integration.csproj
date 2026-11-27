@@ -148,8 +148,8 @@
       LinkBase="TestSupport\Engines"
     />
     <!--
-      値の池（名前つきの値の並び。実体は QuickER.Tests の TestSupport/ValuePools。BCL だけに依存する。
-      値の束縛の生成の表の値の池の水準と、QuickER.Tests のエンジンが同じ値を引く）
+      値のプール（名前つきの値の並び。実体は QuickER.Tests の TestSupport/ValuePools。BCL だけに依存する。
+      値の束縛の生成の表の値のプールの水準と、QuickER.Tests のエンジンが同じ値を引く）
     -->
     <Compile
       Include="..\QuickER.Tests\TestSupport\ValuePools\**\*.cs"

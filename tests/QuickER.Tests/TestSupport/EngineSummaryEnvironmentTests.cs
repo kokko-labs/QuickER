@@ -106,7 +106,7 @@ public sealed class EngineSummaryEnvironmentTests
                 ),
             true
         ),
-        // 要約は DateTimeOffset の時差（値のデータ）を時刻と @ で隔てて書くので、時差の形にならない（簡易 DSL の DateTimeOffset の値の池）
+        // 要約は DateTimeOffset の時差（値のデータ）を時刻と @ で隔てて書くので、時差の形にならない（簡易 DSL の DateTimeOffset の値のプール）
         ["datetimeoffset-written-by-summary"] = (
             () =>
                 SeedSummary.Object(
@@ -125,7 +125,7 @@ public sealed class EngineSummaryEnvironmentTests
     public static TheoryData<string> OffsetProbeIds() => [.. OffsetProbes.Keys];
 
     /// <remarks>
-    /// 時差の形は日時の秒・小数秒の直後だけを見る。負の TimeSpan（簡易 DSL の TimeSpan の値の池）を時差と取り違えず、
+    /// 時差の形は日時の秒・小数秒の直後だけを見る。負の TimeSpan（簡易 DSL の TimeSpan の値のプール）を時差と取り違えず、
     /// 往復の書式の Local の日時と DateTimeOffset の時差は名指しする。
     /// </remarks>
     [Theory(

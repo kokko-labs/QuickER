@@ -145,6 +145,18 @@ internal static class ImpactMapSources
             "テストの土台（変異テストの結果を地図の単位ごとに要約する関数）の自己検査（架空の Stryker の結果で数え方を確かめる。src を守る表ではない）"
         ),
         (
+            "tests/QuickER.Tests/TestSupport/ValuePoolTests.cs",
+            "テストの土台（値のプールの水準の名簿と分類）の自己検査（判定式の境目と今のプールの値の分類を表で確かめる。src を守る表ではない）"
+        ),
+        (
+            "tests/QuickER.Tests/TestSupport/ValuePoolUseTests.cs",
+            "テストの土台（エンジン・表が受ける値の水準の宣言）の照合と、QuickER.Tests で観測する部分の行列（観測する部分の表。src を守る表ではない）"
+        ),
+        (
+            "tests/QuickER.Tests.Integration/ValuePoolUseIntegrationTests.cs",
+            "テストの土台（エンジン・表が受ける値の水準の宣言）の、Integration で観測する部分の行列（観測する部分の表。src を守る表ではない）"
+        ),
+        (
             "tests/QuickER.Tests/TestSupport/OneOffTestCensusTests.cs",
             "テストの土台（単発のテストを地図の守りで数えて報告する関数）の自己検査と CI の入口（架空のテストのソースの木で数え方を確かめる。src を守る表ではない）"
         ),
@@ -308,14 +320,14 @@ internal static class ImpactMapSources
 
     /// <summary>横断の規則の読む範囲の短い表記（除外は件数だけ。除外の中身は規則の表にある）</summary>
     private static string ScopeLabel(SourceScope scope) =>
-        scope.Only.Count > 0
-            ? string.Join("・", scope.Only)
-            : $"{scope.Root}/**/*{scope.Extension}"
-                + (
-                    scope.Exclusions.Count > 0
-                        ? $"（除外 {scope.Exclusions.Count.ToString(CultureInfo.InvariantCulture)} 件）"
-                        : ""
-                );
+        scope.Only.Count > 0 ? string.Join("・", scope.Only)
+        : scope.Label is not null ? scope.Label
+        : $"{scope.Root}/**/*{scope.Extension}"
+            + (
+                scope.Exclusions.Count > 0
+                    ? $"（除外 {scope.Exclusions.Count.ToString(CultureInfo.InvariantCulture)} 件）"
+                    : ""
+            );
 
     private static Protection CrossCutting(string id, ProtectionKind kind, string scope) =>
         new(ProtectionNames.Of(kind, id), kind, "", [], [], scope);

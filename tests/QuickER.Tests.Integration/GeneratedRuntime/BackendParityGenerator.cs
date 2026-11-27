@@ -42,6 +42,7 @@ public sealed partial class BackendParityGenerator
 
     private readonly Random _random;
     private readonly Random _values;
+    private readonly Random _edges;
     private readonly ParityGeneratorMode _mode;
     private readonly Dictionary<int, string> _customers = new();
     private readonly Dictionary<int, (int Customer, decimal Amount)> _orders = new();
@@ -55,6 +56,7 @@ public sealed partial class BackendParityGenerator
     {
         _random = new Random(seed);
         _values = new Random(ValueSeed(seed));
+        _edges = new Random(EdgeSeed(seed));
         _mode = (ParityGeneratorMode)(seed % 3);
     }
 

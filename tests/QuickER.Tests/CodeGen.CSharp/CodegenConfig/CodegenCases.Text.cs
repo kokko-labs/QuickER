@@ -4136,13 +4136,13 @@ internal static partial class CodegenCases
                         "SqlExpressionTranslator",
                         "Visit",
                         "BuildInClause",
-                        ["inColumn", "inCollection", "parameters"]
+                        ["inColumn", "inCollection", "inItem", "parameters"]
                     ),
                     CallArguments(
                         "SqlExpressionTranslator",
                         "Visit",
                         "BuildInClause",
-                        ["notInColumn", "notInCollection", "parameters", "true"]
+                        ["notInColumn", "notInCollection", "notInItem", "parameters", "true"]
                     ),
                     Using("QuickEREntities.g.cs", "System.Collections"),
                 ]

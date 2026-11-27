@@ -652,11 +652,11 @@ GUI のクエリ定義ダイアログと `set_query` も、保存前に同じ検
 
 | バックエンド | `Contains` / `StartsWith` / `EndsWith` の判定 |
 |---|---|
-| SQL Server | 列の照合順序に従う（既定の `..._CI_AS` なら大文字小文字を区別しない）。Unicode でない列（`char`・`varchar`）では列の値の末尾の空白を数えず、パターンの空白は数える |
+| SQL Server | 列の照合順序に従う（既定の `..._CI_AS` なら大文字小文字と、全角と半角を区別せず、全角の空白も半角の空白と同じに扱う）。Unicode でない列（`char`・`varchar`）では列の値の末尾の空白を数えず、パターンの空白は数える |
 | SQLite | 組み込みの `LIKE` が ASCII の英字だけを畳む（`A` は `a` に一致し、`Á` は `á` に一致しない） |
 | EF Core | プロバイダ任せで、やはり格納先次第 |
 | EF Core（PostgreSQL） | データベースの既定の照合順序（`en_US.utf8` などの決定的な照合順序）で、大文字小文字を区別する |
-| EF Core（MySQL） | 既定の照合順序 `utf8mb4_0900_ai_ci` は、大文字小文字とアクセントを区別せず、合成済みの文字と分解形を同じとみなし、`ß` と `ss` も同じとみなす。値オブジェクトの列では 3 つの呼び出しともこれに従う。素の string の列の `StartsWith` と `EndsWith` だけは例外で、大文字小文字を区別し、パターンの末尾の空白を数えない |
+| EF Core（MySQL） | 既定の照合順序 `utf8mb4_0900_ai_ci` は、大文字小文字とアクセントと、全角と半角を区別せず（全角の空白も半角の空白と同じに扱う）、合成済みの文字と分解形を同じとみなし、`ß` と `ss` も同じとみなす。値オブジェクトの列では 3 つの呼び出しともこれに従う。素の string の列の `StartsWith` と `EndsWith` だけは例外で、大文字小文字を区別し、パターンの末尾の空白を数えない |
 | EF Core（Oracle） | 既定のバイナリ比較（`NLS_COMP=BINARY`）で、大文字小文字を区別する |
 | インメモリ | 式木を C# として評価するため序数比較になり、素の string 列でも値オブジェクトでも区別する |
 
@@ -666,7 +666,10 @@ GUI のクエリ定義ダイアログと `set_query` も、保存前に同じ検
 マルチターゲットや「サーバーへリモート・ローカルコピーへ直結」の構成は同じ述語を 2 つのエンジンで走らせるため、サーバー側では大文字小文字を区別しない検索が、ローカル側では区別する検索になり得ます。
 
 MySQL では、等値の比較も照合順序が決めます。
-`x.Name == "a"`・`x.Name != "a"`・`IN` のリストは、文字列一致と同じく `a`・`A`・`á` を同じ値とみなし、C# とインメモリ実装は序数で比べます。
+`x.Name == "a"`・`x.Name != "a"`・`IN` のリストは、文字列一致と同じく `a`・`A`・`á`・`ａ`（全角）を同じ値とみなし、C# とインメモリ実装は序数で比べます。
+MySQL の既定の照合順序は末尾の空白も比べるので、`a` と `a ` は別の値で、`a ` と末尾が全角の空白の `a　` は同じ値です。
+SQL Server も等値を列の照合順序で比べ、既定の照合順序では大文字小文字と、全角と半角を区別せず、末尾の空白を無視します。
+全角の空白は半角の空白と同じに扱われるので、末尾の全角の空白も無視され、`a`・`a `・`a　` は同じ値です。
 PostgreSQL と Oracle は、既定では等値を序数で比べます。
 
 `Query()` の述語の `string.IsNullOrEmpty` と `string.IsNullOrWhiteSpace` は `NULL` でも真になり、両 SQL エンジンで C# と同じ結果を返します。
@@ -810,8 +813,9 @@ PostgreSQL の EF Core 版 Repository も、`date` の列と比べる時刻つ�
 > 列は変換せずに比べ、値の側を変換してください。
 > 簡易 DSL の条件は列と値だけを比べるので、名前付きクエリはこの形になりません。
 
-> **既知の割り切り**: EF Core 版 Repository は、整数の列と比べる `char` の値（`letter` が `char` のときの `Query().Where(x => x.Id > letter)`）を、C# が比べる数でなく文字列として送ります。
-> プロバイダーと条件の形によって、クエリが失敗するか（PostgreSQL・SQL Server・Oracle と、MySQL の `ExecuteDeleteAsync`）、エラーなしに答えが変わります（`QuickErDbContext` へ書いた `ExecuteUpdate` の SQLite、クエリの MySQL）。
+> **既知の割り切り**: EF Core 版 Repository は、`int` の列と比べる `char` の値（`letter` が `char` のときの `Query().Where(x => x.Id > letter)`）を、C# が比べる数でなく文字列として送ります。
+> `bigint` の列と比べる値は数として送ります。
+> プロバイダーと条件の形によって、クエリが失敗するか（PostgreSQL・SQL Server・Oracle と、MySQL の `ExecuteDeleteAsync`）、エラーなしに答えが変わります（`ExecuteDeleteAsync` と `QuickErDbContext` へ書いた `ExecuteUpdate` の SQLite、クエリの MySQL）。
 > 値は数にして渡してください（`(int)letter` か `int` の変数）。
 > QuickER 版 Repository は数を束縛します。
 
@@ -3610,7 +3614,7 @@ blob を捨てる洗い替え（`IncludeUnboundedBinary` を付けずに `Discar
   したがって大文字小文字を区別しない列では、`ABC` と `abc` はサーバーから見れば 1 行、エンジンから見れば別々の 2 つのキーになります。
   テキストのキーは、大文字小文字を揺らさないでください（[GUID 化した主キー](#string-主キーの-guid-化useguidkeyforstringprimarykey)と同じ注意です）。
 - **一意な値が同じかどうかは、サーバーの照合順序で決まります。**
-  ローカルの SQLite は文字列の一意な値をそのまま比べますが、SQL Server の既定の照合順序は大文字小文字と末尾の空白を区別しません。
+  ローカルの SQLite は文字列の一意な値をそのまま比べますが、SQL Server の既定の照合順序は大文字小文字と、全角と半角と、末尾の空白（全角の空白を含む）を区別しません。
   そのため端末は、別の行の `abc` と並べて `ABC` や末尾に空白のある `abc ` を持てますが、サーバーはその行を同じ値のときと同じく `UniqueValueTakenOnServer` で断ります。
   決着も同じで、`Collect` と `LocalWins` はランのたびに報告し、`ServerWins` のランが変更を捨てます。
 - **固定長の文字列の主キー（`nchar(n)` / `char(n)`）は、ローカルの綴りを保ちません。**
@@ -3743,6 +3747,11 @@ app.Run();
 クライアントとサーバーが、共有の `RemoteJson.Options` を使います。
 生成されるモデルでは親参照ナビが `[JsonIgnore]` を持つため循環は起こりませんが、それでも循環が生じたとき（`IncludeJsonIgnoreOnParentNavigation` を無効にした場合や、ループを閉じるナビゲーションを自分で足した場合）は、`RemoteJson.Options` の `ReferenceHandler.IgnoreCycles` が、例外を投げる代わりに循環が閉じる位置へ `null` を書きます。
 転送は成功し、受け取った側ではそのナビゲーションが黙って欠けた状態になります。
+
+**`DateTime` は Kind を落として運びます。**
+`RemoteJson.Options` は `DateTime` を時差も `Z` も付けない往復書式で書き、tick を保って `DateTimeKind.Unspecified` で読みます（`DateTime?` と値オブジェクトの中の `DateTime` も同じです）。
+DB の実装先が `DateTime` を読み戻すときと同じ形なので、クライアントとサーバーの時差が違っても同じ時刻を送って保存し、暦の両端の `Local` の値も運べます。
+`DateTimeOffset` は時差ごと運びます。
 
 名前付きクエリは、実装方式（簡易 DSL／生 SQL／手動実装）に依らず全部リモート面経由で呼び出せます（実装の実体はサーバー側のリポジトリです）。
 

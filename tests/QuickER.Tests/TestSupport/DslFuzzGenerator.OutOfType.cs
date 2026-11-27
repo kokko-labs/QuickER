@@ -35,7 +35,7 @@ public sealed partial class DslFuzzGenerator
     public const string OutOfTypeParameterPrefix = "r";
 
     /// <summary>
-    /// <c>decimal(10,2)</c> の列のスケールの外の値（スケールへ丸めると下がって、行の値の池の 2.25・0.01・10・-1.5・1.5 に重なる）
+    /// <c>decimal(10,2)</c> の列のスケールの外の値（スケールへ丸めると下がって、行の値のプールの 2.25・0.01・10・-1.5・1.5 に重なる）
     /// </summary>
     private static readonly object[] BeyondScaleDecimals =
     [
@@ -58,7 +58,7 @@ public sealed partial class DslFuzzGenerator
     private static readonly object[] BeyondRangeLongs = [long.MaxValue, long.MinValue, 100000000L];
 
     /// <summary>
-    /// SQL Server の money・smallmoney の列の小数 4 桁の外の値（4 桁へ丸めると行の値の池の 2.25・0.01・10・-1.5・1.5 に重なる）
+    /// SQL Server の money・smallmoney の列の小数 4 桁の外の値（4 桁へ丸めると行の値のプールの 2.25・0.01・10・-1.5・1.5 に重なる）
     /// </summary>
     private static readonly object[] BeyondScaleMoney =
     [
@@ -97,8 +97,8 @@ public sealed partial class DslFuzzGenerator
     ];
 
     /// <summary>
-    /// decimal の列と比べる、列の型に入らない値の池（スケールの外・範囲の外・<c>int64</c> で型付けする範囲の外）。money・smallmoney の列は
-    /// その型の小数 4 桁と範囲、ほかは <c>decimal(10,2)</c> の列の池
+    /// decimal の列と比べる、列の型に入らない値のプール（スケールの外・範囲の外・<c>int64</c> で型付けする範囲の外）。money・smallmoney の列は
+    /// その型の小数 4 桁と範囲、ほかは <c>decimal(10,2)</c> の列のプール
     /// </summary>
     private static (
         object[] BeyondScale,
@@ -112,7 +112,7 @@ public sealed partial class DslFuzzGenerator
         : (BeyondScaleDecimals, BeyondRangeDecimals, BeyondRangeLongs);
 
     /// <summary>
-    /// 整数の列と比べる小数（<c>decimal(18,2)</c> へ丸めると下がって、行の値の池の 1・0・-1・5 に重なる）
+    /// 整数の列と比べる小数（<c>decimal(18,2)</c> へ丸めると下がって、行の値のプールの 1・0・-1・5 に重なる）
     /// </summary>
     private static readonly object[] BeyondScaleFractions = [1.004m, 0.0001m, -0.9951m, 5.0049m];
 
@@ -125,8 +125,8 @@ public sealed partial class DslFuzzGenerator
     ];
 
     /// <summary>
-    /// Unicode でない文字列の列と比べる、ASCII の外の文字を含む値（列の値の池のうち ASCII の外の文字を含むもの。LIKE のパターンの芯にも
-    /// するので、列の値の池は空でなく % と _ を含まない値を、<c>'</c> を含むものと含まないものの両方持つこと）
+    /// Unicode でない文字列の列と比べる、ASCII の外の文字を含む値（列の値のプールのうち ASCII の外の文字を含むもの。LIKE のパターンの芯にも
+    /// するので、列の値のプールは空でなく % と _ を含まない値を、<c>'</c> を含むものと含まないものの両方持つこと）
     /// </summary>
     private static List<string> NonAsciiValuesOf(DslColumn column) =>
         DslFuzz
@@ -190,7 +190,7 @@ public sealed partial class DslFuzzGenerator
     /// NOT IN・同じ種類のほかの Unicode でない列の比較と IN を OR でつなぐ）。Unicode でない列が無ければ作らない
     /// </summary>
     /// <remarks>
-    /// 使い回しの網羅の単位の形（<see cref="ReuseAndOrderingCoverageQueries"/>）は値を列の値の池から乱数で選ぶので、ASCII の外の文字を
+    /// 使い回しの網羅の単位の形（<see cref="ReuseAndOrderingCoverageQueries"/>）は値を列の値のプールから乱数で選ぶので、ASCII の外の文字を
     /// 選ぶとは限らない。ここでは使い回すパラメータの値を必ず ASCII の外の文字を含む値にする。
     /// </remarks>
     private List<DslQuery> NonAsciiReuseQueries(IReadOnlyList<DslColumn> columns)
@@ -370,7 +370,7 @@ public sealed partial class DslFuzzGenerator
 
     /// <summary>
     /// TimeSpan の列と、列の型の範囲（<see cref="DslColumn.TimeRange"/>）の外の値の原子：6 つの演算子 × 上の外・下の外の値 × 列で型付けと
-    /// 型トークン <c>time</c>、IN と NOT IN（上の外だけ・下の外と範囲の中・上の外と下の外）。比べる値の池（<see cref="DslColumn.OperandValues"/>）に
+    /// 型トークン <c>time</c>、IN と NOT IN（上の外だけ・下の外と範囲の中・上の外と下の外）。比べる値のプール（<see cref="DslColumn.OperandValues"/>）に
     /// 範囲の外の値が無い列（種の単位の列）は作らない
     /// </summary>
     private IEnumerable<DslAtom> TimeSpanOutOfRange(DslColumn column, DslTimeRange range)
@@ -424,13 +424,13 @@ public sealed partial class DslFuzzGenerator
 
     /// <summary>
     /// SQL Server の datetime・smalldatetime の列（<see cref="DslColumn.LegacyDateTime"/>）と、列が読み戻せない値の原子：6 つの演算子 ×
-    /// 比べる値の池（<see cref="DslColumn.OperandValues"/>）を分けた 4 つの池 × 列で型付けと型トークン <c>datetime</c>、IN と NOT IN（刻みの外と
+    /// 比べる値のプール（<see cref="DslColumn.OperandValues"/>）を分けた 4 つのプール × 列で型付けと型トークン <c>datetime</c>、IN と NOT IN（刻みの外と
     /// 行の値・刻みの細かい外と行の値・上の外と下の外と行の値 × 列で型付けと型トークン）
     /// </summary>
     /// <remarks>
-    /// 4 つの池：範囲の中で刻みの外の値のうち、粗い刻み（datetime はミリ秒・smalldatetime は秒）の上にある値と無い値、範囲の上の外の値、
+    /// 4 つのプール：範囲の中で刻みの外の値のうち、粗い刻み（datetime はミリ秒・smalldatetime は秒）の上にある値と無い値、範囲の上の外の値、
     /// 下の外の値。datetime の粗い刻みの無い値は、読み戻す値と 1/300 秒の刻みの間の値（.003 と .0033333 の間の .0031 など）で、
-    /// 窓の値の原子をいつも作るために池を分ける。比べる値の池に 4 つのどれかが無い列は作らない。DateTime の IN のリストは値型の要素で
+    /// 窓の値の原子をいつも作るためにプールを分ける。比べる値のプールに 4 つのどれかが無い列は作らない。DateTime の IN のリストは値型の要素で
     /// null を持てない（値オブジェクトの単位では作らない）。
     /// </remarks>
     private IEnumerable<DslAtom> LegacyDateTimeOutOfType(
@@ -504,7 +504,7 @@ public sealed partial class DslFuzzGenerator
         }
     }
 
-    /// <summary>整数の列と比べる、整数の型の範囲の外の小数のリテラル（double へ丸めても行の値の池との大小が変わらない値）</summary>
+    /// <summary>整数の列と比べる、整数の型の範囲の外の小数のリテラル（double へ丸めても行の値のプールとの大小が変わらない値）</summary>
     private static readonly object[] BeyondRangeFractionalLiterals =
     [
         10000000000000000000.5m,
@@ -565,7 +565,7 @@ public sealed partial class DslFuzzGenerator
         }
     }
 
-    /// <summary>値の池から 1 つ選んだリテラルとの比較</summary>
+    /// <summary>値のプールから 1 つ選んだリテラルとの比較</summary>
     private DslCompare OutOfTypeLiteral(DslColumn column, DslOp op, IReadOnlyList<object> pool)
     {
         var value = Pick(pool);
@@ -576,7 +576,7 @@ public sealed partial class DslFuzzGenerator
         };
     }
 
-    /// <summary>値の池から 1 つ選んだパラメータとの比較（型トークンが null なら列で型付けする）</summary>
+    /// <summary>値のプールから 1 つ選んだパラメータとの比較（型トークンが null なら列で型付けする）</summary>
     private DslCompare OutOfTypeCompare(
         DslColumn column,
         DslOp op,
@@ -701,7 +701,7 @@ public sealed partial class DslFuzzGenerator
         }
     }
 
-    /// <summary>ASCII の外の文字を含む文字列のリテラル（<paramref name="quote"/> が null なら値の池全体から選ぶ）</summary>
+    /// <summary>ASCII の外の文字を含む文字列のリテラル（<paramref name="quote"/> が null なら値のプール全体から選ぶ）</summary>
     private DslLiteral NonAsciiLiteral(DslColumn column, bool? quote)
     {
         var value = Pick(

@@ -293,7 +293,7 @@ public sealed partial class DslFuzzGenerator
             .ToList();
 
     /// <summary>
-    /// 使い回すパラメータの値の池（1 つめの列の値の池のうち、2 つめの列の型にも入る値）
+    /// 使い回すパラメータの値のプール（1 つめの列の値のプールのうち、2 つめの列の型にも入る値）
     /// </summary>
     /// <remarks>
     /// 型が広がる組で 2 つめの列の型に入らない値（decimal(10,2) の列と比べる int・long の上限など）は、SQL Server の EF Core 版が
@@ -302,7 +302,7 @@ public sealed partial class DslFuzzGenerator
     private static List<object> SharedPool(DslColumn column, DslColumn other) =>
         DslFuzz.ValuePool(column).Where(value => FitsColumn(value, other)).ToList();
 
-    /// <summary>値が列の型に入るか（decimal の列は宣言の精度とスケールで見る。ほかの列は値の池が列の種類の範囲なので入る）</summary>
+    /// <summary>値が列の型に入るか（decimal の列は宣言の精度とスケールで見る。ほかの列は値のプールが列の種類の範囲なので入る）</summary>
     private static bool FitsColumn(object value, DslColumn column)
     {
         if (column.Money is { } money)
@@ -346,7 +346,7 @@ public sealed partial class DslFuzzGenerator
     internal static decimal Pow10(int exponent) =>
         Enumerable.Range(0, exponent).Aggregate(1m, (product, _) => product * 10m);
 
-    /// <summary>使い回す値のパラメータ（1 つめの列の値の池のうち、2 つめの列の型にも入る値を選ぶ）</summary>
+    /// <summary>使い回す値のパラメータ（1 つめの列の値のプールのうち、2 つめの列の型にも入る値を選ぶ）</summary>
     private DslParam SharedParam(DslColumn column, DslColumn other, bool byColumn) =>
         new(
             parameterPrefix + _parameterIndex++,
@@ -356,7 +356,7 @@ public sealed partial class DslFuzzGenerator
             column
         );
 
-    /// <summary>使い回すリストのパラメータ（値は <see cref="SharedParam"/> と同じ池から選ぶ）</summary>
+    /// <summary>使い回すリストのパラメータ（値は <see cref="SharedParam"/> と同じプールから選ぶ）</summary>
     private DslParam SharedList(DslColumn column, DslColumn other, string shape, bool byColumn)
     {
         var pool = SharedPool(column, other);

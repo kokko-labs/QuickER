@@ -93,6 +93,12 @@ internal static class TableRegistry
             [Templates + "_08_EfCore.scriban", "src/QuickER.Runtime.EntityFrameworkCore"]
         ),
         new(
+            "SqlServerQueryParameters",
+            "SQL Server のクエリのパラメータの束縛し直しの表（decimal の列の桁の外・Unicode でない列と ASCII の外の文字・datetime と smalldatetime の読み戻せない値と範囲の外は値の型へ、入る値と SaveChanges と ExecuteUpdate の値は列の型のまま）",
+            ["tests/QuickER.Tests/CodeGen.CSharp/SqlServerQueryParameterInterceptorTests.cs"],
+            [Templates + "_08_EfCore.scriban", "src/QuickER.Runtime.EntityFrameworkCore"]
+        ),
+        new(
             "TranslatorConversions",
             "翻訳器の変換の表（QuickER 版の式の翻訳器が比べる 2 つの側に書いた変換を両方言でどう扱うか＝列の側の値を変えうる数の変換は名指しで断り、値の側は変換を当てて束縛する・日付部品の IN・列名の無い値の束縛の型）",
             [Fixture + "SqlExpressionTranslatorConversionTests.cs"],

@@ -37,7 +37,7 @@ internal static class BranchAxisLedgerEntries
                 ),
                 new(
                     "value-pool",
-                    "値の池",
+                    "値のプール",
                     "値の端の水準（DateTimeKind・端数・刻みの外・範囲の端・ASCII の外）のどれで答えが変わるか"
                 ),
                 new(

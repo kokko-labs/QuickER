@@ -150,6 +150,12 @@ public class DslConditionFuzzTests
             coverageUnits.Add(
                 (DslFuzzUnits.PlainCoverage(DialectNames.MySql), MySqlTarget, InvariantCultureName)
             );
+            coverageUnits.Add(
+                (DslFuzzPoolEdges.Coverage(DialectNames.Sqlite), SqliteTarget, InvariantCultureName)
+            );
+            coverageUnits.Add(
+                (DslFuzzPoolEdges.Coverage(DialectNames.MySql), MySqlTarget, InvariantCultureName)
+            );
             coverageUnits.AddRange(
                 DslFuzzUnits
                     .FamiliesCoverage(DialectNames.Sqlite)

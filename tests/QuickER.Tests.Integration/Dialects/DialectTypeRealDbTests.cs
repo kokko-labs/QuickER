@@ -907,7 +907,7 @@ public abstract class DialectTypeRealDbTestsBase
     }
 
     /// <summary>行の出力（書き出しの行は TryFormat・パラメータの書き出しの行は TryFormatParameterType・マッパーの行は入力）</summary>
-    private static string RowSpelling(DialectTypeCase row, DialectTypeAdapter adapter) =>
+    internal static string RowSpelling(DialectTypeCase row, DialectTypeAdapter adapter) =>
         row.Facet switch
         {
             DialectTypeFacets.Format

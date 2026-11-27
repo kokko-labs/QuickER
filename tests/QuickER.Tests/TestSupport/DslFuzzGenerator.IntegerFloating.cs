@@ -1,4 +1,5 @@
 using QuickER.Model;
+using QuickER.Tests.TestSupport.ValuePools;
 
 namespace QuickER.Tests.TestSupport;
 
@@ -33,7 +34,14 @@ public sealed partial class DslFuzzGenerator
     /// <c>float32</c> で型付けする値（16777216f は 16777217 の行と等しく、16777218f は 16777217 の行より大きい＝float へ丸めた行と比べる。
     /// 1e8f は 100000001 の行と等しい＝10 進で短く書けて decimal へ正確に変換できる値で、整数の列の型でも束縛できる値の形）
     /// </summary>
-    private static readonly object[] IntegralFloats = [16777216f, 16777218f, 0f, -1f, 100000000f];
+    private static readonly object[] IntegralFloats =
+    [
+        (float)PowerOfTwoEdges.TwoPow24,
+        16777218f,
+        0f,
+        -1f,
+        100000000f,
+    ];
 
     /// <summary>
     /// <c>float64</c> で型付けする値（2^53 は 2^53+1 の行と等しく、2^53+2 は 2^53+1 の行より大きい＝double へ丸めた行と比べる。
@@ -41,7 +49,7 @@ public sealed partial class DslFuzzGenerator
     /// </summary>
     private static readonly object[] IntegralDoubles =
     [
-        9007199254740992d,
+        (double)PowerOfTwoEdges.TwoPow53,
         9007199254740994d,
         0d,
         -1d,
@@ -189,8 +197,8 @@ public sealed partial class DslFuzzGenerator
     }
 
     /// <summary>鏡の形で float の列と比べる int32 の値（float へ変換すると 16777216f に丸まる）</summary>
-    private static readonly object[] MirrorInt32Values = [16777217];
+    private static readonly object[] MirrorInt32Values = [PowerOfTwoEdges.TwoPow24Plus1];
 
     /// <summary>鏡の形で double の列と比べる int64 の値（double へ変換すると 2^53 に丸まる）</summary>
-    private static readonly object[] MirrorInt64Values = [9007199254740993L];
+    private static readonly object[] MirrorInt64Values = [PowerOfTwoEdges.TwoPow53Plus1];
 }

@@ -29,10 +29,6 @@ public sealed class TranslatorParityAdoSqlServerRuntimeTests(SqlServerContainerF
     protected override IReadOnlyDictionary<string, BinaryColumnLength>? BinaryColumnLengths =>
         SqlServerBinaryColumnLengths;
 
-    /// <inheritdoc />
-    protected override IReadOnlyDictionary<string, string> KnownRefusals =>
-        QuickErUlongColumnCastRefusals;
-
     protected override async Task<ServiceProvider> CreateProviderAsync()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);

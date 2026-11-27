@@ -1929,10 +1929,10 @@ public static class SqlExpressionTranslator
                 // list of non-null values). Folding the negation into the clause lets it emit the compensated form.
                 if (
                     operand is MethodCallExpression inCall
-                    && TryGetIn(inCall, out var notInColumn, out var notInCollection)
+                    && TryGetIn(inCall, out var notInColumn, out var notInCollection, out var notInItem)
                 )
                 {
-                    return BuildInClause(notInColumn, notInCollection, parameters, negate: true);
+                    return BuildInClause(notInColumn, notInCollection, notInItem, parameters, negate: true);
                 }
 
                 // Anything else keeps the NOT wrapper, and a negated composite condition - !(a == b && c) - lands here: the
@@ -1975,8 +1975,8 @@ public static class SqlExpressionTranslator
                 return $"{likeColumn} LIKE {AddParameter(pattern, parameters, RawColumnName(likeColumn), variableLength: true)} ESCAPE '\\'";
 
             case MethodCallExpression call
-                when TryGetIn(call, out var inColumn, out var inCollection):
-                return BuildInClause(inColumn, inCollection, parameters);
+                when TryGetIn(call, out var inColumn, out var inCollection, out var inItem):
+                return BuildInClause(inColumn, inCollection, inItem, parameters);
 
             case MethodCallExpression call
                 when TryGetNullOrEmpty(call, out var neColumn, out var neWhitespace):
@@ -2374,11 +2374,13 @@ public static class SqlExpressionTranslator
     private static bool TryGetIn(
         MethodCallExpression call,
         out string column,
-        out Expression collection
+        out Expression collection,
+        out Expression item
     )
     {
         column = string.Empty;
         collection = null!;
+        item = null!;
 
         // A substring match on a column (x.Name.Contains(x.Other)) belongs to the LIKE path even when its argument is a column too:
         // the receiver is a column, not a collection of values. Deciding it here keeps the answer the same wherever the call is
@@ -2406,6 +2408,7 @@ public static class SqlExpressionTranslator
             {
                 column = staticItem;
                 collection = UnwrapCollection(call.Arguments[0]);
+                item = call.Arguments[1];
                 return true;
             }
 
@@ -2420,6 +2423,7 @@ public static class SqlExpressionTranslator
             {
                 column = instanceItem;
                 collection = UnwrapCollection(call.Object);
+                item = call.Arguments[0];
                 return true;
             }
         }
@@ -2466,6 +2470,7 @@ public static class SqlExpressionTranslator
     private static string BuildInClause(
         string column,
         Expression collection,
+        Expression itemOperand,
         List<SqlQueryParameter> parameters,
         bool negate = false
     )

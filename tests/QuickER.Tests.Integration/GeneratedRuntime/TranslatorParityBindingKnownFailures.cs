@@ -41,9 +41,12 @@ namespace QuickER.Tests.Integration.GeneratedRuntime;
 /// <item>QuickER 版の SQLite・SQL Server（Accepted）：<see cref="QuickErNarrowingColumnCastFinding"/>。列の側の値を変える明示の変換は、翻訳器が変換を
 /// 名指しした NotSupportedException で断る（docs/code-generation.md の Known limitation。値に依らず必ず例外なので形だけで決める）。</item>
 /// <item>台帳の外の項目（区切り a のフェーズ 2 で水準を足して見つけた）：<see cref="EfCoreNarrowingColumnCastFinding"/>（Pending・
-/// きっかけ待ち＝<see cref="TriggerSlice"/>。EF Core 版の列の側の値を変える明示の変換は、SQLite・MySQL が値を変えない変換に書いて黙って割れ、
-/// PostgreSQL・Oracle が範囲の外の行のある表で必ず断り、SQL Server もほとんどの形で断る。符号だけの変換は 5 方言とも折り返さずに黙って割れ、
-/// SQLite の ulong の大小の比較だけは翻訳が断る〔述語の表の行〕。docs の Known limitation に回避を書いた）。</item>
+/// きっかけ待ち＝<see cref="TriggerSlice"/>。EF Core 版の列の側の値を変える明示の変換は、予測を DB の CAST の意味で作る〔<see cref="NarrowingColumnCast"/>〕：
+/// SQLite・MySQL は値を変えない変換に書いて黙って割れ、SQL Server は int・bigint の列で範囲の外の行のある表で断り、PostgreSQL・Oracle は bigint の列で
+/// 断って int の列で -1 の行を折り返さずに黙って割れる。符号だけの変換は 5 方言とも折り返さずに黙って割れ、SQLite の ulong どうしの大小の比較だけは
+/// 翻訳が断る〔符号だけの変換の水準の行・規則 <see cref="SignOnlyColumnCast"/>〕。docs の Known limitation に回避を書いた）。</item>
+/// <item>EF Core 版の SQLite（Pending・きっかけ待ち）：<see cref="SqliteSignCastDecimalEqualityFinding"/>。符号だけの変換の列と decimal の値の等値・IN を
+/// 文字列で比べる（値のプールの正本の区切りのフェーズ 3 で、符号だけの変換と decimal の値の組を作れるようにして見つけた）。</item>
 /// </list>
 /// </remarks>
 internal static class TranslatorParityBindingKnownFailures
@@ -178,8 +181,8 @@ internal static class TranslatorParityBindingKnownFailures
     private static IReadOnlyList<Rule> RulesFor(RuntimeTarget target) =>
         target switch
         {
-            RuntimeTarget.AdoSqlite => [QuickErNarrowingColumnCast],
-            RuntimeTarget.AdoSqlServer => [QuickErNarrowingColumnCast],
+            RuntimeTarget.AdoSqlite => [QuickErNarrowingColumnCast, QuickErUlongColumnCast],
+            RuntimeTarget.AdoSqlServer => [QuickErNarrowingColumnCast, QuickErUlongColumnCast],
             RuntimeTarget.EfCoreSqlite =>
             [
                 new(
@@ -193,7 +196,36 @@ internal static class TranslatorParityBindingKnownFailures
                     SqliteExecuteUpdateReason
                 ),
                 CharValueSentAsText(RuntimeTarget.EfCoreSqlite),
-                NarrowingColumnCast(alwaysThrows: false, NarrowingSqliteReason),
+                // UInt64 どうしの大小の比較は、EF Core の SQLite プロバイダが翻訳できずに断る（値に依らず必ず例外なので形だけで決める。
+                // 比べる型が decimal〔decimal・符号つきの値と比べる〕なら ef_compare で数として比べ、断らない）
+                new(
+                    row =>
+                        row.Levels[TranslatorParityBindingRows.ColumnShape]
+                            == TranslatorParityBindingRows.ULongCast
+                        && row.ComparedType == typeof(ulong)
+                        && IsOrdering(row),
+                    SqliteUlongOrderingFinding,
+                    KnownKind.Accepted,
+                    null,
+                    SqliteUlongOrderingReason
+                ),
+                // 符号だけの変換の列と decimal の値の等値・IN は、Query() の条件の書き換え（SqliteIntegralDecimalEquality）が変換のある列を
+                // 書き換えず、EF Core の SQLite プロバイダが文字列で比べる（整数の値の decimal はどの行とも等しくない）
+                new(
+                    row =>
+                        TranslatorParityBindingRows.IsSignCastShape(
+                            row.Levels[TranslatorParityBindingRows.ColumnShape]
+                        )
+                        && row.ComparedType == typeof(decimal)
+                        && IsEquality(row)
+                        && Diverges(row, NeverEqual, NeverEqual),
+                    SqliteSignCastDecimalEqualityFinding,
+                    KnownKind.Pending,
+                    TriggerSlice,
+                    SqliteSignCastDecimalEqualityReason
+                ),
+                SignOnlyColumnCast(SignOnlySqliteReason, sqlite: true),
+                NarrowingColumnCast(_ => false, WithoutColumnCast, NarrowingSqliteReason),
             ],
             RuntimeTarget.EfCoreSqlServer =>
             [
@@ -232,7 +264,17 @@ internal static class TranslatorParityBindingKnownFailures
                 ),
                 DateConstant(datePartIsDate: true),
                 CharValueSentAsText(RuntimeTarget.EfCoreSqlServer),
-                NarrowingColumnCast(alwaysThrows: true, NarrowingSqlServerReason),
+                SignOnlyColumnCast(SignOnlySqlServerReason),
+                // int の列の (byte) は tinyint への CAST で -1 の行が、bigint の列の (short) は smallint への CAST で long の上限・下限の行が
+                // 範囲の外になり、どの形も断る（decimal の列の (int) は小数部を切り捨て、C# と同じ値になる）
+                NarrowingColumnCast(
+                    row =>
+                        row.ColumnType
+                            is TranslatorParityBindingRows.Int
+                                or TranslatorParityBindingRows.BigInt,
+                    WithoutColumnCast,
+                    NarrowingSqlServerReason
+                ),
             ],
             RuntimeTarget.EfCorePostgreSql =>
             [
@@ -277,17 +319,34 @@ internal static class TranslatorParityBindingKnownFailures
                     PostgreSqlUtcLiteralOnTimestampReason
                 ),
                 CharValueSentAsText(RuntimeTarget.EfCorePostgreSql),
-                NarrowingColumnCast(alwaysThrows: true, NarrowingPostgreSqlReason),
+                SignOnlyColumnCast(SignOnlyPostgreSqlReason),
+                // bigint の列の (short) は smallint に入らない行で断り、int の列の (byte) は smallint への CAST で -1 の行を折り返さない
+                NarrowingColumnCast(
+                    row => row.ColumnType == TranslatorParityBindingRows.BigInt,
+                    WithoutColumnCast,
+                    NarrowingPostgreSqlReason
+                ),
             ],
             RuntimeTarget.EfCoreMySql =>
             [
                 CharValueSentAsText(RuntimeTarget.EfCoreMySql),
-                NarrowingColumnCast(alwaysThrows: false, NarrowingMySqlReason),
+                SignOnlyColumnCast(SignOnlyMySqlReason),
+                NarrowingColumnCast(_ => false, WithoutColumnCast, NarrowingMySqlReason),
             ],
             RuntimeTarget.EfCoreOracle =>
             [
                 CharValueSentAsText(RuntimeTarget.EfCoreOracle),
-                NarrowingColumnCast(alwaysThrows: true, NarrowingOracleReason),
+                SignOnlyColumnCast(SignOnlyOracleReason),
+                // bigint の列の (short) は NUMBER(5) に入らない行で断り、int の列の (byte) は TO_NUMBER(列, 'xx') で列の 10 進の綴りを
+                // 16 進として読む
+                NarrowingColumnCast(
+                    row => row.ColumnType == TranslatorParityBindingRows.BigInt,
+                    row =>
+                        row.ColumnType == TranslatorParityBindingRows.Int
+                            ? DivergesOnColumnImage(row, OracleHexImage)
+                            : WithoutColumnCast(row),
+                    NarrowingOracleReason
+                ),
             ],
             _ => [],
         };
@@ -298,8 +357,13 @@ internal static class TranslatorParityBindingKnownFailures
     /// </summary>
     /// <remarks>
     /// <list type="bullet">
-    /// <item>SQLite：ExecuteUpdate の WHERE だけが値を TEXT で送り、SQLite は整数の列をどの TEXT よりも小さいとみなす（例外にならず黙って割れる。
-    /// 値を整数の上限へ置き換えた C# の答えになる行）。Query()・ExecuteDelete の条件は C# と一致する。</item>
+    /// <item>SQLite：ExecuteUpdate の WHERE と ExecuteDelete の条件で、変換を書かない int の列（素の列）と比べる値を TEXT で送り、SQLite は
+    /// 整数の列をどの TEXT よりも小さいとみなす（例外にならず黙って割れる。値を整数の上限へ置き換えた C# の答えになる行。ExecuteDelete は
+    /// 値のプールの正本の区切りで網羅の配列の並びが変わり、初めて出た組で確かめた）。列の側に変換を書いた形は EF Core が
+    /// <c>CAST(unicode(@Value) AS INTEGER)</c> で数にして送るので C# と一致する。Query() の条件も C# と一致する。</item>
+    /// <item>bigint の列（5 方言）：C# が char を long へ広げ（値を保つ変換では decimal へ）、EF Core はその型のパラメータ（Int64・decimal）で
+    /// 送るので C# と一致する（値の束縛の生成の表で、bigint の列の ExecuteUpdate・値を保つ変換の ExecuteDelete の行を確かめた）。以下の方言の
+    /// 振る舞いはどれも int の列のもの。</item>
     /// <item>PostgreSQL：ExecuteUpdate の WHERE は integer のパラメータに char を書けず InvalidCastException、列の側に値を保つ変換を書いた形は
     /// 文字列のパラメータを integer へ変換して 22P02（どちらも値に依らず必ず例外なので形だけで決める）。</item>
     /// <item>SQL Server・Oracle：列の側に値を保つ変換を書いた形は文字列のパラメータを int・NUMBER へ変換して断る（変換のエラー・ORA-01722。
@@ -323,6 +387,13 @@ internal static class TranslatorParityBindingKnownFailures
                     return false;
                 }
 
+                // bigint の列は、C# が char を long（値を保つ変換なら decimal）へ広げた値を EF Core がそのまま Int64・decimal のパラメータで
+                // 送るので割れない（2026-11-27 の Docker の実行で 5 方言とも C# と一致した：@p Int64/Bigint 1・@p Decimal/Numeric 1 ほか）
+                if (row.ColumnType != TranslatorParityBindingRows.Int)
+                {
+                    return false;
+                }
+
                 var update = row.QueryPath == TranslatorParityBindingRows.ExecuteUpdate;
                 var preserving =
                     row.Levels[TranslatorParityBindingRows.ColumnShape]
@@ -330,7 +401,12 @@ internal static class TranslatorParityBindingKnownFailures
 
                 return target switch
                 {
-                    RuntimeTarget.EfCoreSqlite => update && Diverges(row, _ => int.MaxValue, null),
+                    RuntimeTarget.EfCoreSqlite => (
+                        update || row.QueryPath == TranslatorParityBindingRows.ExecuteDelete
+                    )
+                        && row.Levels[TranslatorParityBindingRows.ColumnShape]
+                            == TranslatorParityBindingRows.Plain
+                        && Diverges(row, _ => int.MaxValue, null),
                     RuntimeTarget.EfCorePostgreSql => update || preserving,
                     RuntimeTarget.EfCoreSqlServer or RuntimeTarget.EfCoreOracle => preserving,
                     RuntimeTarget.EfCoreMySql => preserving
@@ -348,7 +424,7 @@ internal static class TranslatorParityBindingKnownFailures
         );
 
     private const string CharValueReason =
-        "EF Core は整数の列と比べる捕捉した char の値を整数へ広げずに char のまま（文字列として）送る。SQLite は ExecuteUpdate の WHERE で TEXT と比べて黙って割れ、PostgreSQL は ExecuteUpdate で char を integer のパラメータに書けず、列の側に値を保つ変換を書いた形は 22P02、SQL Server・Oracle はその形で文字列を数へ変換できずに断り、MySQL はその形の書き込みの文が厳格のモードで断り、Query() は警告だけで 0 として比べ黙って割れうる（回避は値を (int)c か int の変数にして渡す：docs/code-generation.md の EF Core 版の Known limitation）";
+        "EF Core は int の列と比べる捕捉した char の値を整数へ広げずに char のまま（文字列として）送る（bigint の列は C# が広げた long・decimal のパラメータで送り割れない）。SQLite は ExecuteUpdate の WHERE と ExecuteDelete の条件で変換を書かない int の列と TEXT で比べて黙って割れ、PostgreSQL は ExecuteUpdate で char を integer のパラメータに書けず、列の側に値を保つ変換を書いた形は 22P02、SQL Server・Oracle はその形で文字列を数へ変換できずに断り、MySQL はその形の書き込みの文が厳格のモードで断り、Query() は警告だけで 0 として比べ黙って割れうる（回避は値を (int)c か int の変数にして渡す：docs/code-generation.md の EF Core 版の Known limitation）";
 
     /// <summary>
     /// QuickER 版の列の側の値を変える明示の変換（Accepted）：翻訳器が変換を名指しした NotSupportedException で断る（値に依らず必ず例外なので
@@ -365,30 +441,167 @@ internal static class TranslatorParityBindingKnownFailures
     );
 
     /// <summary>
-    /// EF Core 版の列の側の値を変える明示の変換：SQLite・MySQL は値を変えない変換に書いて変換を外した形の答えになり、SQL Server・PostgreSQL・
-    /// Oracle は変換先の型に入らない行（bigint の列の short への変換＝シードの long の上限ほか）で断る（値を手元で評価する値の側の変換は割れない）。
-    /// 直す区切りは決まっていない（docs/code-generation.md の EF Core 版の Known limitation に、列は変換せずに値の側を広げる回避を書いた）
+    /// QuickER 版の列の側の ulong への変換（Accepted）：翻訳器が変換を名指しした NotSupportedException で断る（値に依らず必ず例外なので形だけで
+    /// 決める。述語の表の QuickER 版の KnownRefusals から移した）
     /// </summary>
-    /// <param name="alwaysThrows">変換先の型に入らない行がある表で例外になる方言か（形だけで決める）</param>
-    /// <param name="reason">実装先の振る舞い（Docker の実行で読んだもの）</param>
-    private static Rule NarrowingColumnCast(bool alwaysThrows, string reason) =>
+    private static readonly Rule QuickErUlongColumnCast = new(
+        row =>
+            row.Levels[TranslatorParityBindingRows.ColumnShape]
+            == TranslatorParityBindingRows.ULongCast,
+        QuickErUlongColumnCastFinding,
+        KnownKind.Accepted,
+        null,
+        QuickErUlongColumnCastReason
+    );
+
+    /// <summary>QuickER 版の列の側の ulong への変換を翻訳器が断る割り切りの指摘の名前</summary>
+    public const string QuickErUlongColumnCastFinding = "quicker-ulong-column-cast";
+
+    private const string QuickErUlongColumnCastReason =
+        "QuickER 版の翻訳器は、列の側に書いた ulong への変換を、変換を名指しした NotSupportedException で断る。C# が折り返した値は bigint に入らず、SQL で同じ値を作れないので翻訳しない（docs/code-generation.md「Letter case, whitespace, and date parts」の Known limitation：A cast to ulong is refused because its wrapped value does not fit a bigint）";
+
+    /// <summary>
+    /// EF Core 版の列の側の符号だけの変換（(uint)・(ulong)）：5 方言とも負の値を折り返さない変換に書く（例外にならない）ので、変換を外した形の
+    /// 答えになり、C# が折り返して当てる行と黙って割れる（述語の表の EF Core の派生の Known から移した。縮める変換と同じ指摘・きっかけ待ち）
+    /// </summary>
+    /// <param name="reason">実装先の振る舞い（2026-11-27 の Docker の実行で読んだもの）</param>
+    /// <param name="sqlite">
+    /// EF Core の SQLite の形か：ulong どうしの等値・IN は ulong の値を long へ写して送るので負の値の行と当たって C# と一致し（大小の比較は
+    /// 前の規則が断る）、decimal の値との等値・IN は前の規則の文字列の比較になるので、どちらもこの規則に当てない
+    /// </param>
+    private static Rule SignOnlyColumnCast(string reason, bool sqlite = false) =>
         new(
             row =>
-                row.Levels[TranslatorParityBindingRows.ColumnShape]
-                    == TranslatorParityBindingRows.NarrowingCast
-                && (
-                    alwaysThrows
-                        ? row.ColumnType == TranslatorParityBindingRows.BigInt
-                        : DivergesFrom(row, row.PredicateWithout(NarrowingDrop.Column))
-                ),
+                TranslatorParityBindingRows.IsSignCastShape(
+                    row.Levels[TranslatorParityBindingRows.ColumnShape]
+                )
+                && !(
+                    sqlite
+                    && (
+                        (
+                            row.Levels[TranslatorParityBindingRows.ColumnShape]
+                                == TranslatorParityBindingRows.ULongCast
+                            && row.ComparedType == typeof(ulong)
+                        ) || (row.ComparedType == typeof(decimal) && IsEquality(row))
+                    )
+                )
+                && WithoutColumnCast(row),
             EfCoreNarrowingColumnCastFinding,
             KnownKind.Pending,
             TriggerSlice,
             reason
         );
 
+    /// <summary>EF Core 版の SQLite の UInt64 の大小の比較の割り切りの指摘の名前</summary>
+    public const string SqliteUlongOrderingFinding = "efcore-sqlite-ulong-ordering";
+
+    private const string SqliteUlongOrderingReason =
+        "EF Core の SQLite プロバイダは UInt64 の大小の比較を翻訳できず、InvalidOperationException で断る（プロバイダの文書の Query limitations：SQLite が持たない型の比較と並び替えはクライアントの評価が要る）";
+
+    /// <summary>EF Core 版の SQLite の符号だけの変換の列と decimal の値の等値・IN の指摘の名前（きっかけ待ち）</summary>
+    public const string SqliteSignCastDecimalEqualityFinding =
+        "efcore-sqlite-sign-cast-decimal-equality";
+
+    private const string SqliteSignCastDecimalEqualityReason =
+        "EF Core の SQLite プロバイダは、列の側に (uint)・(ulong) を書いた整数の列と decimal の値の等値・IN を CAST(CAST(列 AS INTEGER) AS TEXT) IN (@Value1, @Value2) と書き、decimal のパラメータを TEXT（Decimal/Text の 1・2、-1・0 ほか）で送るので文字列で比べ、整数の値の decimal がどの行とも等しくならない（2026-11-27 の Docker の実行で Query() と ExecuteDelete の 6 行。Query() の条件の整数と decimal の等値の書き換えは変換のある列を書き換えない）";
+
+    private const string SignOnlySqliteReason =
+        "EF Core の SQLite プロバイダは列の側の (uint) などを値を変えない変換に書き、負の値を折り返さないので、C# が折り返して当てる行と黙って答えが割れる（例外にならない）";
+
+    private const string SignOnlySqlServerReason =
+        "EF Core の SQL Server プロバイダは列の側の (uint)・(ulong) を負の値を折り返さない変換に書くので、C# が折り返して当てる行と黙って答えが割れる（例外にならない。縮める変換と違い、変換先の型の範囲に入らない行が無い）";
+
+    private const string SignOnlyPostgreSqlReason =
+        "EF Core の PostgreSQL プロバイダは列の側の (uint)・(ulong) を負の値を折り返さない変換に書くので、C# が折り返して当てる行と黙って答えが割れる（例外にならない。縮める変換と違い、変換先の型の範囲に入らない行が無い）";
+
+    private const string SignOnlyMySqlReason =
+        "EF Core の MySQL プロバイダは列の側の (uint)・(ulong) を値を変えない形で比べ、負の値を折り返さない（MySQL の CAST(… AS unsigned) の 64 ビットの折り返しも起きない）ので、C# が折り返して当てる行と黙って答えが割れる（例外にならない）";
+
+    private const string SignOnlyOracleReason =
+        "EF Core の Oracle プロバイダは列の側の (uint)・(ulong) を負の値を折り返さない変換に書くので、C# が折り返して当てる行と黙って答えが割れる（例外にならない。縮める変換と違い、変換先の型の範囲に入らない行が無い）";
+
+    /// <summary>
+    /// EF Core 版の列の側の値を変える明示の変換：DB の CAST の意味で答えを作る。シードの行を変換先の DB の型に入れられない方言・列の型は
+    /// 例外になり（形だけで決める）、入れられる行は DB が CAST した値（多くは元の値のまま＝折り返さない）で比べた答えになる（値を手元で評価する
+    /// 値の側の変換は割れない）。直す区切りは決まっていない（docs/code-generation.md の EF Core 版の Known limitation に、列は変換せずに値の側を
+    /// 広げる回避を書いた）
+    /// </summary>
+    /// <param name="refuses">変換先の DB の型に入らない行（int の列の -1・bigint の列の long の上限と下限）で例外になる列の型か</param>
+    /// <param name="diverges">例外にならない列の型で、DB の CAST の答えが C# の答えと違うか</param>
+    /// <param name="reason">実装先の振る舞い（Docker の実行で読んだもの）</param>
+    private static Rule NarrowingColumnCast(
+        Func<TranslatorParityBinding, bool> refuses,
+        Func<TranslatorParityBinding, bool> diverges,
+        string reason
+    ) =>
+        new(
+            row =>
+                row.Levels[TranslatorParityBindingRows.ColumnShape]
+                    == TranslatorParityBindingRows.NarrowingCast
+                && (refuses(row) || diverges(row)),
+            EfCoreNarrowingColumnCastFinding,
+            KnownKind.Pending,
+            TriggerSlice,
+            reason
+        );
+
+    /// <summary>
+    /// 列の側の変換を外した形の答え（DB の CAST がシードの値を変えない形）が C# の答えと違うか（シードの decimal の列の値はどれも整数で、
+    /// 小数部の切り捨て〔SQL Server・SQLite〕と丸め〔PostgreSQL・Oracle〕のどちらでも値が変わらない）
+    /// </summary>
+    private static bool WithoutColumnCast(TranslatorParityBinding row) =>
+        DivergesFrom(row, row.PredicateWithout(NarrowingDrop.Column));
+
+    /// <summary>
+    /// 列の値を DB の CAST の値 <paramref name="image"/> に置き換えたシードへ、列の側の変換を外した述語を当てた答えが C# の答えと違うか
+    /// （int の列＝small_child の big_parent_id の行だけ）
+    /// </summary>
+    private static bool DivergesOnColumnImage(TranslatorParityBinding row, Func<int, int> image)
+    {
+        if (row.Entity != BindingEntity.SmallChild)
+        {
+            throw new InvalidOperationException(
+                $"{row.ColumnType} の列は列の値の置き換えを持たない（int の列だけ）"
+            );
+        }
+
+        var imaged = TranslatorParityRuntimeTestsBase
+            .CrossTypeChildren()
+            .Select(seed => new SmallChildEntity
+            {
+                Id = seed.Id,
+                BigParentId = seed.BigParentId is { } value ? image(value) : null,
+            })
+            .ToList<object>();
+        var compiled = row.PredicateWithout(NarrowingDrop.Column).Compile();
+        var hits = imaged
+            .Where(seed => (bool)compiled.DynamicInvoke(seed)!)
+            .Select(seed => (long)((SmallChildEntity)seed).Id)
+            .ToList();
+        var answer =
+            row.QueryPath == TranslatorParityBindingRows.ExecuteUpdate
+                ? $"rows={hits.Count}"
+                : BindingRunOutcome.Keys(hits);
+
+        return AnswerOf(row, row.Predicate) != answer;
+    }
+
+    /// <summary>
+    /// EF Core の Oracle プロバイダが int の列の (byte) に書く <c>TO_NUMBER(列, 'xx')</c> の値：0 以上の値は 10 進の綴りを 16 進として読み
+    /// （シードの 1・2 は変わらない）、負の値の行は折り返した値（255）でなく、比べるどの値（1・2・255・256）とも等しくなく 2 より大きい値に
+    /// なる（2026-11-27 の Docker の実行の観測。値そのものは確かめていないので、byte の範囲の外の int の上限で表す）
+    /// </summary>
+    private static int OracleHexImage(int value) =>
+        value >= 0
+            ? int.Parse(
+                value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                System.Globalization.NumberStyles.AllowHexSpecifier,
+                System.Globalization.CultureInfo.InvariantCulture
+            )
+            : int.MaxValue;
+
     private const string NarrowingSqliteReason =
-        "EF Core の SQLite プロバイダは列の側の (short) などを CAST(列 AS INTEGER) と書き、値を縮めないので、C# が折り返して当てる行・当てない行と黙って答えが割れる（例外にならない。符号だけの変換の (uint) なども同じく負の値を折り返さない＝述語の表の行 int-column-sign-cast-*・in-uint-*-sign-cast-column）";
+        "EF Core の SQLite プロバイダは列の側の (short) などを CAST(列 AS INTEGER) と書き、値を縮めないので、C# が折り返して当てる行・当てない行と黙って答えが割れる（例外にならない。符号だけの変換の (uint) なども同じく負の値を折り返さない＝符号だけの変換の水準の行・規則 SignOnlyColumnCast）";
 
     private const string NarrowingMySqlReason =
         "EF Core の MySQL プロバイダは列の側の (short) などを SQL に書かず変換の無い列と比べるので、C# が折り返して当てる行・当てない行と黙って答えが割れる（例外にならない）"
@@ -398,19 +611,35 @@ internal static class TranslatorParityBindingKnownFailures
     /// 符号だけの変換の振る舞い（2026-11-27 の Docker の実行で 5 方言とも確かめた。SQLite の ulong の大小の比較だけは翻訳が断る）
     /// </summary>
     private const string SignOnlyCastSilent =
-        "。符号だけの変換の (uint)・(ulong) も負の値を折り返さず、例外にならずに黙って割れる（述語の表の行 int-column-sign-cast-*・in-uint-*-sign-cast-column・*-ulong-cast-greater）";
+        "。符号だけの変換の (uint)・(ulong) も負の値を折り返さず、例外にならずに黙って割れる（符号だけの変換の水準の行・規則 SignOnlyColumnCast）";
 
     private const string NarrowingSqlServerReason =
-        "EF Core の SQL Server プロバイダは列の側の (short) などを CAST(列 AS smallint) と書き、smallint に入らない行（bigint の列の long の上限・下限ほか）があると Arithmetic overflow の例外で失敗する。例外にならない実行計画（捕まえた値との等値で観測）でも、C# が折り返して当てる行を当てない"
+        "EF Core の SQL Server プロバイダは列の側の (byte)・(short) を CAST(列 AS tinyint)・CAST(列 AS smallint) と書き、変換先の型に入らない行（int の列の -1 の行・bigint の列の long の上限と下限の行）があると Arithmetic overflow の例外で失敗する（2026-11-27 の Docker の実行：Arithmetic overflow error for data type tinyint, value = -1。例外にならない実行計画〔捕まえた値との等値で観測〕でも、C# が折り返して当てる行を当てない）。decimal の列の (int) は小数部を切り捨て、C# と同じ値になる"
         + SignOnlyCastSilent;
 
     private const string NarrowingPostgreSqlReason =
-        "EF Core の PostgreSQL プロバイダは列の側の (short) などを smallint への CAST と書き、smallint に入らない行（bigint の列の long の上限・下限ほか）がある表では 22003: smallint out of range の例外で必ず失敗する"
+        "EF Core の PostgreSQL プロバイダは列の側の (byte)・(short) を ::smallint と書く。smallint に入らない行（bigint の列の long の上限・下限）がある表では 22003: smallint out of range の例外で必ず失敗し、int の列の (byte) は -1 の行を 255 へ折り返さず -1 のまま比べて黙って割れる（2026-11-27 の Docker の実行：DELETE … WHERE s.big_parent_id::smallint < 1 が -1 の行を消す）"
         + SignOnlyCastSilent;
 
     private const string NarrowingOracleReason =
-        "EF Core の Oracle プロバイダは列の側の (short) などを NUMBER(5) への CAST と書き、5 桁に入らない行（bigint の列の long の上限・下限ほか）がある表では ORA-01438 の例外で必ず失敗する"
+        "EF Core の Oracle プロバイダは列の側の (short) を NUMBER(5) への CAST と書き、5 桁に入らない行（bigint の列の long の上限・下限）がある表では ORA-01438 の例外で必ず失敗する。int の列の (byte) は TO_NUMBER(列, 'xx') と書いて列の 10 進の綴りを 16 進として読み、-1 の行は 255 にならず黙って割れる（2026-11-27 の Docker の実行：= 255・IN (255, 256) が -1 の行に当たらず、< 1 にも <= 1 にも当たらない）"
         + SignOnlyCastSilent;
+
+    /// <summary>等値・IN の比べ方か</summary>
+    private static bool IsEquality(TranslatorParityBinding row) =>
+        row.Levels[TranslatorParityBindingRows.Comparison]
+            is "equal"
+                or "not-equal"
+                or "in"
+                or "not-in";
+
+    /// <summary>大小の比べ方か</summary>
+    private static bool IsOrdering(TranslatorParityBinding row) =>
+        row.Levels[TranslatorParityBindingRows.Comparison]
+            is "less"
+                or "greater-or-equal"
+                or TranslatorParityBindingRows.LessOrEqual
+                or TranslatorParityBindingRows.Greater;
 
     /// <summary>
     /// date の列（SQL Server は日付部品も）と比べる定数・メソッド呼び出しの値で、値の時刻を落とすと C# の答えが変わる行（EF Core が date の
@@ -496,11 +725,7 @@ internal static class TranslatorParityBindingKnownFailures
     private static bool IsIntegerDecimalEquality(TranslatorParityBinding row) =>
         row.ColumnType is TranslatorParityBindingRows.Int or TranslatorParityBindingRows.BigInt
         && row.ComparedType == typeof(decimal)
-        && row.Levels[TranslatorParityBindingRows.Comparison]
-            is "equal"
-                or "not-equal"
-                or "in"
-                or "not-in";
+        && IsEquality(row);
 
     /// <summary>SQL Server の datetime・smalldatetime が値を受け取った形</summary>
     private static Func<object, object> SqlServerRounding(TranslatorParityBinding row) =>

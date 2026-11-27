@@ -49,6 +49,32 @@ internal sealed record SourceScope(
         return new(root, extension, paths, []);
     }
 
+    /// <summary>
+    /// 宣言から導いたファイルの集合（最初に範囲を引くときに 1 回だけ作る。無ければ根の下の全部）。台帳（エンジンの台帳など）から範囲を
+    /// 作る規則が、規則の表を作る間に台帳を読まないための遅延（台帳が規則の数を数えるので、作る間に読むと互いを待つ）
+    /// </summary>
+    public Lazy<IReadOnlySet<string>>? Declared { get; init; }
+
+    /// <summary><see cref="Declared"/> の範囲の短い表記（報告・影響の地図に出す）</summary>
+    public string? Label { get; init; }
+
+    /// <summary>宣言から導いたファイルの集合だけを読む範囲（リポジトリのルートからの相対パス。拡張子は C# のソース）</summary>
+    /// <param name="root">ファイルを列挙するフォルダ</param>
+    /// <param name="label">範囲の短い表記</param>
+    /// <param name="files">読むファイルを返す関数（遅延して 1 回だけ呼ぶ）</param>
+    public static SourceScope FromDeclarations(
+        string root,
+        string label,
+        Func<IReadOnlyList<string>> files
+    ) =>
+        Under(root) with
+        {
+            Label = label,
+            Declared = new Lazy<IReadOnlySet<string>>(() =>
+                files().ToHashSet(StringComparer.Ordinal)
+            ),
+        };
+
     /// <summary>読む領域（根からの相対パスの接頭辞・大文字小文字を区別しない。空なら根の下の全部）</summary>
     public IReadOnlyList<string> Areas { get; init; } = [];
 
@@ -93,6 +119,11 @@ internal sealed record SourceScope(
             return false;
         }
 
+        if (Declared is not null && !Declared.Value.Contains(relativePath))
+        {
+            return false;
+        }
+
         if (
             Areas.Count > 0
             && !Areas.Any(prefix => area.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
@@ -108,11 +139,11 @@ internal sealed record SourceScope(
 
     /// <summary>範囲の表記（報告用）</summary>
     public override string ToString() =>
-        Only.Count > 0
-            ? string.Join(", ", Only)
-            : $"{Root}/**/*{Extension}"
-                + (Areas.Count > 0 ? $" (within {string.Join(", ", Areas)})" : "")
-                + string.Concat(Exclusions.Select(exclusion => $" - {exclusion.AreaPrefix}"));
+        Only.Count > 0 ? string.Join(", ", Only)
+        : Label is not null ? Label
+        : $"{Root}/**/*{Extension}"
+            + (Areas.Count > 0 ? $" (within {string.Join(", ", Areas)})" : "")
+            + string.Concat(Exclusions.Select(exclusion => $" - {exclusion.AreaPrefix}"));
 }
 
 /// <summary>範囲の除外（根からの相対パスの接頭辞と理由）</summary>

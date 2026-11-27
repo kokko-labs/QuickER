@@ -148,6 +148,14 @@ Kestrel は本文の読み取りの例外を先に投げ、`RequestAborted` は�
 - ガード：実装先の一致のシナリオ `remote-save-writes-back-hook-values`・`remote-write-back-by-position`（Remote・RemoteEfCoreOnly）、`IdentityColumnRemoteEfCoreSqlServerRuntimeTests`（EF Core のサーバー・実 SQL Server の採番列が Insert / Save / Update で戻る・Docker）、`RemoteSaveResponseClientTests`（応答を差し替えた HTTP）、`EditModelSaveRuntimeTestsBase` の Before フックのシナリオ（リモートの派生でも流す）、`h3-edit-then-skip-*`・`hook-edit-then-continue-delete`（Remote・RemoteEfCoreOnly の slots）。mutation 実証済み。
 - `CollectSaveRows` が削除行を飛ばさないようにしても緑のまま（両側が同じ関数で並びを作るので食い違わない）。サーバーの一覧を保存の後に作っても緑のまま（EF Core の保存が渡したエンティティのナビゲーションを元へ戻すため）。保存の前に作る形は二重の守りとして残す。
 
+## DateTime は Kind を落として運ぶ
+
+- `RemoteJson.Options` は、入れ子の非公開の変換器 `KindlessDateTimeConverter` で DateTime を時差も `Z` も付けない往復書式で書き、tick を保って `DateTimeKind.Unspecified` で読む。DateTime? と配列は System.Text.Json が同じ変換器で扱い、値オブジェクトの中の DateTime は `ValueObjectJsonConverter` が同じ設定で書くので同じに運ぶ。DateTimeOffset には当てない（時差ごと運ぶ）。登録は値オブジェクトの有無の 2 つの枝（`_06_RemoteSaveInfraAndDI.scriban`）の両方にある。公開 API の面は変えない。
+  - CRUD・保存の応答・URL のキー・名前付きクエリの引数・双方向同期の HTTP の差分ソース（`HttpSyncServerSource` は `HttpRemoteRepositoryCore` を継ぐ）が、どれもこの設定を通る。
+  - 理由：System.Text.Json の既定は Local の値を書いた側の時差つきで書き、読む側の時差の Local へ換算して読む。クライアントとサーバーの時差が違うと保存される時刻がずれ、暦の両端の Local の値は範囲の外へ出て 400 になる（値のプールの正本の区切りで、実装先どうしの一致の値の幅＝暦の最初の Local がリモートで 400 になって見つけた）。DB の実装先は DateTime を Unspecified で読み戻す（docs のインメモリの節）ので、転送も同じ形にそろえた。
+  - 変換器は時差つきの文字列を書かない。読むときに時差つきの文字列（この変換器が書かない形）が来たら既定の規則で読み、`Z` つきの文字列は tick を保って Unspecified で読む。
+- ガード：`CodegenCaseTests` の行 `exec-remote-json-datetime-travels-without-kind`・`exec-remote-json-datetime-travels-without-kind-value-objects`（生成した `RemoteJson.Options` で、Local・Utc・Unspecified と暦の両端の DateTime・DateTime?・配列・値オブジェクトを書いて読み、時差の文字が無い・tick が同じ・Kind が Unspecified。この機の時差に依らない）・実装先どうしの一致の値の幅（`GeneratedRuntime/ParityValues`＝暦の端 × Kind をリモートの実装先でも流す）。mutation 実証済み（書く側の Kind の落としを外す・読む側の Kind の落としを外す・値オブジェクトありの枝の登録を外す・値オブジェクトなしの枝の登録を外す、の各回で対応する行が赤）。
+
 ## 除外した無制限バイナリ列を値として運ばない
 
 - blob はバイナリのエンドポイントだけで運ぶ。除外した無制限バイナリ列を、JSON の通信では値として運ばない。
