@@ -741,7 +741,8 @@ public sealed record SyncLocalTrigger(string Name, string TableName, string Sql)
 /// synchronised table: its table, its key as the table stores it, whether it is still to be sent (<c>dirty</c>), whether
 /// it was deleted, the unbounded binary columns written since it was last sent, and the number of its latest change.
 /// It also has columns only the engine writes (<c>base_version</c>, <c>known</c>, <c>sw_seq</c>, <c>blob_owed</c>,
-/// <c>applied_version</c>: the version of the latest content of another writer the engine put into the row).
+/// <c>applied_version</c>: the version of the latest content of another writer the engine put into the row,
+/// <c>owed_key</c>: the server key the owed binary columns are copied from when it is not the row's own key).
 /// The anchor table <c>quicker_sync_table</c> holds one row per synchronised table: where its next download resumes
 /// (<c>anchor</c>).
 /// </para>
@@ -751,7 +752,10 @@ public sealed record SyncLocalTrigger(string Name, string TableName, string Sql)
 /// named here, so the engine's columns of <c>quicker_sync_row</c> keep their values across a delete, a re-insert under
 /// the same key and a change of the primary key. The one exception is the change of a primary key: the row's new key
 /// takes the <c>applied_version</c> of its old key, since the content the engine put under the old key is what moved,
-/// and records every unbounded binary column, since a server row under the new key holds other blobs.
+/// and records every unbounded binary column, since a server row under the new key holds other blobs - except the columns
+/// the old key still owes from the server and this device has not written since: the new key owes those instead
+/// (<c>blob_owed</c>), copied from the server's row under the old key (<c>owed_key</c>, which a key moved again keeps),
+/// since the local value of such a column is not the row's content yet.
 /// </para>
 /// </remarks>
 public static class SyncLocalTracking
@@ -797,6 +801,11 @@ public static class SyncLocalTracking
     /// <summary>The declaration of the engine's column <c>applied_version</c> of the row state table.</summary>
     private const string AppliedVersionColumn = "applied_version BLOB NULL";
 
+    /// <summary>
+    /// The declaration of the engine's column <c>owed_key</c> of the row state table (no declared type, like the key column).
+    /// </summary>
+    private const string OwedKeyColumn = "owed_key";
+
     /// <summary>The statement that creates the row state table when it is missing.</summary>
     /// <remarks>The key column has no declared type, so it keeps each key exactly as the synchronised table stores it.</remarks>
     private const string CreateRowTableSql =
@@ -816,6 +825,8 @@ public static class SyncLocalTracking
         + BlobOwedColumn
         + ", "
         + AppliedVersionColumn
+        + ", "
+        + OwedKeyColumn
         + ", "
         + "PRIMARY KEY (table_name, \"key\"))";
 
@@ -867,6 +878,37 @@ public static class SyncLocalTracking
         var keyChanged = $"{oldKey} IS NOT {newKey}";
         var allBinaryColumns = Text(string.Join(",", accessorNames));
 
+        // One engine column of the state of the row's old key, as a subquery
+        string Moved(string column) =>
+            $"(SELECT moved.{column} FROM {SyncLocalTracking.RowTableName} AS moved "
+            + $"WHERE moved.table_name = {tableText} AND moved.\"key\" = {oldKey})";
+
+        // Whether the old key still owes a column (to copy down from the server) that this device has not written since:
+        // its local value is not this device's content, so the column moves to the new key as still owed
+        string Carried(string accessorName)
+        {
+            var name = Text("," + accessorName + ",");
+
+            return $"(instr(',' || COALESCE({Moved("blob_owed")}, '') || ',', {name}) > 0 "
+                + $"AND instr(',' || COALESCE({Moved("blob_columns")}, '') || ',', {name}) = 0)";
+        }
+
+        // The columns the new key owes (carried) and the ones it sends (every other column), comma separated
+        string ColumnList(bool carried) =>
+            accessorNames.Count == 0
+                ? "''"
+                : "trim("
+                    + string.Join(
+                        " || ",
+                        accessorNames.Select(name =>
+                            carried
+                                ? $"CASE WHEN {Carried(name)} THEN {Text(name + ",")} ELSE '' END"
+                                : $"CASE WHEN {Carried(name)} THEN '' ELSE {Text(name + ",")} END"
+                        )
+                    )
+                    + ", ',')";
+        var carriedOwed = ColumnList(carried: true);
+
         var triggers = new List<SyncLocalTrigger>(3 + accessorNames.Count)
         {
             // An insert records the row with every excluded binary column, since the insert wrote them all.
@@ -883,7 +925,10 @@ public static class SyncLocalTracking
             // An update records the row under its new key and, when the key changed, the old key as deleted. A row moved
             // to another key takes every excluded binary column there (a server row under that key holds other blobs),
             // and the version of the latest content of another writer the engine put under its old key: that content is
-            // what moved, so a row saved from an entity read before it came down is still told apart
+            // what moved, so a row saved from an entity read before it came down is still told apart. A column the old
+            // key still owes from the server (and this device has not written) moves as owed instead, with the server key
+            // to copy it from (the old key, or the key it was owed from before), so the copy that does not hold the
+            // server's blob yet is not sent as the row's content
             Create(
                 table,
                 "au",
@@ -892,9 +937,9 @@ public static class SyncLocalTracking
                     + $"CASE WHEN {keyChanged} THEN {allBinaryColumns} ELSE '' END, {NextSequence}) "
                     + $"{RowConflict} dirty = 1, deleted = 0, change_seq = excluded.change_seq, "
                     + $"blob_columns = CASE WHEN {keyChanged} THEN excluded.blob_columns ELSE blob_columns END; "
-                    + $"UPDATE {SyncLocalTracking.RowTableName} SET applied_version = "
-                    + $"(SELECT moved.applied_version FROM {SyncLocalTracking.RowTableName} AS moved "
-                    + $"WHERE moved.table_name = {tableText} AND moved.\"key\" = {oldKey}) "
+                    + $"UPDATE {SyncLocalTracking.RowTableName} SET applied_version = {Moved("applied_version")}, "
+                    + $"blob_owed = {carriedOwed}, blob_columns = {ColumnList(carried: false)}, "
+                    + $"owed_key = CASE WHEN {carriedOwed} <> '' THEN COALESCE({Moved("owed_key")}, {oldKey}) END "
                     + $"WHERE {keyChanged} AND table_name = {tableText} AND \"key\" = {newKey}; "
                     + $"{AdvanceSequence}; "
                     + $"INSERT INTO {RowColumns} SELECT {tableText}, {oldKey}, 1, 1, '', {NextSequence} "
@@ -2519,6 +2564,12 @@ internal sealed record SyncRowState
 
     /// <summary>The unbounded binary columns still to be copied down from the server (accessor names, comma separated).</summary>
     public string BlobOwed { get; init; } = string.Empty;
+
+    /// <summary>
+    /// The server key the owed columns are copied from, as the row state table stores it, when it is not the row's own key
+    /// (a row moved to another key while it still owed them; null otherwise).
+    /// </summary>
+    public object? OwedKey { get; init; }
 }
 
 /// <summary>
@@ -2534,7 +2585,7 @@ internal static class SyncState
 {
     /// <summary>The columns of a row state read, in the order <see cref="ReadRowState"/> reads them.</summary>
     private const string RowStateColumns =
-        "\"key\", base_version, known, dirty, change_seq, blob_columns, blob_owed";
+        "\"key\", base_version, known, dirty, change_seq, blob_columns, blob_owed, owed_key";
 
     /// <summary>
     /// Whether one server version is older than another: the versions are read as big-endian unsigned integers, so the one
@@ -2670,7 +2721,9 @@ internal static class SyncState
     /// change number is still the one read - that it has nothing more to send. A write that overwrote the server's row
     /// without a version check also forgets the version of the other writer's content put into the row (whatever the
     /// change number): that content is overwritten, so an entity read before it came down no longer saves over it. Any
-    /// other write keeps that version, since this device's own write is not another writer's content.
+    /// other write keeps that version, since this device's own write is not another writer's content. The server's row
+    /// under the key now holds what was sent, so a column still owed is owed from it, not from a key the row moved from
+    /// (<c>owed_key</c> is cleared).
     /// </summary>
     /// <param name="connection">An open connection to the local database.</param>
     /// <param name="tableName">The synchronised table.</param>
@@ -2695,7 +2748,7 @@ internal static class SyncState
                 + " SET base_version = @version, known = 1, "
                 + "dirty = CASE WHEN change_seq = @seq THEN 0 ELSE dirty END, "
                 + "deleted = CASE WHEN change_seq = @seq THEN 0 ELSE deleted END, "
-                + "blob_columns = CASE WHEN change_seq = @seq THEN '' ELSE blob_columns END, "
+                + "blob_columns = CASE WHEN change_seq = @seq THEN '' ELSE blob_columns END, owed_key = NULL, "
                 + "applied_version = CASE WHEN @forced = 1 THEN NULL ELSE applied_version END "
                 + "WHERE table_name = @table AND \"key\" = @key",
             cancellationToken,
@@ -3039,6 +3092,8 @@ internal static class SyncState
     /// <summary>
     /// Records that a row now holds the server's content: its base version, that the server knows it, and no unsent
     /// change. A non-empty <paramref name="owed"/> replaces the columns still to be copied down; an empty one keeps them.
+    /// Either way they are owed from the server's row under the row's own key (<c>owed_key</c> is cleared: a row moved here
+    /// and then replaced, as a forced refresh replaces it, no longer holds the content it moved with).
     /// </summary>
     /// <remarks>
     /// The version also becomes the version of the latest content of another writer put into the row
@@ -3070,7 +3125,7 @@ internal static class SyncState
                 + "applied_version = CASE WHEN base_version IS excluded.base_version THEN applied_version "
                 + "ELSE excluded.base_version END, "
                 + "base_version = excluded.base_version, known = 1, "
-                + "dirty = 0, deleted = 0, blob_columns = '', sw_seq = NULL, "
+                + "dirty = 0, deleted = 0, blob_columns = '', sw_seq = NULL, owed_key = NULL, "
                 + "blob_owed = CASE WHEN @owed = '' THEN blob_owed ELSE @owed END",
             cancellationToken,
             ("@table", tableName),
@@ -3163,6 +3218,38 @@ internal static class SyncState
             "UPDATE " + SyncLocalTracking.RowTableName + " SET blob_owed = @owed WHERE table_name = @table AND \"key\" = @key",
             cancellationToken,
             ("@owed", owed),
+            ("@table", tableName),
+            ("@key", rawKey)
+        );
+
+    /// <summary>
+    /// Records the copy of the owed columns of a row moved to another key: the columns still owed, and the columns the
+    /// upload sends under the new key (the copies, with the columns written here). The key the columns were owed from stays
+    /// until the row is sent (<see cref="SettleSentAsync"/>) or takes the server's content (<see cref="WriteAppliedRowAsync"/>);
+    /// with nothing owed, it is read by nothing.
+    /// </summary>
+    /// <param name="connection">An open connection to the local database.</param>
+    /// <param name="tableName">The synchronised table.</param>
+    /// <param name="rawKey">The key as the row state table stores it.</param>
+    /// <param name="owed">The columns still owed (accessor names, comma separated; empty when none is).</param>
+    /// <param name="send">The columns to send (accessor names, comma separated).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    public static Task WriteMovedOwedAsync(
+        DbConnection connection,
+        string tableName,
+        object rawKey,
+        string owed,
+        string send,
+        CancellationToken cancellationToken
+    ) =>
+        ExecuteAsync(
+            connection,
+            "UPDATE "
+                + SyncLocalTracking.RowTableName
+                + " SET blob_owed = @owed, blob_columns = @send WHERE table_name = @table AND \"key\" = @key",
+            cancellationToken,
+            ("@owed", owed),
+            ("@send", send),
             ("@table", tableName),
             ("@key", rawKey)
         );
@@ -3271,6 +3358,7 @@ internal static class SyncState
             ChangeSequence = reader.GetInt64(4),
             BlobColumns = reader.GetString(5),
             BlobOwed = reader.GetString(6),
+            OwedKey = reader.IsDBNull(7) ? null : reader.GetValue(7),
         };
 }
 
@@ -4987,6 +5075,14 @@ public sealed class SyncEngine
         CancellationToken cancellationToken
     )
     {
+        // A row moved to another key while it owed binary columns copies them from the server's row under the key it owes
+        // them from before anything is sent: the delete of the old key, sent by this upload, takes that row with it. A
+        // copy that fails ends the run before anything is sent, as any copy does
+        if (options.IncludeUnboundedBinary)
+        {
+            await CopyOwedBinariesAsync(scope, cancellationToken, movedOnly: true).ConfigureAwait(false);
+        }
+
         var byName = scope.ToDictionary(table => table.TableName, StringComparer.Ordinal);
         List<SyncQueued> queue;
 
@@ -7246,7 +7342,21 @@ public sealed class SyncEngine
     /// device wrote since (still unsent) is not copied; a column NULL on the server clears the local column; a row the
     /// server no longer has, or a row gone locally, only stops owing.
     /// </summary>
-    private async Task CopyOwedBinariesAsync(List<SyncTable> scope, CancellationToken cancellationToken)
+    /// <remarks>
+    /// A row moved to another key while it owed columns copies them from the server's row under the key it owes them from
+    /// (<see cref="SyncRowState.OwedKey"/>), and then names them as written, so the upload sends them under the new key:
+    /// the server's row under the new key holds other blobs, and the server's row under the old key goes with the delete
+    /// of the old key. With no server row to copy from, the columns are named as written all the same, and the local value
+    /// is what goes.
+    /// </remarks>
+    /// <param name="scope">The tables of the run.</param>
+    /// <param name="movedOnly">Whether to copy only the rows moved to another key (the copy made before the upload).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    private async Task CopyOwedBinariesAsync(
+        List<SyncTable> scope,
+        CancellationToken cancellationToken,
+        bool movedOnly = false
+    )
     {
         foreach (var table in scope)
         {
@@ -7264,7 +7374,7 @@ public sealed class SyncEngine
                     .ConfigureAwait(false);
             }
 
-            foreach (var owedRow in owedRows)
+            foreach (var owedRow in owedRows.Where(row => !movedOnly || row.OwedKey is not null))
             {
                 await CopyOwedRowAsync(table, owedRow, cancellationToken).ConfigureAwait(false);
             }
@@ -7279,6 +7389,8 @@ public sealed class SyncEngine
     )
     {
         var key = table.KeyOfRaw(owedRow.RawKey);
+        // A row moved to another key copies from the server's row under the key it owes the columns from
+        var source = owedRow.OwedKey is { } owedKey ? table.KeyOfRaw(owedKey) : key;
         var owed = SplitColumns(owedRow.BlobOwed);
         var written = SplitColumns(owedRow.BlobColumns);
         var wanted = owed.Where(column => !written.Contains(column)).ToList();
@@ -7295,7 +7407,7 @@ public sealed class SyncEngine
                 var file = CreateTemporaryFile();
                 files.Add((column, file));
 
-                if (await table.ReadServerBinaryAsync(column, key, file, cancellationToken).ConfigureAwait(false))
+                if (await table.ReadServerBinaryAsync(column, source, file, cancellationToken).ConfigureAwait(false))
                 {
                     file.Position = 0;
                 }
@@ -7307,10 +7419,11 @@ public sealed class SyncEngine
             }
 
             // A row the server no longer has leaves the local columns as they are (the row goes with the delete propagation
-            // or stays because something refers to it, and a NOT NULL column cannot be cleared); it only stops owing
+            // or stays because something refers to it, and a NOT NULL column cannot be cleared); it only stops owing. A moved
+            // row whose server row to copy from is gone keeps its local columns the same way, and sends them
             if (
                 files.Any(entry => entry.File is null)
-                && !await table.ServerHasAsync(table.KeyText(key), cancellationToken).ConfigureAwait(false)
+                && !await table.ServerHasAsync(table.KeyText(source), cancellationToken).ConfigureAwait(false)
             )
             {
                 foreach (var (_, file) in files)
@@ -7351,15 +7464,33 @@ public sealed class SyncEngine
                         }
                     }
 
-                    await SyncState
-                        .WriteOwedAsync(
-                            connection,
-                            table.TableName,
-                            owedRow.RawKey,
-                            string.Join(",", currentOwed.Where(column => !owed.Contains(column))),
-                            cancellationToken
-                        )
-                        .ConfigureAwait(false);
+                    var stillOwed = string.Join(",", currentOwed.Where(column => !owed.Contains(column)));
+
+                    if (current.OwedKey is null)
+                    {
+                        await SyncState
+                            .WriteOwedAsync(connection, table.TableName, owedRow.RawKey, stillOwed, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        // A moved row sends what it now holds under its new key: the copies, or its local columns when
+                        // the server row to copy from is gone
+                        var send = currentWritten
+                            .Concat(owed.Where(column => currentOwed.Contains(column)))
+                            .Distinct(StringComparer.Ordinal)
+                            .Order(StringComparer.Ordinal);
+                        await SyncState
+                            .WriteMovedOwedAsync(
+                                connection,
+                                table.TableName,
+                                owedRow.RawKey,
+                                stillOwed,
+                                string.Join(",", send),
+                                cancellationToken
+                            )
+                            .ConfigureAwait(false);
+                    }
                 }
 
                 await SyncState.SetApplyingAsync(connection, false, cancellationToken).ConfigureAwait(false);

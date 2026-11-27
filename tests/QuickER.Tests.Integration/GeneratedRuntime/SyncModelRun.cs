@@ -89,6 +89,12 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     /// <summary>blob を書いた後でその品目が削除された（作り直されたら blob の期待値を決めない＝N12 (ii)）</summary>
     private readonly HashSet<string> _blobHistoryCut = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// 品目のキー → 最後に書き手がその品目を消した時点の blob の履歴の長さ（空の blob の判定は、それより後の書き込みだけを
+    /// 空でない blob の書き手に数える。消した品目の blob は削除と一緒に消えた）
+    /// </summary>
+    private readonly Dictionary<string, int> _blobDeletedAt = new(StringComparer.Ordinal);
+
     /// <summary>だれかが消したことのある品目（行の書き手の操作として見えたもの）</summary>
     private readonly HashSet<string> _deletedItems = new(StringComparer.Ordinal);
 
@@ -714,23 +720,34 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
         // 書き込みの前後の内容を比べ、実際に変わった行と blob だけを履歴へ積む（失敗した書き込み・フックが飛ばした
         // 書き込みは何も積まない。キーを決めるフックが変えたキーも、変わった行として拾える）
         var after = await _world.ReadStateAsync(op.Actor, _ct);
+        var succeeded = applied && _world.Faults.Fired == firedBefore ? op : null;
+        // 遅れている blob の行の付け替えは、付け替え先の blob の期待を付け替えの時点のサーバーの写す元のキーから決める
+        var behindBlobs = await BehindMoveBlobsAsync(op.Actor, succeeded, after);
         // 成功した手（失敗も注入した失敗・フックの飛ばしも無い）は、内容が変わらなくても手が名指しする行の持ち分を立てる
-        NoteWrite(
-            op.Actor,
-            before,
-            after,
-            tracked: true,
-            op.Describe(),
-            applied && _world.Faults.Fired == firedBefore ? op : null
-        );
-        RecordChanges(op.Actor, before, after);
+        NoteWrite(op.Actor, before, after, tracked: true, op.Describe(), succeeded, behindBlobs);
+        RecordChanges(op.Actor, before, after, succeeded, behindBlobs);
         await CheckNewForeignKeyViolationsAsync(op.Actor, foreignKeysBefore, op.Describe());
 
         return applied;
     }
 
-    private void RecordChanges(ModelActor actor, ModelDbState before, ModelDbState after)
+    /// <param name="actor">書き手</param>
+    /// <param name="before">書き込みの前の書き手の DB</param>
+    /// <param name="after">書き込みの後の書き手の DB</param>
+    /// <param name="op">成功した書き込みの手（付け替えの扱いだけが見る。失敗した手と手でない書き込みは null）</param>
+    /// <param name="behindMoves">
+    /// 遅れている blob の行を動かす付け替えの組（付け替え先 → 写す元のキーと送るべき blob。<see cref="BehindMoveBlobsAsync"/>）
+    /// </param>
+    private void RecordChanges(
+        ModelActor actor,
+        ModelDbState before,
+        ModelDbState after,
+        ModelWriteOp? op = null,
+        IReadOnlyDictionary<string, (string Origin, string Blob)>? behindMoves = null
+    )
     {
+        behindMoves ??= new Dictionary<string, (string Origin, string Blob)>();
+
         foreach (var table in ModelTables.All)
         {
             var was = before.Rows(table);
@@ -767,6 +784,10 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                     if (table == ModelTables.Items && newRow is null)
                     {
                         _deletedItems.Add(key);
+                        // 空の blob の判定は、この削除より後の書き込みだけを見る（この削除で、それまでの blob は消えた）
+                        _blobDeletedAt[key] = _blobs.TryGetValue(key, out var written)
+                            ? written.Count
+                            : 0;
                     }
                 }
             }
@@ -779,7 +800,12 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             if (!oldPayloads.TryGetValue(key, out var oldHex) || oldHex != hex)
             {
                 NoteInitialContested(actor, ModelTables.Items, key);
-                Append(_blobs, key, (actor, hex));
+
+                // 遅れている blob の行の付け替え先は、端末の値でなく写す元のキーのサーバーの blob を積む（下の呼び出し）
+                if (!behindMoves.ContainsKey(key))
+                {
+                    Append(_blobs, key, (actor, hex));
+                }
 
                 // 追跡しない行に端末が初めて書いたのが blob だけ：その行の内容もこの端末の内容としてサーバーへ挿入される
                 if (
@@ -791,6 +817,8 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 }
             }
         }
+
+        NoteBlobBehindWrite(actor, op, behindMoves, before, after);
     }
 
     private async Task<bool> SyncAsync(ModelSyncOp op, bool quiescing)
@@ -1084,7 +1112,11 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
     public IReadOnlyList<(SyncMode Mode, SyncConflictPolicy Policy, string Outcome)> Outcomes =>
         _outcomes;
 
-    /// <summary>消された品目のうち、この同期の前にサーバーに無く、後にあるもの＝この端末が上げ直したものを控える。</summary>
+    /// <summary>
+    /// 消された品目のうち、この同期の前にサーバーに無く、後にあるもの＝この端末が上げ直したものを控える。上げ直した端末の
+    /// blob が空なら控えない（端末は空でない blob を持っていない＝写し待ちの代わりの値のまま上げ直した。本当の blob は
+    /// サーバーの削除で消えた）
+    /// </summary>
     private async Task RecordRecreatorsAsync(ModelActor device, HashSet<string>? serverItemsBefore)
     {
         if (serverItemsBefore is null)
@@ -1092,13 +1124,19 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
             return;
         }
 
+        var localPayloads = (await _world.ReadStateAsync(device, _ct)).Payloads();
+
         foreach (
             var key in (await _world.ReadStateAsync(ModelActor.Server, _ct))
                 .Rows(ModelTables.Items)
                 .Keys
         )
         {
-            if (!serverItemsBefore.Contains(key) && _deletedItems.Contains(key))
+            if (
+                !serverItemsBefore.Contains(key)
+                && _deletedItems.Contains(key)
+                && localPayloads.GetValueOrDefault(key) is not (null or "" or "NULL")
+            )
             {
                 if (!_recreators.TryGetValue(key, out var set))
                 {
@@ -2310,12 +2348,22 @@ internal sealed partial class SyncModelRun : IAsyncDisposable
                 // 消された品目を上げ直した端末も、その品目の blob の書き手に数える（作り直しの挿入が blob を運ぶ＝その
                 // 送信が失敗すると空の blob が残る。種 982）。根拠になるのは、その端末の記録が競合として報告されたか、
                 // ServerWins に捨てられたことだけ
+                // 書き手が品目を消したなら、その削除より前の書き込み（初期データを含む）は削除と一緒に消えた。削除の後に
+                // 空でない blob を書いた（上げ直した）端末が無ければ、空でそろってよい（写し待ちの代わりの空の値のまま上げ直した形）
+                var deletedAt = _blobDeletedAt.TryGetValue(key, out var cut) ? cut : (int?)null;
                 var nonEmptyWriters = history
+                    .Skip(deletedAt ?? 0)
                     .Where(h => h.Hex is not ("" or "NULL"))
                     .Select(h => h.Actor)
                     .Concat(_recreators.GetValueOrDefault(key) ?? [])
                     .Distinct()
                     .ToList();
+
+                if (deletedAt is not null && nonEmptyWriters.Count == 0)
+                {
+                    continue;
+                }
+
                 var lostByPolicy =
                     nonEmptyWriters.Count > 0
                     && conflicted is not null

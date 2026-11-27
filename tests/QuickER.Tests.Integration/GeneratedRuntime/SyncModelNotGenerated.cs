@@ -95,6 +95,27 @@ internal static class SyncModelNotGenerated
                         + " の行 `rekey-onto-locally-deleted-key-uploads-rows-and-blobs-collect`・`table:SyncTriggerRecording` の行 `primary-key-change-int` / `primary-key-change-text` / `primary-key-change-datetime`"
                 ),
                 NotGenerated.Accepted(
+                    "rekey-rows-with-owed-blobs",
+                    "写し待ちの blob を持つ品目（降ろした行の blob の写しがまだの行）の主キーの付け替えを、決まって出す形",
+                    "生成器と判定役は端末の状態の表を読まない（台帳の規則）ので、付け替える行が写し待ちかを生成器が選べない。写し待ちは列を運ぶ実行の写しの失敗（注入した BlobDownload）か版のガードを外した上書きの後にだけ残り、乱数の列でその行を付け替える形は失敗の注入の組の種でまれにしか出ない（夜間の種 555 で初めて出た）。付け替えの形 3 つ × blob の状態（端末が持っている・写し待ちの新しい行・写し待ちの書き直された行）×（ポリシー 3・付け替えの後の写しと送信の失敗）は決まった形の行が水準で交差させ、全転送で流す",
+                    Random
+                        + " の行 `rekey-onto-locally-deleted-key-owed-new-row-uploads-rows-and-blobs-collect` / `rekey-fresh-key-owed-rewritten-row-uploads-rows-and-blobs-collect` / `rekey-swap-through-temporary-key-owed-new-row-copy-fails-then-next-sync-uploads`"
+                ),
+                NotGenerated.Accepted(
+                    "rekey-owed-rows-moved-with-runs-not-carrying-blobs",
+                    "写し待ちの blob を持つ品目の付け替えに、blob を運ばない実行を挟む形",
+                    "docs の「無制限バイナリ列」の節（列を運ぶかどうかは端末ごとに決め、変えない）と既知の制限：運ばない実行は送る前に写さないので、その実行が付け替えを送ると、付け替えた行は blob 無しで送られ、元のキーの削除でサーバーの元の blob が消え、付け替え先の blob は端末の代わりの値かサーバーに前からあった blob のまま残る。乱数の列は常に運ぶ（作らない形 blobs-not-carried）。送らずに捨てる運ばない実行（Versioned の ServerWins）の後は、戻したキーがそのキーのサーバーの blob を写し、決まった形の行が持つ",
+                    Random
+                        + " の行 `rekey-onto-locally-deleted-key-owed-rewritten-row-serverwins-without-blobs-then-sync-copies-own-blobs`"
+                ),
+                NotGenerated.Pending(
+                    "rekey-onto-key-during-pre-upload-copy",
+                    "送信の前の写し（付け替えた行の写し待ちを元のキーから写す）の最中に、端末が同じキーへ写し待ちを持つ別の行を付け替える形",
+                    "（未起動）",
+                    "写しはサーバーの元のキーの blob を一時ファイルへ読んでから、書き込みのロックの中でそのキーの行へ書く。読む間に端末がそのキーへ別の付け替えを流すと、前の写す元の blob が後から来た行へ書かれ、その行の写し待ちは消える（docs の既知の制限）。割り込みの点は blob の読み出しに無く、生成器も決まった形の行もこの形を作らない",
+                    NotGenerated.Unguarded
+                ),
+                NotGenerated.Accepted(
                     "copied-device-databases",
                     "別の端末やバックアップの DB の写し（行の状態の表・再開点の表ごと）で始める端末",
                     "docs に約束が無い。行の状態の表（未送信の印・基準の版）と表ごとの再開点は端末の DB の中の記録で、サーバーは端末ごとの状態を持たず、生成されるランタイムは端末の識別子を持たないので、複製した 2 台は同じ未送信の変更を二重に上げ、時間を戻した端末の基準の版と再開点は古い",

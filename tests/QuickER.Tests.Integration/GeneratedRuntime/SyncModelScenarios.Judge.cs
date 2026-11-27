@@ -811,6 +811,47 @@ internal static partial class SyncModelScenarios
             ),
             ExpectedJudgeSignatures = new HashSet<string>(),
         };
+
+        // blob の期待（遅れている blob の付け替え）：サーバーが品目 1 の blob を書き直した後、降ろす同期で写しが落ち、端末の
+        // blob は前の値のまま。端末が品目 1 を新しいキーへ付け替えた後の実行の前に、エンジンが付け替え先の写し待ちを忘れて
+        // blob の列を全部名指しする（端末の前の blob を送る）。付け替え先の blob の期待はサーバーの元のキーの blob なので、
+        // 送られた前の blob は誰も付け替え先へ書いていない値になり（照合の blob の期待）、付け替え先の blob の持ち分（送るべき
+        // blob）は端末からもサーバーからも消える（照合 3）
+        yield return new(
+            "judge-moved-behind-blob-sent-from-device-is-invented",
+            [Folder(SV, 1), Item(SV, 1, folder: 1), Item(SV, 2, folder: 1)],
+            [
+                new WritePayloadOp(SV, 1, "0C0C"),
+                new ArmFaultOp(D1, ModelFaultKind.BlobDownload),
+                new ExpectThrowOp(D1),
+                Plain(D1),
+                new ExpectPayloadOp(D1, 1, "0A0B0001"),
+                new RekeyItemOp(D1, 1, RekeyFreshKey, RekeyShape.Fresh),
+                Plain(D1),
+            ]
+        )
+        {
+            Transports = DirectOnly,
+            JudgeDevice = new(
+                true,
+                [
+                    new JudgeBreak(JudgeBreakKind.WriteLocalBeforeRun, D1, 1, OnRun: 3)
+                    {
+                        Statements =
+                        [
+                            "UPDATE quicker_sync_row SET blob_columns = 'Payload', blob_owed = '' "
+                                + "WHERE table_name = 'model_items' AND dirty = 1 AND deleted = 0 "
+                                + "AND blob_owed <> ''",
+                        ],
+                    },
+                ]
+            ),
+            ExpectedJudgeSignatures = new HashSet<string>
+            {
+                "3/blob-invented:model_items",
+                "5/local-discard:model_items:payload",
+            },
+        };
     }
 
     /// <summary>親のフォルダーが無いラベルを入れる文（外部キーの検査を切った接続で流す）</summary>
