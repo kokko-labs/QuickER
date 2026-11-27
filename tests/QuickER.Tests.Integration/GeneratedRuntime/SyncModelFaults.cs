@@ -297,6 +297,47 @@ internal sealed class SyncModelFaults
         }
     }
 
+    // 差分・ページの取得がエンジンへ返した品目の行（端末・品目のキー）。判定役の台帳が、その実行で端末へ届いた行を見分ける
+    private readonly List<(ModelActor Device, string Key)> _fetchedItems = [];
+
+    /// <summary>同期中の端末の取得が返した品目の行を控える（サーバー役の取得の口が通す。転送に依らない）</summary>
+    private void NoteFetchedItems<TEntity>(IReadOnlyList<TEntity> rows)
+    {
+        if (Syncing is not { } device)
+        {
+            return;
+        }
+
+        lock (_fetchedItems)
+        {
+            foreach (var item in rows.OfType<ModelItemEntity>())
+            {
+                _fetchedItems.Add((device, ModelDbState.Key(item.ItemId)));
+            }
+        }
+    }
+
+    /// <summary>これまでに取得が返した品目の行（端末・品目のキー）の数</summary>
+    public int FetchedItemCount
+    {
+        get
+        {
+            lock (_fetchedItems)
+            {
+                return _fetchedItems.Count;
+            }
+        }
+    }
+
+    /// <summary><paramref name="from"/> 番目から後に取得が返した品目の行（端末・品目のキー）</summary>
+    public IReadOnlyList<(ModelActor Device, string Key)> FetchedItemsSince(int from)
+    {
+        lock (_fetchedItems)
+        {
+            return [.. _fetchedItems.Skip(from)];
+        }
+    }
+
     /// <summary><paramref name="from"/> 番目から後に BlobDownload の失敗が当たった（端末・品目のキー）</summary>
     public IReadOnlyList<(ModelActor Device, string Key)> BlobReadHitsSince(int from)
     {
@@ -424,6 +465,8 @@ internal sealed class SyncModelFaults
     )
         where TEntity : EntityBase, new()
     {
+        NoteFetchedItems(rows);
+
         if (rows.Count > 0)
         {
             await InterruptAsync(ModelInterruptPoint.AfterServerFetchBeforeApply)
@@ -442,6 +485,8 @@ internal sealed class SyncModelFaults
     )
         where TEntity : EntityBase, new()
     {
+        NoteFetchedItems(batch.Rows);
+
         if (batch.Rows.Count > 0)
         {
             await InterruptAsync(ModelInterruptPoint.AfterServerFetchBeforeApply)

@@ -294,6 +294,57 @@ internal static class SyncTriggerRecordingRows
             .Should()
             .BeTrue();
 
+    /// <summary>
+    /// 品目のキーの行の状態に、blob の写し待ちを直接入れる（エンジンが降ろした行で blob の写しがまだの形。行の状態が無ければ、
+    /// サーバーが知っていて未送信の無い行として入れる）
+    /// </summary>
+    private static async Task OweAsync(SyncTriggerHarness h, int key, CancellationToken ct)
+    {
+        await using var connection = await h.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "INSERT INTO quicker_sync_row (table_name, \"key\", dirty, deleted, blob_columns, change_seq, known, blob_owed) "
+            + "VALUES ('model_items', @key, 0, 0, '', 0, 1, 'Payload') "
+            + "ON CONFLICT (table_name, \"key\") DO UPDATE SET blob_owed = 'Payload'";
+        command.Parameters.AddWithValue("@key", key);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>主キーを変える生の文を順に流す（どれもちょうど 1 行を変える）</summary>
+    private static async Task RekeyAsync(
+        SyncTriggerHarness h,
+        CancellationToken ct,
+        params string[] statements
+    )
+    {
+        foreach (var sql in statements)
+        {
+            (await h.Model.Sql.ExecuteSqlAsync(sql, cancellationToken: ct)).Should().Be(1);
+        }
+    }
+
+    /// <summary>品目のキーの行の状態の、写し待ちの列と写す元のキーを確かめる</summary>
+    private static async Task ExpectOwedAsync(
+        SyncTriggerHarness h,
+        int key,
+        string owed,
+        long? owedKey,
+        CancellationToken ct
+    )
+    {
+        await using var connection = await h.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT blob_owed, owed_key FROM quicker_sync_row WHERE table_name = 'model_items' AND \"key\" = @key";
+        command.Parameters.AddWithValue("@key", key);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        (await reader.ReadAsync(ct)).Should().BeTrue($"品目 {key} の行の状態がある");
+        reader.GetString(0).Should().Be(owed, $"品目 {key} の写し待ちの列");
+        (reader.IsDBNull(1) ? (long?)null : reader.GetInt64(1))
+            .Should()
+            .Be(owedKey, $"品目 {key} の写す元のキー");
+    }
+
     /// <summary>接続の上で文を 1 つ実行する</summary>
     private static void Execute(SqliteConnection connection, string sql)
     {
@@ -1322,6 +1373,214 @@ internal static class SyncTriggerRecordingRows
                                 .Should()
                                 .Be(1);
                         }
+                    },
+                    [
+                        Live(Items, 10, "Payload"),
+                        Live(Items, 11, "Payload"),
+                        Gone(Items, 100, "Payload"),
+                    ]
+                )
+            ),
+            // 写し待ちの blob を持つ品目の主キーの変更：付け替えの形 3 つ × 付け替えの前の端末の書き込みの有無。写し待ち（降ろした
+            // 行の blob の写しがまだ）は、記録つきでなく行の状態を直接入れて作る（エンジンが降ろした行の形）
+            Row(
+                "primary-key-change-owed-blob-to-new-key-carries-owed-from-old-key",
+                "写し待ちの blob を持つ品目の主キーを新しいキーへ変えると、新しいキーは写し待ちの列を名前に持たず（送らない）、"
+                    + "写し待ちと写す元のキー（古いキー）を受け取る",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    PrepareItemAsync,
+                    async (h, ct) =>
+                    {
+                        await OweAsync(h, 10, ct);
+                        await RekeyAsync(
+                            h,
+                            ct,
+                            "UPDATE model_items SET item_id = 12 WHERE item_id = 10"
+                        );
+                        await ExpectOwedAsync(h, 12, "Payload", 10, ct);
+                    },
+                    [Live(Items, 12), Gone(Items, 10)]
+                )
+            ),
+            Row(
+                "primary-key-change-owed-blob-written-before-move-to-new-key-names-blob",
+                "写し待ちの blob を端末が書いてから品目の主キーを新しいキーへ変えると、新しいキーは書いた列を名前に持ち、写し待ちを"
+                    + "受け取らない（端末の書いた blob を送る）",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    PrepareItemAsync,
+                    async (h, ct) =>
+                    {
+                        await OweAsync(h, 10, ct);
+                        (
+                            await h.Model.Items.WritePayloadAsync(
+                                10,
+                                Bytes(7, 7),
+                                cancellationToken: ct
+                            )
+                        )
+                            .Should()
+                            .BeTrue();
+                        await RekeyAsync(
+                            h,
+                            ct,
+                            "UPDATE model_items SET item_id = 12 WHERE item_id = 10"
+                        );
+                        await ExpectOwedAsync(h, 12, "", null, ct);
+                    },
+                    [Live(Items, 12, "Payload"), Gone(Items, 10, "Payload")]
+                )
+            ),
+            Row(
+                "primary-key-change-owed-blob-onto-locally-deleted-key-carries-owed-from-old-key",
+                "写し待ちの blob を持つ品目の主キーを、端末が消したキーへ変えると、そのキーは写し待ちの列を名前に持たず、写し待ちと"
+                    + "写す元のキー（古いキー）を受け取る",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    async (h, ct) =>
+                    {
+                        await PrepareItemAsync(h, ct);
+                        await h.Model.Items.InsertAsync(Item(11, 1, "c11", "eleven"), ct);
+                    },
+                    async (h, ct) =>
+                    {
+                        await OweAsync(h, 10, ct);
+                        (await h.Model.Items.DeleteAsync(11, ct)).Should().BeTrue();
+                        await RekeyAsync(
+                            h,
+                            ct,
+                            "UPDATE model_items SET item_id = 11 WHERE item_id = 10"
+                        );
+                        await ExpectOwedAsync(h, 11, "Payload", 10, ct);
+                    },
+                    [Live(Items, 11), Gone(Items, 10)]
+                )
+            ),
+            Row(
+                "primary-key-change-owed-blob-written-before-move-onto-locally-deleted-key-names-blob",
+                "写し待ちの blob を端末が書いてから、品目の主キーを端末が消したキーへ変えると、そのキーは書いた列を名前に持ち、"
+                    + "写し待ちを受け取らない",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    async (h, ct) =>
+                    {
+                        await PrepareItemAsync(h, ct);
+                        await h.Model.Items.InsertAsync(Item(11, 1, "c11", "eleven"), ct);
+                    },
+                    async (h, ct) =>
+                    {
+                        await OweAsync(h, 10, ct);
+                        (
+                            await h.Model.Items.WritePayloadAsync(
+                                10,
+                                Bytes(7, 7),
+                                cancellationToken: ct
+                            )
+                        )
+                            .Should()
+                            .BeTrue();
+                        (await h.Model.Items.DeleteAsync(11, ct)).Should().BeTrue();
+                        await RekeyAsync(
+                            h,
+                            ct,
+                            "UPDATE model_items SET item_id = 11 WHERE item_id = 10"
+                        );
+                        await ExpectOwedAsync(h, 11, "", null, ct);
+                    },
+                    [Live(Items, 11, "Payload"), Gone(Items, 10, "Payload")]
+                )
+            ),
+            Row(
+                "primary-key-change-blob-onto-key-owing-its-own-blob-drops-that-owed-copy",
+                "写し待ちの無い品目の主キーを、写し待ちを持つキー（端末が消した品目）へ変えると、そのキーの写し待ちは消え、全部の"
+                    + "除外 blob の列を名前に持つ（消した品目の blob を写さない）",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    async (h, ct) =>
+                    {
+                        await PrepareItemAsync(h, ct);
+                        await h.Model.Items.InsertAsync(Item(11, 1, "c11", "eleven"), ct);
+                    },
+                    async (h, ct) =>
+                    {
+                        await OweAsync(h, 11, ct);
+                        (await h.Model.Items.DeleteAsync(11, ct)).Should().BeTrue();
+                        await RekeyAsync(
+                            h,
+                            ct,
+                            "UPDATE model_items SET item_id = 11 WHERE item_id = 10"
+                        );
+                        await ExpectOwedAsync(h, 11, "", null, ct);
+                    },
+                    [Live(Items, 11, "Payload"), Gone(Items, 10)]
+                )
+            ),
+            Row(
+                "primary-key-change-owed-blob-swap-through-temporary-key-carries-original-key",
+                "写し待ちの blob を持つ品目と持たない品目の主キーを仮のキー経由で入れ替えると、写し待ちの品目が移ったキーは写し待ちと"
+                    + "元のキー（仮のキーでなく）を受け取り、持たない品目が移ったキーは全部の列を名前に持って写し待ちを持たない",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    async (h, ct) =>
+                    {
+                        await PrepareItemAsync(h, ct);
+                        await h.Model.Items.InsertAsync(
+                            Item(11, 1, "c11", "eleven", [4, 5, 6]),
+                            ct
+                        );
+                    },
+                    async (h, ct) =>
+                    {
+                        await OweAsync(h, 10, ct);
+                        await RekeyAsync(
+                            h,
+                            ct,
+                            "UPDATE model_items SET item_id = 100 WHERE item_id = 10",
+                            "UPDATE model_items SET item_id = 10 WHERE item_id = 11",
+                            "UPDATE model_items SET item_id = 11 WHERE item_id = 100"
+                        );
+                        await ExpectOwedAsync(h, 11, "Payload", 10, ct);
+                        await ExpectOwedAsync(h, 10, "", null, ct);
+                    },
+                    [Live(Items, 10, "Payload"), Live(Items, 11), Gone(Items, 100)]
+                )
+            ),
+            Row(
+                "primary-key-change-owed-blob-written-before-swap-names-blob",
+                "写し待ちの blob を端末が書いてから、2 つの品目の主キーを仮のキー経由で入れ替えると、どちらのキーも全部の列を名前に"
+                    + "持ち、写し待ちを受け取らない",
+                new(
+                    SyncTriggerFixture.SyncModel,
+                    async (h, ct) =>
+                    {
+                        await PrepareItemAsync(h, ct);
+                        await h.Model.Items.InsertAsync(
+                            Item(11, 1, "c11", "eleven", [4, 5, 6]),
+                            ct
+                        );
+                    },
+                    async (h, ct) =>
+                    {
+                        await OweAsync(h, 10, ct);
+                        (
+                            await h.Model.Items.WritePayloadAsync(
+                                10,
+                                Bytes(7, 7),
+                                cancellationToken: ct
+                            )
+                        )
+                            .Should()
+                            .BeTrue();
+                        await RekeyAsync(
+                            h,
+                            ct,
+                            "UPDATE model_items SET item_id = 100 WHERE item_id = 10",
+                            "UPDATE model_items SET item_id = 10 WHERE item_id = 11",
+                            "UPDATE model_items SET item_id = 11 WHERE item_id = 100"
+                        );
+                        await ExpectOwedAsync(h, 11, "", null, ct);
+                        await ExpectOwedAsync(h, 10, "", null, ct);
                     },
                     [
                         Live(Items, 10, "Payload"),

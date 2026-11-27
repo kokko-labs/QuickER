@@ -483,6 +483,15 @@ internal sealed partial class SyncModelRun
         /// <summary>実行の始めの、BlobDownload の失敗の控えの位置（<see cref="SyncModelFaults.BlobReadHitsSince"/>）</summary>
         public int BlobReadHitIndex { get; init; }
 
+        /// <summary>実行の始めの、取得が返した品目の行の控えの位置（<see cref="SyncModelFaults.FetchedItemsSince"/>）</summary>
+        public int FetchedItemIndex { get; init; }
+
+        /// <summary>
+        /// 降ろした行の blob を写す実行か（blob を運ぶ同期・洗い替え。blob を捨てる洗い替えは写さない）。降ろした行の写しが
+        /// まだなら写し待ちが残る
+        /// </summary>
+        public bool CopiesBlobs { get; init; }
+
         /// <summary>洗い替えか（サーバーへ書かず、端末の行をサーバーの行で置き換える実行）</summary>
         public bool IsRefresh => !WritesServer && LowersOnMatch;
 
@@ -548,13 +557,18 @@ internal sealed partial class SyncModelRun
     /// 1 行（blob の書き込みは行と blob の品目）の持ち分を今の内容で立てる（記録は内容に依らず残り、エンジンが送る）。グラフ保存が
     /// ほかの行を書いても、名指しの行だけを立てる（ほかの行は内容が変わった分を差分が拾う）
     /// </param>
+    /// <param name="behindMoves">
+    /// 遅れている blob の行を動かす付け替えの組（付け替え先 → 写す元のキーと送るべき blob。<see cref="BehindMoveBlobsAsync"/>）。
+    /// 付け替え先の blob の持ち分の内容は、端末の値（写し待ちの代わりの値）でなく送るべき blob にする
+    /// </param>
     private void NoteWrite(
         ModelActor actor,
         ModelDbState before,
         ModelDbState after,
         bool tracked,
         string what,
-        ModelWriteOp? succeeded = null
+        ModelWriteOp? succeeded = null,
+        IReadOnlyDictionary<string, (string Origin, string Blob)>? behindMoves = null
     )
     {
         var was = Contents(before);
@@ -670,6 +684,18 @@ internal sealed partial class SyncModelRun
             )
             {
                 _blobWrittenAfterHeld.Add((actor, ModelTables.Items, key.Key));
+            }
+        }
+
+        // 遅れている blob の行の付け替え先の blob は、端末の値（写し待ちの代わりの値）でなく送るべき blob（サーバーの写す元の
+        // キーの blob）を持ち分の内容にする（エンジンは送る前に写す）
+        foreach (
+            var (to, moved) in behindMoves ?? new Dictionary<string, (string Origin, string Blob)>()
+        )
+        {
+            if (_holdings.TryGetValue((actor, PayloadTable, to), out var holding))
+            {
+                _holdings[(actor, PayloadTable, to)] = holding with { Content = moved.Blob };
             }
         }
 
@@ -802,49 +828,59 @@ internal sealed partial class SyncModelRun
         _recordTouched.Add((device, table, key));
 
     /// <summary>同期の実行の照合の入力を控える（状態を渡せばそれを使い、無ければ読む）</summary>
-    private Task<RunFrame> BeginSyncRunAsync(ModelSyncOp op, RunSnapshot? before) =>
-        BeginRunAsync(
-            op.Device,
-            op.Describe(),
-            writesServer: op.Kind != ModelSyncKind.Download,
-            serverWinsRun: op.Policy == SyncConflictPolicy.ServerWins
-                && op.Kind != ModelSyncKind.Download,
-            forceRefresh: false,
-            syncKind: op.Kind == ModelSyncKind.Sync,
-            versionedServerWins: op
-                is { Mode: SyncMode.Versioned, Policy: SyncConflictPolicy.ServerWins }
-                && op.Kind != ModelSyncKind.Download,
-            guardsVersions: op is { Mode: SyncMode.Versioned }
-                && op.Policy is SyncConflictPolicy.Collect or SyncConflictPolicy.ServerWins
-                && op.Kind != ModelSyncKind.Download,
-            lowersOnMatch: op.Kind != ModelSyncKind.Download,
-            table =>
-                !op.Excluded.Contains(table)
-                && !(op.Mode == SyncMode.Versioned && table == ModelTables.Labels),
-            before?.Server,
-            before?.Local
-        );
+    private async Task<RunFrame> BeginSyncRunAsync(ModelSyncOp op, RunSnapshot? before) =>
+        (
+            await BeginRunAsync(
+                op.Device,
+                op.Describe(),
+                writesServer: op.Kind != ModelSyncKind.Download,
+                serverWinsRun: op.Policy == SyncConflictPolicy.ServerWins
+                    && op.Kind != ModelSyncKind.Download,
+                forceRefresh: false,
+                syncKind: op.Kind == ModelSyncKind.Sync,
+                versionedServerWins: op
+                    is { Mode: SyncMode.Versioned, Policy: SyncConflictPolicy.ServerWins }
+                    && op.Kind != ModelSyncKind.Download,
+                guardsVersions: op is { Mode: SyncMode.Versioned }
+                    && op.Policy is SyncConflictPolicy.Collect or SyncConflictPolicy.ServerWins
+                    && op.Kind != ModelSyncKind.Download,
+                lowersOnMatch: op.Kind != ModelSyncKind.Download,
+                table =>
+                    !op.Excluded.Contains(table)
+                    && !(op.Mode == SyncMode.Versioned && table == ModelTables.Labels),
+                before?.Server,
+                before?.Local
+            )
+        ) with
+        {
+            CopiesBlobs = op.IncludeBlobs,
+        };
 
     /// <summary>洗い替えの実行の照合の入力を控える</summary>
-    private Task<RunFrame> BeginRefreshRunAsync(
+    private async Task<RunFrame> BeginRefreshRunAsync(
         ModelOp op,
         ModelActor device,
         SyncRefreshOptions options
     ) =>
-        BeginRunAsync(
-            device,
-            op.Describe(),
-            writesServer: false,
-            serverWinsRun: false,
-            forceRefresh: options.Force,
-            syncKind: false,
-            versionedServerWins: false,
-            guardsVersions: false,
-            lowersOnMatch: true,
-            table => InRefreshScope(table, options),
-            null,
-            null
-        );
+        (
+            await BeginRunAsync(
+                device,
+                op.Describe(),
+                writesServer: false,
+                serverWinsRun: false,
+                forceRefresh: options.Force,
+                syncKind: false,
+                versionedServerWins: false,
+                guardsVersions: false,
+                lowersOnMatch: true,
+                table => InRefreshScope(table, options),
+                null,
+                null
+            )
+        ) with
+        {
+            CopiesBlobs = options.IncludeUnboundedBinary && !options.DiscardLocalUnboundedBinaries,
+        };
 
     private async Task<RunFrame> BeginRunAsync(
         ModelActor device,
@@ -898,6 +934,7 @@ internal sealed partial class SyncModelRun
         )
         {
             BlobReadHitIndex = _world.Faults.BlobReadHitCount,
+            FetchedItemIndex = _world.Faults.FetchedItemCount,
             ForeignKeyViolationsBefore = await ReadForeignKeyViolationsAsync(device),
         };
     }
@@ -1171,6 +1208,9 @@ internal sealed partial class SyncModelRun
         {
             _thrownServerWins.Remove(key);
         }
+
+        // 遅れている blob の控え（持ち分を下ろした後の持ち分で決める）
+        NoteBlobsBehind(frame, serverAfter, localAfter);
     }
 
     /// <summary>
@@ -2038,6 +2078,7 @@ internal sealed partial class SyncModelRun
                 WrittenDuringRun(key)
                 || string.Equals(localNow, held, StringComparison.Ordinal)
                 || string.Equals(serverNow, held, StringComparison.Ordinal)
+                || AwaitsBehindCopy(frame.Device, key, held, serverAfter)
             )
             {
                 continue;

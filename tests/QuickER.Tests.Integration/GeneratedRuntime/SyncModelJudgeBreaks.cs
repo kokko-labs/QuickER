@@ -38,6 +38,12 @@ internal enum JudgeBreakKind
     /// （<see cref="JudgeBreak.Throws"/> と組むと、エンジンを呼ばずに文を流した後で例外で終わる実行になる）
     /// </summary>
     WriteLocalWithoutForeignKeys,
+
+    /// <summary>
+    /// エンジンを呼ぶ前に、端末のローカル DB へ記録させずに文を順に流す（<see cref="JudgeBreak.Statements"/>。外部キーは検査する）。
+    /// エンジンが自分の記録を書き換えてから実行した結果を作る
+    /// </summary>
+    WriteLocalBeforeRun,
 }
 
 /// <summary>壊し方 1 つ（どの端末の、何回目の実行で、どのフォルダーを壊すか）</summary>
@@ -193,6 +199,20 @@ internal sealed class SyncModelJudgeBreakSync(
             if (brk.Kind == JudgeBreakKind.WriteLocalWithoutForeignKeys && brk.Throws)
             {
                 await WriteWithoutForeignKeysAsync(brk, ct);
+            }
+
+            if (brk.Kind == JudgeBreakKind.WriteLocalBeforeRun)
+            {
+                await device.WriteUntrackedAsync(
+                    async connection =>
+                    {
+                        foreach (var sql in brk.Statements)
+                        {
+                            await ExecuteOnAsync(connection, sql, [], ct);
+                        }
+                    },
+                    ct
+                );
             }
         }
 

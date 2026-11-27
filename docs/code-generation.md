@@ -2717,7 +2717,7 @@ The local database gets three state tables and the triggers on the synced tables
 | Object | What it holds |
 |---|---|
 | `quicker_sync_state` | One row: the format version, an id of this database, the flag the engine sets while it applies, and the counter that numbers the changes |
-| `quicker_sync_row` | One row for each row with a state: whether it holds an unsent change and whether that change is a delete, the unbounded binary columns it wrote, its change number, the server version it was last in step with, and whether the server knows the row |
+| `quicker_sync_row` | One row for each row with a state: whether it holds an unsent change and whether that change is a delete, the unbounded binary columns it wrote, its change number, the server version it was last in step with, whether the server knows the row, and the unbounded binary columns it still has to copy down from the server, with the server key it copies them from when the row moved to another key |
 | `quicker_sync_table` | One row for each synced table: its resume point |
 | Triggers | On each synced table, one for inserts, one for updates, one for deletes, and one more for each excluded unbounded binary column, which record the change in `quicker_sync_row` |
 
@@ -2886,6 +2886,7 @@ A graph save records as deletes only the rows it removed from the database.
 The DELETE of a new child the save never wrote touches no row, so no trigger fires for it.
 
 An update that changes the primary key records both keys: the row under its new key, and a delete under the old key.
+The new key names every excluded unbounded binary column, so the row's blobs go with it, except the columns the old key still had to copy down from the server and this device had not written since: those move to the new key as still owed, with the key to copy them from (see [Unbounded binary columns](#unbounded-binary-columns)).
 
 One write is not recorded: the delete of another row that a `REPLACE` (`INSERT OR REPLACE`, `UPDATE OR REPLACE`) removes for a unique constraint.
 SQLite fires no delete trigger for that row while `recursive_triggers` is off, as it is by default.
@@ -3032,6 +3033,14 @@ A row that came down in a run that did not carry them has no blob here, and an e
 A row the server takes as an insert is the exception, and every column of it is sent, as an ordinary insert writes them: an offline insert, or a row a local edit puts back after the server deleted it (`LocalWins`, last-write-wins).
 Otherwise the server would create the row with its blobs empty.
 Should sending them fail after the row has gone in, they stay owed: the row is made to name every column first, so the next run, which finds the row on the server and updates it, still sends them all.
+
+**A row moved to another key sends its blobs under the new key.**
+An update that changes the primary key names every column at the new key, since the server's row under that key, if there is one, holds another row's blobs.
+A column the moved row still owed from the server (its copy had not come down yet) holds none of the row's content here, so it moves to the new key still owed, together with the server key it is owed from.
+A run that carries the columns copies such a column from the server's row under the old key before it sends anything, while that row is still there, and then sends it under the new key.
+A copy that fails ends the run before anything is sent, and a later run copies again.
+With no server row left under the old key, the local value is sent.
+A run that does not carry the columns does not copy them (see [Known limitations](#known-limitations)).
 
 **An overwrite that skips the version guard owes a copy of the blobs it did not send.**
 `LocalWins` and a last-write-wins run overwrite the server's row without its version guard, and an update leaves the server's blobs in place, which may be another writer's, newer than the ones here.
@@ -3430,6 +3439,17 @@ A refresh fetches every row again, so a large database can go over `DownloadRowL
   Give a table a rowversion column when its conflicts should be detected (see [Versionless tables and last-write-wins](#versionless-tables-and-last-write-wins-syncmodelastwritewins)).
 - **Unbounded binary columns are not carried unless you ask for them** (`SyncOptions.IncludeUnboundedBinary`), and carrying them costs one round trip per column per changed row.
   See [Unbounded binary columns](#unbounded-binary-columns).
+- **A key change sent by a run that does not carry the unbounded binary columns loses the moved blob.**
+  Such a run sends the moved row without its blobs, together with the delete of the old key, which takes the server's blob with it.
+  The new key keeps the local copy, or the blob the server held under that key before.
+  On a device that changes the primary keys of rows with such columns, carry the columns on every run.
+- **A key change made while a run copies a moved row's blobs can put the wrong blob under that key.**
+  The copy reads the blob from the server before it writes it to the local row.
+  If, in between, the device moves another row that still owes its blobs onto the same key, the blob read for the first row is written to the second, and the second no longer owes its own.
+  Do not change primary keys while a sync is running.
+- **A device database whose row state table lacks a column of this version is not upgraded in place.**
+  The engine creates its state tables when they are missing and does not add columns to an existing one, so a row state table created before the column `owed_key` was added makes the first read fail with SQLite's `no such column`, and the run is rolled back.
+  Build the device database again.
 - **A foreign key that refers to a unique constraint, or spans several columns, cannot be asked which rows it refers to.**
   A local table with such a foreign key to a table a refresh rebuilds makes that refresh refuse whenever the table exists locally, without looking at its rows.
   When the server refuses a delete because of such a foreign key, or of a table the engine does not synchronize, the delete is not reported as `DeleteRefusedOnServer`: the engine looks only at the server rows of the synchronized tables, through the foreign keys it knows, and finding none, it throws the original failure back unchanged.

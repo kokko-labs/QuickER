@@ -181,6 +181,47 @@ internal static partial class SyncModelScenarios
                     new ExpectPayloadOp(SV, 11, "0909"),
                 ]
             ),
+            // 写し待ちの新しい行（降ろす同期で blob の写しが落ち、端末の blob は空の代わりの値）をサーバーの他者が消した後、端末が
+            // 普通の列を編集する。本当の blob はサーバーの削除で消えているので、LocalWins の上げ直し（挿入は全列を送る）は端末の空の
+            // 値を送り、空でそろう（判定役は、削除より前の blob の書き込みと、空の blob のまま上げ直した端末を書き手に数えない）
+            Moved(
+                "blob-owed-new-row-deleted-on-server-localwins-puts-back-empty-blob",
+                [],
+                [
+                    .. Seed(1, "alice", 11, "widget"),
+                    new ArmFaultOp(D1, ModelFaultKind.BlobDownload),
+                    new ExpectThrowOp(D1),
+                    Plain(D1),
+                    Expect.Result(D1).Contains("exception *"),
+                    new ExpectPayloadOp(D1, 11, ""),
+                    new DeleteItemOp(SV, Direct, 11),
+                    new UpdateItemOp(D1, Direct, 11, 1, null, "c-11", "edited"),
+                    Plain(D1, policy: SyncConflictPolicy.LocalWins),
+                    Expect.Result(D1).Absent("conflict *"),
+                    Expect.Pending(D1).Empty(),
+                    Expect.Rows(SV, I).Contains("11 folder=1 label=null code=c-11 title=edited"),
+                    new ExpectPayloadOp(SV, 11, ""),
+                    new ExpectPayloadOp(D1, 11, ""),
+                ]
+            ),
+            // 同じ形の Collect：端末の編集はサーバーに無い行の更新として MissingOnServer で報告され、端末の行は残る
+            Moved(
+                "blob-owed-new-row-deleted-on-server-collect-reports-missing",
+                [],
+                [
+                    .. Seed(1, "alice", 11, "widget"),
+                    new ArmFaultOp(D1, ModelFaultKind.BlobDownload),
+                    new ExpectThrowOp(D1),
+                    Plain(D1),
+                    Expect.Result(D1).Contains("exception *"),
+                    new DeleteItemOp(SV, Direct, 11),
+                    new UpdateItemOp(D1, Direct, 11, 1, null, "c-11", "edited"),
+                    Plain(D1),
+                    Expect.Result(D1).Single("conflict * reason=MissingOnServer *"),
+                    Expect.Pending(D1).Exact($"{I} key=11 row=present"),
+                    Expect.Rows(SV, I).Absent("11 *"),
+                ]
+            ),
             // 例外で終わった ServerWins の同期の後、ServerWins でない同期が、端末の古い blob でサーバーの他者の新しい blob を
             // 競合なしに上書きする。持ち越しを宣言しないエンジンでは数えるだけ（照合 5 の数えるだけの種類）。持ち越しを宣言する
             // エンジン（適用が全部か無しか）では、捨てた記録と行の書き込みが同じ適用でコミットされ、例外の一覧に品目 11 が載り、
