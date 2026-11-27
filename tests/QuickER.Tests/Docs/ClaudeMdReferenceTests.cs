@@ -346,11 +346,15 @@ public class ClaudeMdReferenceTests
             // このファイル自身は Id の照合の本文に入れない（行 Id でない語の一覧と自己検査の架空の Id が写り込み、
             // 一覧の語や架空の Id が tests/ に実在するように見えてしまう）。作らない形の宣言のファイルも同じ理由で入れない
             // （受け持つ守りに書いた行 Id が宣言そのものに当たり、架空の Id が実在に見える）。分岐の軸の台帳の宣言も、判定役と
-            // 指摘のセルに行 Id を書くので同じ理由で入れない。宣言とファイル名の照合には入れる
+            // 指摘のセルに行 Id を書くので同じ理由で入れない。値のプールの受ける水準の宣言も、受けない行の受け持つ守りに行 Id を
+            // 書くので同じ理由で入れない。宣言とファイル名の照合には入れる
             if (
                 Path.GetFileName(path) != nameof(ClaudeMdReferenceTests) + ".cs"
                 && !NotGeneratedGuard.IsDeclarationFileName(Path.GetFileName(path))
                 && !BranchAxisLedgerChecks.IsDeclarationFileName(Path.GetFileName(path))
+                && !TestSupport.ValuePools.ValuePoolUseChecks.IsDeclarationFileName(
+                    Path.GetFileName(path)
+                )
             )
             {
                 all.Add(source);

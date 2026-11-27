@@ -15,6 +15,7 @@ internal static partial class SourceRules
             .. Provider(),
             .. Text(),
             .. Tests(),
+            .. ValueEdges(),
             .. Gui(),
             .. Mcp(),
             .. Comments(),

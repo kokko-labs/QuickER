@@ -110,6 +110,8 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 - **The EF Core Repository no longer gives a reused context a disposed connection after a save that takes the alternate key of a deleted row** — With a context configured by `UseSqlServer()` and a connection string set at run time, the next use of that context failed.
 - **The EF Core Repository now writes an alternate key whose `DateTimeOffset` value changes only its offset** — The two values are the same instant, so the change counted as none and the save reported success without writing it.
 - **A graph save that reaches one unchanged instance through two paths that both delete it or write changed rows below it is now refused on every backend** — The QuickER Repository failed on the primary key, while the EF Core Repository wrote the row once and fired its After hook once per path.
+- **Remote services now carry a `DateTime` value as the same time whatever the time zones of the client and the server** — A `DateTimeKind.Local` value was read in the server's time zone, so a server in another time zone stored a shifted time, and a value at either end of the calendar was refused with 400. The value is now written without an offset and read back with the same ticks as `DateTimeKind.Unspecified`.
+- **On SQLite, the QuickER Repository now compares an integer column with a `decimal` value as C# does** — Fractions and values outside the `long` range were compared after rounding to REAL, so `(decimal)x.Id != -9223372036854775809m` dropped the row holding `long.MinValue`, and values near integers above 2^53 matched the neighboring row. Integers that fit the column type are now sent as integers, and other values are folded to the C# answer.
 
 #### Bidirectional sync
 

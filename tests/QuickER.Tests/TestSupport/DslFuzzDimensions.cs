@@ -397,7 +397,7 @@ public static class DslFuzzDimensions
                             scope,
                             "EP",
                             ReuseOutOfTypeFixedIn,
-                            "パラメータを使い回す形は、1 つめの列の値の池（列の型の値）から、型が広がる組で相手の列の型に入る値だけを選ぶ（DslFuzzGenerator.SharedPool）ので、使い回すパラメータの値が列の小数の桁・整数部の外になる形と、float の列で float に入らない double の値のパラメータを使い回す形を作らない",
+                            "パラメータを使い回す形は、1 つめの列の値のプール（列の型の値）から、型が広がる組で相手の列の型に入る値だけを選ぶ（DslFuzzGenerator.SharedPool）ので、使い回すパラメータの値が列の小数の桁・整数部の外になる形と、float の列で float に入らない double の値のパラメータを使い回す形を作らない",
                             ParameterReuse,
                             ValueFit,
                             (reuse, fit) =>
@@ -521,7 +521,7 @@ public static class DslFuzzDimensions
 
     /// <summary>
     /// TimeSpan の列と、列の型の範囲の外の値（<see cref="FitBeyondRange"/>）の組を作らない範囲（docs の TimeSpan の既知の割り切り。
-    /// 作るのは SQL Server の QuickER 版の網羅の単位 <c>coverage-sqlserver-timespan-out-of-day</c> と、PostgreSQL の time の列の比べる値の池）
+    /// 作るのは SQL Server の QuickER 版の網羅の単位 <c>coverage-sqlserver-timespan-out-of-day</c> と、PostgreSQL の time の列の比べる値のプール）
     /// </summary>
     private static IEnumerable<CoverageGapEntry> TimeSpanBeyondRangeGaps()
     {
@@ -529,11 +529,11 @@ public static class DslFuzzDimensions
         [
             (
                 ["sqlite:ado", "sqlite:efcore", "sqlite:inmemory"],
-                "SQLite は TimeSpan を文字列で持ち、0〜24 時間未満の値どうしの順序比較だけが数の順と一致する（docs の TimeSpan の既知の割り切り）ので、SQLite の単位の値の池は日の中だけにする"
+                "SQLite は TimeSpan を文字列で持ち、0〜24 時間未満の値どうしの順序比較だけが数の順と一致する（docs の TimeSpan の既知の割り切り）ので、SQLite の単位の値のプールは日の中だけにする"
             ),
             (
                 ["mysql:inmemory", "mysql:efcore"],
-                "MySQL の time の列は ±838:59:59 の値とだけ比べられ、範囲の外の値は端の値へ丸めて比べる（docs の TimeSpan の既知の割り切り）ので、MySQL の単位の値の池はその範囲の中だけにする"
+                "MySQL の time の列は ±838:59:59 の値とだけ比べられ、範囲の外の値は端の値へ丸めて比べる（docs の TimeSpan の既知の割り切り）ので、MySQL の単位の値のプールはその範囲の中だけにする"
             ),
             (
                 ["sqlserver:efcore"],
@@ -587,7 +587,7 @@ public static class DslFuzzDimensions
                 "postgresql:efcore",
                 FitBeyondScale,
                 null,
-                "PostgreSQL の timestamp の列はマイクロ秒まで持ち、ドライバはそれより細かい部分を落として送る（docs の日時の既知の割り切り）ので、総当たりの DateTime の値の池はマイクロ秒より粗い値だけにする"
+                "PostgreSQL の timestamp の列はマイクロ秒まで持ち、ドライバはそれより細かい部分を落として送る（docs の日時の既知の割り切り）ので、総当たりの DateTime の値のプールはマイクロ秒より粗い値だけにする"
             ),
             (
                 "postgresql:efcore",
@@ -677,7 +677,7 @@ public static class DslFuzzDimensions
                 CoverageGap.AcceptedTuple(
                     scope,
                     "DO",
-                    "小数秒の桁を宣言する DateTimeOffset の列（datetimeoffset(n)）を持つのは SQL Server の単位だけ。SQLite は値を TEXT で持ち、PostgreSQL の timestamptz と Oracle の TIMESTAMP WITH TIME ZONE の値の池はマイクロ秒の粒度にそろえる（マイクロ秒より細かい値の切り詰めは docs の日時の既知の割り切り）ので、列の桁より細かい値を作らない",
+                    "小数秒の桁を宣言する DateTimeOffset の列（datetimeoffset(n)）を持つのは SQL Server の単位だけ。SQLite は値を TEXT で持ち、PostgreSQL の timestamptz と Oracle の TIMESTAMP WITH TIME ZONE の値のプールはマイクロ秒の粒度にそろえる（マイクロ秒より細かい値の切り詰めは docs の日時の既知の割り切り）ので、列の桁より細かい値を作らない",
                     (Clr, nameof(DslClr.DateTimeOffset)),
                     (ValueFit, FitBeyondScale)
                 )

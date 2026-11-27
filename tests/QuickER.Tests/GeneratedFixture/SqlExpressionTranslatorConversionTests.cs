@@ -8,6 +8,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using QuickER.Tests.GeneratedTranslatorParityFixture;
 using QuickER.Tests.TestSupport.Engines;
+using QuickER.Tests.TestSupport.ValuePools;
 using Xunit;
 using Evaluator = QuickER.Tests.GeneratedTranslatorParityFixture.QueryValueEvaluator;
 using SqliteMetadata = QuickER.Tests.GeneratedTranslatorParityFixture.Repositories.Sqlite.EntitySaveMetadata;
@@ -89,6 +90,7 @@ public sealed class SqlExpressionTranslatorConversionTests
     /// <param name="Bound">束縛した値（型も比べる。値を持たない行は空）</param>
     /// <param name="Compiles">翻訳が式木をコンパイルした回数（コンパイルの回数を見ない行は null）</param>
     /// <param name="Binding">束縛の期待（翻訳の行は null）</param>
+    /// <param name="SqliteBound">SQLite だけ束縛する値が違う行の、SQLite の束縛した値（null なら <paramref name="Bound"/>）</param>
     internal sealed record ConversionCase(
         Expression<Func<Shapes, bool>>? Predicate,
         string? SqlServer,
@@ -97,7 +99,8 @@ public sealed class SqlExpressionTranslatorConversionTests
         string[] RefusalNames,
         object[] Bound,
         int? Compiles,
-        BindingCase? Binding
+        BindingCase? Binding,
+        object[]? SqliteBound = null
     );
 
     private static ScenarioRow<ConversionCase> Translated(
@@ -107,8 +110,15 @@ public sealed class SqlExpressionTranslatorConversionTests
         string sqlServer,
         string sqlite,
         object[] bound,
-        int? compiles = null
-    ) => new(id, null, arm, new(predicate, sqlServer, sqlite, null, [], bound, compiles, null));
+        int? compiles = null,
+        object[]? sqliteBound = null
+    ) =>
+        new(
+            id,
+            null,
+            arm,
+            new(predicate, sqlServer, sqlite, null, [], bound, compiles, null, sqliteBound)
+        );
 
     private static ScenarioRow<ConversionCase> Refused(
         string id,
@@ -178,12 +188,38 @@ public sealed class SqlExpressionTranslatorConversionTests
     /// <summary>行の Id</summary>
     public static TheoryData<string> Ids() => Table.Ids();
 
+    /// <summary>
+    /// 値のプールの観測：翻訳の行の述語の比べる値（行に依らない側を評価する）と、束縛の行の値。列は CLR の型だけのプローブなので、列の相は
+    /// 値を変える明示の変換の変換先だけを持つ（値は変えない）
+    /// </summary>
+    internal static IReadOnlyList<TestSupport.ValuePools.ValueObservation> ObserveValues() =>
+        [
+            .. Table.SelectMany(row =>
+                row.Input.Predicate is { } predicate
+                    ? TestSupport.ValuePools.ValueExpressionObserver.Observe(
+                        predicate,
+                        _ => null,
+                        $"行 {row.Id}"
+                    )
+                : row.Input.Binding is { } binding
+                    ?
+                    [
+                        new TestSupport.ValuePools.ValueObservation(
+                            binding.Value,
+                            null,
+                            $"行 {row.Id}"
+                        ),
+                    ]
+                : []
+            ),
+        ];
+
     private static IReadOnlyList<ScenarioRow<ConversionCase>> Rows()
     {
         var ratio = 10.75;
         var captured = 9;
-        var bigInt = 16_777_217;
-        var bigLong = 9_007_199_254_740_993L;
+        var bigInt = PowerOfTwoEdges.TwoPow24Plus1;
+        var bigLong = PowerOfTwoEdges.TwoPow53Plus1;
         var letter = 'a';
         var kind = Kind.B;
         int? none = null;
@@ -385,11 +421,12 @@ public sealed class SqlExpressionTranslatorConversionTests
             ),
             Translated(
                 "column-integral-to-decimal",
-                "列の側の確かめ ChangesColumnValue の小数への腕：整数から decimal は外す",
+                "列の側の確かめ ChangesColumnValue の小数への腕：整数から decimal は外す（SQLite は列の型の範囲の中の整数の decimal を long で束縛する＝IntegralDecimalComparison）",
                 x => (decimal)x.Big == 2m,
                 "[Big] = @p0",
                 "\"Big\" = @p0",
-                [2m]
+                [2m],
+                sqliteBound: [2L]
             ),
             // ---- 値の側：値を変える変換は C# と同じに当てて束縛する ----
             Translated(
@@ -416,7 +453,7 @@ public sealed class SqlExpressionTranslatorConversionTests
                 x => x.Single == bigInt,
                 "[Single] = @p0",
                 "\"Single\" = @p0",
-                [16_777_216f],
+                [(float)PowerOfTwoEdges.TwoPow24],
                 compiles: 1
             ),
             Translated(
@@ -646,7 +683,11 @@ public sealed class SqlExpressionTranslatorConversionTests
         sqliteParameters
             .Select(parameter => parameter.Value)
             .Should()
-            .Equal(row.Bound, (actual, expected) => Equals(actual, expected), id);
+            .Equal(
+                row.SqliteBound ?? row.Bound,
+                (actual, expected) => Equals(actual, expected),
+                id
+            );
 
         if (row.Compiles is { } compiles)
         {

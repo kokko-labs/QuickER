@@ -147,19 +147,19 @@ internal static class DslFuzzNotGenerated
                 NotGenerated.Accepted(
                     "oracle-empty-string-in-not-null-columns",
                     "Oracle の単位の NOT NULL の文字列の列に入れる空文字列",
-                    "Oracle は空文字列を NULL として持ち、NOT NULL の列への空文字列の挿入を断る（ORA-01400。docs の「大文字小文字・空白・日付部品」の節の Oracle の段落）。単位の行が入らず照合が始まらないので、NOT NULL の列の値の池から空文字列を外す。NULL を許す列は空文字列を持ち、読み戻すと NULL になる形を照合する",
+                    "Oracle は空文字列を NULL として持ち、NOT NULL の列への空文字列の挿入を断る（ORA-01400。docs の「大文字小文字・空白・日付部品」の節の Oracle の段落）。単位の行が入らず照合が始まらないので、NOT NULL の列の値のプールから空文字列を外す。NULL を許す列は空文字列を持ち、読み戻すと NULL になる形を照合する",
                     "`Dsl/Oracle`"
                 ),
                 NotGenerated.Accepted(
                     "oracle-empty-binary-in-not-null-columns",
                     "Oracle の単位の NOT NULL のバイナリの列に入れる空の配列",
-                    "Oracle は空のバイナリを NULL として持ち、NOT NULL の列への空の挿入を断る（docs の「大文字小文字・空白・日付部品」の節のバイナリの段落。空文字列と同じ）。単位の行が入らず照合が始まらないので、NOT NULL の列の値の池から空の配列を外す。NULL を許す列は空の配列を持ち、読み戻すと NULL になる形を照合する",
+                    "Oracle は空のバイナリを NULL として持ち、NOT NULL の列への空の挿入を断る（docs の「大文字小文字・空白・日付部品」の節のバイナリの段落。空文字列と同じ）。単位の行が入らず照合が始まらないので、NOT NULL の列の値のプールから空の配列を外す。NULL を許す列は空の配列を持ち、読み戻すと NULL になる形を照合する",
                     "`Dsl/Oracle`"
                 ),
                 NotGenerated.Accepted(
                     "postgresql-money-negative-literal",
                     "PostgreSQL の money の列と比べる負の数のリテラル",
-                    "Npgsql の EF Core のプロバイダは負の定数を `-1::money` と書き、PostgreSQL は money の単項の負号を持たないので断る（42883。docs の「大文字小文字・空白・日付部品」の節の既知の割り切り）。負の値はパラメータで比べる（行の値・パラメータの値の池は負の値を持つ）",
+                    "Npgsql の EF Core のプロバイダは負の定数を `-1::money` と書き、PostgreSQL は money の単項の負号を持たないので断る（42883。docs の「大文字小文字・空白・日付部品」の節の既知の割り切り）。負の値はパラメータで比べる（行の値・パラメータの値のプールは負の値を持つ）",
                     "`Dsl/PostgreSql`"
                 ),
             ]

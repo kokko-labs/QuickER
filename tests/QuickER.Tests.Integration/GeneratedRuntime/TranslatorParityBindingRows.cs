@@ -109,13 +109,13 @@ public static class TranslatorParityBindingValues
 }
 
 /// <summary>
-/// 値の束縛の生成の表：列の型 × 列の側の形 × 比べ方 × 値の数 × 値の池 × Kind × 値の形 × クエリの経路を、網羅の配列（種は固定）と
+/// 値の束縛の生成の表：列の型 × 列の側の形 × 比べ方 × 値の数 × 値のプール × Kind × 値の形 × クエリの経路を、網羅の配列（種は固定）と
 /// 必ず含む行で組み、述語の表の基底 2 つ（QuickER 版・インメモリと EF Core 版）が C# の評価と照らす
 /// </summary>
 /// <remarks>
 /// <para>
 /// 因子は分岐の軸の台帳の値の束縛の標準の軸（<c>BranchAxisLedgerEntries.Areas</c> の value-binding）と 1:1。行の Id は水準の名前から作る
-/// （<c>vb-{列の型}-{列の側}-{比べ方}-{値の数}-{値の池}-{Kind}-{値の形}-{経路}</c>）。値の池の水準の名前は値の池
+/// （<c>vb-{列の型}-{列の側}-{比べ方}-{値の数}-{値のプール}-{Kind}-{値の形}-{経路}</c>）。値のプールの水準の名前は値のプール
 /// （tests/QuickER.Tests/TestSupport/ValuePools）の値の名前そのもの。図・フィクスチャは変えず、述語の表の図の既存の列を使う。
 /// </para>
 /// <para>
@@ -125,7 +125,7 @@ public static class TranslatorParityBindingValues
 /// </para>
 /// <para>
 /// 区切り a のフェーズ 2 で足した水準（Kind の Utc・Local、日付部品、値を変える明示の変換〔列の側・値の側〕、ラムダを含む値の式、
-/// 比べ方の &lt;=・&gt;、値の池の整数の値の decimal と縮める変換の元の値）と指摘のセルの必ず含む行は、分岐の軸の台帳の項目の札
+/// 比べ方の &lt;=・&gt;、値のプールの整数の値の decimal と縮める変換の元の値）と指摘のセルの必ず含む行は、分岐の軸の台帳の項目の札
 /// （<c>RowTag.Ledger</c>）を持つ。作らない形は <c>TranslatorParityBindingRowsNotGenerated</c> に宣言する。
 /// </para>
 /// </remarks>
@@ -149,7 +149,7 @@ public static class TranslatorParityBindingRows
     /// <summary>因子：値の数</summary>
     public const string ValueCount = "ValueCount";
 
-    /// <summary>因子：値の池</summary>
+    /// <summary>因子：値のプール</summary>
     public const string ValuePool = "ValuePool";
 
     /// <summary>因子：比べる値の DateTimeKind</summary>
@@ -186,6 +186,17 @@ public static class TranslatorParityBindingRows
 
     /// <summary>列の型：NULL 許容の bit（probes.flag・bool?）</summary>
     public const string Bit = "bit";
+
+    /// <summary>
+    /// 列の側の形：符号だけの変換で uint へ（32 ビットの int の列の <c>(uint)x</c>。C# は負の値を 2^32 足して折り返す＝翻訳器は CASE で書く腕）
+    /// </summary>
+    public const string UIntCast = "uint-cast";
+
+    /// <summary>
+    /// 列の側の形：符号だけの変換で ulong へ（int・bigint の列の <c>(ulong)x</c>。C# は負の値を 64 ビットへ符号拡張して折り返す＝QuickER 版の
+    /// 翻訳器は断る腕）
+    /// </summary>
+    public const string ULongCast = "ulong-cast";
 
     /// <summary>列の側の形：素の列</summary>
     public const string Plain = "plain";
@@ -279,11 +290,11 @@ public static class TranslatorParityBindingRows
     /// <summary>3 回目の効果測定の記録</summary>
     private const string Measure3Record = "review-measure3-2026-11-26";
 
-    /// <summary>XT5 の水準（NULL 許容の bool の列と bool の値の池）の札の理由</summary>
+    /// <summary>XT5 の水準（NULL 許容の bool の列と bool の値のプール）の札の理由</summary>
     private const string Xt5Reason =
         $"XT5（{Measure3Record} v10）：NULL 許容の bool の列。等値・IN の比べ方 × 値の形の軸で交差させ、順序の比べ方は C# で書けない。.Value の素の述語と並び替えは手書きの述語の表の行が受け持つ";
 
-    /// <summary>数値の値の池のうち、値を変える明示の変換の元の値（縮める変換の形とだけ組む）</summary>
+    /// <summary>数値の値のプールのうち、値を変える明示の変換の元の値（縮める変換の形とだけ組む）</summary>
     private static bool IsNarrowingPool(string pool) => NarrowingPool.Names.Contains(pool);
 
     /// <summary>網羅の配列の種</summary>
@@ -301,13 +312,117 @@ public static class TranslatorParityBindingRows
     /// <summary>数値の列の型</summary>
     private static readonly string[] NumericColumns = [Int, BigInt, Decimal];
 
-    /// <summary>数値の値の池の名前（整数の値・小数の値・列の型の外の値）</summary>
+    /// <summary>数値の値のプールの名前（整数の値・小数の値・列の型の外の値）</summary>
     private static readonly string[] NumericPools =
     [
         DecimalPool.Integral,
         DecimalPool.Fraction,
         DecimalPool.BeyondColumnRange,
     ];
+
+    /// <summary>値のプールの正本の決定の名前（札の理由に書く）</summary>
+    private const string CanonDecision = "value-pool-canon-phase3-decisions";
+
+    /// <summary>値のプールの正本で足した水準の札（既存の水準の対照。理由はどの製品の腕を通すか）</summary>
+    private static RowTag Canon(string reason) =>
+        RowTag.Reason(
+            RowTagKind.ExistingLevelControl,
+            $"値のプールの正本（決定 {CanonDecision}）：{reason}"
+        );
+
+    /// <summary>述語の表から移した必ず含む行の札（改名。Id は述語の表の行の Id のまま）</summary>
+    private static RowTag MovedFromPredicates(string reason) =>
+        RowTag.Reason(
+            RowTagKind.Rename,
+            $"値のプールの正本（決定 {CanonDecision}）：述語の表（TranslatorParityPredicateRows）の同じ Id の行から移した（値のプールの正本）。{reason}"
+        );
+
+    /// <summary>値のプールの正本で足した値のプールの水準と、通す製品の腕（札の理由）</summary>
+    private static readonly IReadOnlyDictionary<string, string> CanonPoolReasons = new Dictionary<
+        string,
+        string
+    >(StringComparer.Ordinal)
+    {
+        [DateTimePool.LegacyReadBackFirst] =
+            "datetime が読み戻す値 .003。FitsDateTime の刻みの腕（ミリ秒の 1 の位が 3）が真で、列の型のまま束縛する",
+        [DateTimePool.LegacyWindowAfterReadBack] =
+            "読み戻す値 .003 と刻み .0033333 の間の窓。FitsDateTime が偽で BetweenDateTimeReadBacks が読み戻す値の間へ置き直す腕（互換レベル 130 以上の比べ方）",
+        [DateTimePool.LegacyWindowBeforeReadBack] =
+            "刻み .0066667 と読み戻す値 .007 の間の窓。BetweenDateTimeReadBacks の置き直しの腕",
+        [DateTimePool.LegacyOffGridLowBand] =
+            "ミリ秒の 1 の位が 0〜2 の刻みの外の値。BetweenDateTimeReadBacks が直前の読み戻す値を .000 から取る帯",
+        [DateTimePool.LegacyOffGridHighBand] =
+            "ミリ秒の 1 の位が 7〜9 の刻みの外の値。BetweenDateTimeReadBacks が直前の読み戻す値を .007 から取る帯",
+        [DateTimePool.SmallRoundsDown] =
+            "smalldatetime が切り下げる 29.998 秒。FitsSmallDateTime の分ちょうどの腕が偽で datetime2 で束縛する",
+        [DateTimePool.SmallRoundsUp] =
+            "smalldatetime が切り上げる 29.999 秒。FitsSmallDateTime の分ちょうどの腕が偽で datetime2 で束縛する",
+        [DateTimePool.SmallRangeFirst] =
+            "smalldatetime の範囲の最初の値ちょうど。FitsSmallDateTime の範囲の下限の比較（>=）が真で列の型のまま束縛する",
+        [DateTimePool.SmallRangeLast] =
+            "smalldatetime の範囲の最後の値ちょうど。FitsSmallDateTime の範囲の上限の比較（<=）が真で列の型のまま束縛する",
+        [DateTimePool.SmallPastLast] =
+            "smalldatetime の範囲の最後の値 +30 秒（分へ丸めると範囲の外へあふれる）。FitsSmallDateTime の範囲の上限の比較が偽で datetime2 で束縛する",
+        [DateTimePool.SmallBeforeFirst] =
+            "smalldatetime の範囲の最初の値 -1 秒（分へ丸めると範囲の最初の値になる）。FitsSmallDateTime の範囲の下限の比較が偽で datetime2 で束縛する",
+        [DecimalPool.FractionBelowOne] =
+            "1 未満の小数 0.999（整数へ丸めると 1 になる）。IsIntegralWithin・FitsDecimal の整数部 0 の腕と、SQLite の整数の列と decimal の比較の小数の腕",
+        [DecimalPool.BeyondDoubleFraction] =
+            "2^53 を超える整数の間の小数（bigint の列の 10^16 の行の隣）。SQLite の整数の列と decimal の比較で、REAL へ丸めずに C# の答えへ畳む小数の腕",
+        [DecimalPool.NearLongMaxFraction] =
+            "long の上限の近くの小数（REAL へ丸めると 2^63）。SQLite の整数の列と decimal の比較で、大小を floor・ceil の整数で比べる腕",
+        [IntegerPool.UnsignedMax] =
+            "符号なしの型の最大（-1 を折り返した値）。列の側の符号だけの変換が -1 の行を折り返したときだけ等しくなる値",
+        [DecimalPool.Zero] =
+            "0。FitsDecimal の整数部の桁の数え方の 0 の腕（integral == 0m）と、整数の列の IsIntegralWithin",
+        [DecimalPool.Negative] =
+            "当たる値の符号を変えた負の値。FitsDecimal の Math.Abs の腕と、整数の列の IsIntegralWithin の下限の側",
+        [DecimalPool.SmallestUnit] =
+            "decimal(10,2) のスケールちょうどの最小の単位 0.01。FitsDecimal の整数部 0 の腕と、小数の桁がスケールに等しい境目",
+        [DecimalPool.BeyondPrecision] =
+            "decimal(10,2) の精度の外（整数部 9 桁）。FitsDecimal の整数部の桁の比較が偽で、値の型で束縛する",
+        [IntegerPool.TypeMin] =
+            "整数の列の型の最小。IsIntegralWithin の下限の比較（number >= min）が真で列の型のまま束縛する",
+        [IntegerPool.BelowTypeMin] =
+            "整数の列の型の最小の 1 つ下（int の列は long の値・bigint の列は decimal の値）。IsIntegralWithin の下限の比較が偽で値の型で束縛する",
+        [IntegerPool.SignBoundary] =
+            "符号だけの変換の境目（uint の 2147483648・ulong の 2^63）。列の側の符号だけの変換が負の値を折り返したときだけ当たる値",
+    };
+
+    /// <summary>値のプールの正本で足した数値の値のプールの名前（宣言の順）</summary>
+    private static readonly string[] CanonNumericPools =
+    [
+        DecimalPool.Zero,
+        DecimalPool.Negative,
+        DecimalPool.SmallestUnit,
+        DecimalPool.BeyondPrecision,
+        DecimalPool.FractionBelowOne,
+        DecimalPool.BeyondDoubleFraction,
+        DecimalPool.NearLongMaxFraction,
+        IntegerPool.TypeMin,
+        IntegerPool.BelowTypeMin,
+        IntegerPool.SignBoundary,
+        IntegerPool.UnsignedMax,
+    ];
+
+    /// <summary>decimal(10,2) の列（probes.amount）の精度とスケール（図の宣言）</summary>
+    private const int AmountPrecision = 10;
+
+    private const int AmountScale = 2;
+
+    /// <summary>列の側の形が符号だけの変換か</summary>
+    private static bool IsSignCast(string? shape) => shape is UIntCast or ULongCast;
+
+    /// <summary>列の側の形が符号だけの変換か（既知の失敗の規則が使う）</summary>
+    /// <param name="shape">列の側の形の水準</param>
+    internal static bool IsSignCastShape(string? shape) => IsSignCast(shape);
+
+    /// <summary>符号だけの変換の変換先の型</summary>
+    private static Type SignCastTargetOf(string shape) =>
+        shape == UIntCast ? typeof(uint) : typeof(ulong);
+
+    /// <summary>整数の列（int・bigint）</summary>
+    private static bool IsIntegerColumn(string? column) => column is Int or BigInt;
 
     /// <summary>次元表</summary>
     public static DimensionTable Table { get; } =
@@ -329,8 +444,20 @@ public static class TranslatorParityBindingRows
                         new Level(PreservingConversion),
                         new Level(DatePart) { Tag = Ledger("xb1") },
                         new Level(NarrowingCast) { Tag = Ledger("xt4") },
+                        new Level(UIntCast)
+                        {
+                            Tag = Canon(
+                                "列の側の符号だけの変換 (uint)。ColumnConversionsSql が SignWrapModulus の 2^32 で CASE の折り返しを書く腕（区切り a の XT4 の直し）"
+                            ),
+                        },
+                        new Level(ULongCast)
+                        {
+                            Tag = Canon(
+                                "列の側の符号だけの変換 (ulong)。ChangesColumnValue が符号つきから ulong への変換を断る腕（折り返した値が bigint に入らない）"
+                            ),
+                        },
                     ],
-                    "列の側の式の形（素の列・値を保つ明示の変換・日付部品・値を変える明示の変換）"
+                    "列の側の式の形（素の列・値を保つ明示の変換・日付部品・値を変える明示の変換・符号だけの変換）"
                 ),
                 new Factor(
                     Comparison,
@@ -349,7 +476,17 @@ public static class TranslatorParityBindingRows
                 new Factor(
                     ValuePool,
                     [
-                        .. DateTimePool.Names.Concat(NumericPools).Select(name => new Level(name)),
+                        .. DateTimePool
+                            .Names.Concat(NumericPools)
+                            .Select(name =>
+                                CanonPoolReasons.TryGetValue(name, out var reason)
+                                    ? new Level(name) { Tag = Canon(reason) }
+                                    : new Level(name)
+                            ),
+                        .. CanonNumericPools.Select(name => new Level(name)
+                        {
+                            Tag = Canon(CanonPoolReasons[name]),
+                        }),
                         new Level(DecimalPool.IntegralDecimal) { Tag = Ledger("ha4") },
                         .. NarrowingPool.Names.Select(name => new Level(name)
                         {
@@ -360,7 +497,7 @@ public static class TranslatorParityBindingRows
                             Tag = Finding(Xt5Reason),
                         }),
                     ],
-                    "値の池の値（tests/QuickER.Tests/TestSupport/ValuePools の名前）"
+                    "値のプールの値（tests/QuickER.Tests/TestSupport/ValuePools の名前）"
                 ),
                 new Factor(
                     DateTimeKind,
@@ -389,7 +526,7 @@ public static class TranslatorParityBindingRows
                         new Level(ImmutableArrayShape)
                         {
                             Tag = Finding(
-                                $"HA3（{Measure3Record} v7）：値型のコレクション（ImmutableArray）の Contains。SQLite の EF Core 版の整数と decimal の書き換えが値型を IEnumerable へ通さず例外になった。列の型 × 値の池の軸で交差させ、配列の静的な Contains は既存の配列の水準が受け持つ"
+                                $"HA3（{Measure3Record} v7）：値型のコレクション（ImmutableArray）の Contains。SQLite の EF Core 版の整数と decimal の書き換えが値型を IEnumerable へ通さず例外になった。列の型 × 値のプールの軸で交差させ、配列の静的な Contains は既存の配列の水準が受け持つ"
                             ),
                         },
                     ],
@@ -440,7 +577,7 @@ public static class TranslatorParityBindingRows
             Captured,
             Query
         ),
-        // HA1 の隣（再現の入力でない）：順序の向き・値の池・経路を変えても同じ腕で断る（網羅の配列は ha1 の水準と ExecuteDelete の組を持たない）
+        // HA1 の隣（再現の入力でない）：順序の向き・値のプール・経路を変えても同じ腕で断る（網羅の配列は ha1 の水準と ExecuteDelete の組を持たない）
         Required(
             "ha1-date-greater-or-equal-utc-tick-before-midnight-execute-delete",
             "ha1",
@@ -595,12 +732,646 @@ public static class TranslatorParityBindingRows
             NarrowingCast,
             Query
         ),
+        // ---- XT4 の列の側の符号だけの変換（述語の表から移した 6 行。Id は述語の表の行のまま・札は台帳の xt4 のまま。列は small_child の
+        //      big_parent_id〔-1 の子の行を持つ〕と big_parent の id〔-1・long の下限の行を持つ〕。述語の表は probes の probe_id の int の下限の行
+        //      で比べていた）----
+        // int の列を uint へ変換した ==：負の値を折り返し、-1 の行が 4294967295 に一致する（述語の表は int の下限の行が 2147483648 に一致する形）
+        Required(
+            "int-column-sign-cast-equals-uint-beyond-int",
+            "xt4",
+            Int,
+            UIntCast,
+            "equal",
+            Single,
+            IntegerPool.UnsignedMax,
+            NoKind,
+            Constant,
+            Query
+        ),
+        // int の列を uint へ変換した順序比較：負の値を int の上限より大きい値へ折り返して比べる（述語の表は > 2147483647u。境目の >= と同じ行）
+        Required(
+            "int-column-sign-cast-greater-uint-max-int",
+            "xt4",
+            Int,
+            UIntCast,
+            "greater-or-equal",
+            Single,
+            IntegerPool.SignBoundary,
+            NoKind,
+            Constant,
+            Query
+        ),
+        // uint のリスト・配列と uint へ変換した int の列の IN：折り返した -1 の行に一致する
+        Required(
+            "in-uint-list-sign-cast-column",
+            "xt4",
+            Int,
+            UIntCast,
+            "in",
+            List,
+            IntegerPool.UnsignedMax,
+            NoKind,
+            Captured,
+            Query
+        ),
+        Required(
+            "in-uint-array-sign-cast-column",
+            "xt4",
+            Int,
+            UIntCast,
+            "in",
+            Array,
+            IntegerPool.UnsignedMax,
+            NoKind,
+            Captured,
+            Query
+        ),
+        // bigint・int の列を ulong へ変換した順序比較：負の値を 2^63 以上へ折り返して比べる（QuickER 版は断る）
+        Required(
+            "bigint-column-ulong-cast-greater",
+            "xt4",
+            BigInt,
+            ULongCast,
+            "greater-or-equal",
+            Single,
+            IntegerPool.SignBoundary,
+            NoKind,
+            Constant,
+            Query
+        ),
+        Required(
+            "int-column-ulong-cast-greater",
+            "xt4",
+            Int,
+            ULongCast,
+            "greater-or-equal",
+            Single,
+            IntegerPool.SignBoundary,
+            NoKind,
+            Constant,
+            Query
+        ),
+        // ---- 述語の表から移した値の束縛の行（Id は述語の表の行のまま・札は改名）----
+        Moved(
+            "date-less-time-of-day",
+            "date の列と時刻つきの DateTime の < は時刻を落とさずに比べる（述語の表の値は 12:00・プールの値は 10:00。どちらも QueryValueFits の date の時刻の腕）",
+            Date,
+            Plain,
+            "less",
+            Single,
+            DateTimePool.TimeOfDay,
+            Unspecified,
+            Captured,
+            Query
+        ),
+        Moved(
+            "date-equals-time-of-day",
+            "date の列と時刻つきの DateTime の == はどの行にも一致しない",
+            Date,
+            Plain,
+            "equal",
+            Single,
+            DateTimePool.TimeOfDay,
+            Unspecified,
+            Captured,
+            Query
+        ),
+        Moved(
+            "legacy-equals-read-back",
+            "datetime の列と読み戻す値（.003）の == はその行に一致する",
+            LegacyDateTime,
+            Plain,
+            "equal",
+            Single,
+            DateTimePool.LegacyReadBackFirst,
+            Unspecified,
+            Captured,
+            Query
+        ),
+        Moved(
+            "legacy-equals-between-read-backs",
+            "datetime の列と読み戻せない値（.004）の == はどの行にも一致しない",
+            LegacyDateTime,
+            Plain,
+            "equal",
+            Single,
+            DateTimePool.BetweenLegacyReadBacks,
+            Unspecified,
+            Captured,
+            Query
+        ),
+        Moved(
+            "legacy-less-between-read-back-and-step",
+            "datetime の列と、読み戻す値 .003 と 1/300 秒 .0033333 の間の値の < は読み戻す値で比べる",
+            LegacyDateTime,
+            Plain,
+            "less",
+            Single,
+            DateTimePool.LegacyWindowAfterReadBack,
+            Unspecified,
+            Captured,
+            Query
+        ),
+        Moved(
+            "legacy-greater-between-step-and-read-back",
+            "datetime の列と、2/300 秒 .0066667 と読み戻す値 .007 の間の値の > は読み戻す値で比べる",
+            LegacyDateTime,
+            Plain,
+            Greater,
+            Single,
+            DateTimePool.LegacyWindowBeforeReadBack,
+            Unspecified,
+            Captured,
+            Query
+        ),
+        Moved(
+            "legacy-less-or-equal-between-step-and-read-back",
+            "datetime の列と、2/300 秒 .0066667 と読み戻す値 .007 の間の値の <= は読み戻す値で比べる",
+            LegacyDateTime,
+            Plain,
+            LessOrEqual,
+            Single,
+            DateTimePool.LegacyWindowBeforeReadBack,
+            Unspecified,
+            Captured,
+            Query
+        ),
+        Moved(
+            "legacy-less-past-max",
+            "datetime の列と、範囲の最後の値を超え丸めると範囲の外になる値の < は範囲の外の値のまま比べる",
+            LegacyDateTime,
+            Plain,
+            "less",
+            Single,
+            DateTimePool.PastSqlDateTimeMax,
+            Unspecified,
+            Captured,
+            Query
+        ),
+        Moved(
+            "legacy-greater-before-min",
+            "datetime の列と、範囲の最初の値より前の値の > は NULL でない全行に一致する",
+            LegacyDateTime,
+            Plain,
+            Greater,
+            Single,
+            DateTimePool.BeforeSqlDateTimeMin,
+            Unspecified,
+            Captured,
+            Query
+        ),
+        Moved(
+            "small-equals-exact",
+            "smalldatetime の列と分ちょうどの値の == はその行に一致する（述語の表の値は 10:01・プールの値は 10:00。どちらも FitsSmallDateTime が真の腕）",
+            SmallDateTime,
+            Plain,
+            "equal",
+            Single,
+            DateTimePool.TimeOfDay,
+            Unspecified,
+            Captured,
+            Query
+        ),
+        Moved(
+            "small-equals-half-minute",
+            "smalldatetime の列と切り上げの秒のある値の == はどの行にも一致しない（分へ丸めて比べない。述語の表の値は 30 秒・プールの値は 29.999 秒。どちらも切り上げの腕）",
+            SmallDateTime,
+            Plain,
+            "equal",
+            Single,
+            DateTimePool.SmallRoundsUp,
+            Unspecified,
+            Captured,
+            Query
+        ),
+        Moved(
+            "small-not-equals-half-minute",
+            "smalldatetime の列と切り上げの秒のある値の != は NULL の行を含む全行に一致する（述語の表の値は 30 秒・プールの値は 29.999 秒）",
+            SmallDateTime,
+            Plain,
+            "not-equal",
+            Single,
+            DateTimePool.SmallRoundsUp,
+            Unspecified,
+            Captured,
+            Query
+        ),
+        Moved(
+            "small-greater-half-minute",
+            "smalldatetime の列と切り上げの秒のある値の > は次の分の行を含む（切り上げた分と比べない。述語の表の値は 30 秒・プールの値は 29.999 秒）",
+            SmallDateTime,
+            Plain,
+            Greater,
+            Single,
+            DateTimePool.SmallRoundsUp,
+            Unspecified,
+            Captured,
+            Query
+        ),
+        Moved(
+            "small-greater-or-equal-rounding-down-seconds",
+            "smalldatetime の列と 29.998 秒の値の >= は基準の分の行を含まない（切り下げた分と比べない）",
+            SmallDateTime,
+            Plain,
+            "greater-or-equal",
+            Single,
+            DateTimePool.SmallRoundsDown,
+            Unspecified,
+            Captured,
+            Query
+        ),
+        Moved(
+            "small-less-past-last",
+            "smalldatetime の列と、範囲の最後の値 +30 秒（丸めると範囲の外へあふれる値）の < は範囲の最後の値の行を含む",
+            SmallDateTime,
+            Plain,
+            "less",
+            Single,
+            DateTimePool.SmallPastLast,
+            Unspecified,
+            Captured,
+            Query
+        ),
+        Moved(
+            "small-greater-past-last",
+            "smalldatetime の列と、範囲の最後の値より後ろの値の > はどの行にも一致しない",
+            SmallDateTime,
+            Plain,
+            Greater,
+            Single,
+            DateTimePool.SmallPastLast,
+            Unspecified,
+            Captured,
+            Query
+        ),
+        Moved(
+            "small-greater-before-first",
+            "smalldatetime の列と、範囲の最初の値 -1 秒の > は NULL でない全行に一致する",
+            SmallDateTime,
+            Plain,
+            Greater,
+            Single,
+            DateTimePool.SmallBeforeFirst,
+            Unspecified,
+            Captured,
+            Query
+        ),
+        Moved(
+            "decimal-equals-beyond-scale",
+            "decimal(10,2) の列と桁の多い decimal の定数の == は値を列の桁へ丸めない",
+            Decimal,
+            Plain,
+            "equal",
+            Single,
+            DecimalPool.BeyondColumnRange,
+            NoKind,
+            Constant,
+            Query
+        ),
+        Moved(
+            "decimal-equals-beyond-scale-variable",
+            "decimal(10,2) の列と桁の多い decimal の変数の == は値を列の桁へ丸めない",
+            Decimal,
+            Plain,
+            "equal",
+            Single,
+            DecimalPool.BeyondColumnRange,
+            NoKind,
+            Captured,
+            Query
+        ),
+        Moved(
+            "decimal-equals-beyond-precision-variable",
+            "decimal(10,2) の列と整数部の桁が列に入らない decimal の変数の == はどの行にも一致しない（例外にしない）",
+            Decimal,
+            Plain,
+            "equal",
+            Single,
+            DecimalPool.BeyondPrecision,
+            NoKind,
+            Captured,
+            Query
+        ),
+        Moved(
+            "int-column-less-or-equal-decimal-fraction-variable",
+            "int の列と 1 未満の decimal の変数（0.999）の <= は値を丸めずに数として比べる（整数へ丸めると 1 になる値）",
+            Int,
+            Plain,
+            LessOrEqual,
+            Single,
+            DecimalPool.FractionBelowOne,
+            NoKind,
+            Captured,
+            Query
+        ),
+        Moved(
+            "int-column-less-long-beyond-int",
+            "int の列と int の範囲の外の long の定数の < は数として比べる（例外にしない）",
+            Int,
+            Plain,
+            "less",
+            Single,
+            IntegerPool.BeyondColumnRange,
+            NoKind,
+            Constant,
+            Query
+        ),
+        Moved(
+            "int-column-equals-long-beyond-int",
+            "int の列と int の範囲の外の long の定数の == はどの行にも一致しない",
+            Int,
+            Plain,
+            "equal",
+            Single,
+            IntegerPool.BeyondColumnRange,
+            NoKind,
+            Constant,
+            Query
+        ),
+        Moved(
+            "int-column-equals-decimal-integral-variable",
+            "int の列と整数の値の decimal の変数の == は、同じ値の行に一致する",
+            Int,
+            Plain,
+            "equal",
+            Single,
+            DecimalPool.IntegralDecimal,
+            NoKind,
+            Captured,
+            Query
+        ),
+        Moved(
+            "int-column-not-equals-decimal-integral-variable",
+            "int の列と整数の値の decimal の変数の != は、同じ値の行を除き NULL の行を含める",
+            Int,
+            Plain,
+            "not-equal",
+            Single,
+            DecimalPool.IntegralDecimal,
+            NoKind,
+            Captured,
+            Query
+        ),
+        Moved(
+            "int-column-equals-decimal-integral-constant",
+            "int の列と整数の値の decimal の定数の == は、同じ値の行に一致する",
+            Int,
+            Plain,
+            "equal",
+            Single,
+            DecimalPool.IntegralDecimal,
+            NoKind,
+            Constant,
+            Query
+        ),
+        Moved(
+            "bigint-column-greater-decimal-fraction-variable",
+            "bigint の列と小数の decimal の変数の > は、整数部の大きい行も数として比べる",
+            BigInt,
+            Plain,
+            Greater,
+            Single,
+            DecimalPool.Fraction,
+            NoKind,
+            Captured,
+            Query
+        ),
+        Moved(
+            "bigint-column-equals-decimal-integral-variable",
+            "bigint の列と整数の値の decimal の変数の == は、同じ値の行に一致する",
+            BigInt,
+            Plain,
+            "equal",
+            Single,
+            DecimalPool.IntegralDecimal,
+            NoKind,
+            Captured,
+            Query
+        ),
+        Moved(
+            "bigint-column-not-equals-decimal-fraction-variable",
+            "bigint の列と小数の decimal の変数の != は全行に一致する",
+            BigInt,
+            Plain,
+            "not-equal",
+            Single,
+            DecimalPool.Fraction,
+            NoKind,
+            Captured,
+            Query
+        ),
+        Moved(
+            "bigint-column-less-decimal-beyond-long-variable",
+            "bigint の列と long の範囲の外の decimal の変数の < は全行に一致する",
+            BigInt,
+            Plain,
+            "less",
+            Single,
+            DecimalPool.BeyondColumnRange,
+            NoKind,
+            Captured,
+            Query
+        ),
+        Moved(
+            "bigint-column-greater-decimal-fraction-constant",
+            "bigint の列と小数の decimal の定数の > は、整数部の大きい行も数として比べる",
+            BigInt,
+            Plain,
+            Greater,
+            Single,
+            DecimalPool.Fraction,
+            NoKind,
+            Constant,
+            Query
+        ),
+        Moved(
+            "nullable-bool-equals-true",
+            "NULL 許容の bool の列と true の定数の == は、true の行に一致する（.Value を通らない対照。.Value の素の述語と並び替えは手書きの述語の表の XT5 の行が受け持つ）",
+            Bit,
+            Plain,
+            "equal",
+            Single,
+            BooleanPool.True,
+            NoKind,
+            Constant,
+            Query
+        ),
+        // ---- P1：整数の列と、REAL へ丸めると行に重なる decimal の値（QuickER 版の SQLite。値が左の形は手書きの述語の表の行）----
+        P1(
+            "p1-bigint-not-equal-below-long",
+            BigInt,
+            Plain,
+            "not-equal",
+            Single,
+            IntegerPool.BelowTypeMin,
+            Constant,
+            Query
+        ),
+        P1(
+            "p1-bigint-preserving-greater-below-long-execute-delete",
+            BigInt,
+            PreservingConversion,
+            Greater,
+            Single,
+            IntegerPool.BelowTypeMin,
+            MethodCall,
+            ExecuteDelete
+        ),
+        P1(
+            "p1-bigint-equal-beyond-double-fraction",
+            BigInt,
+            Plain,
+            "equal",
+            Single,
+            DecimalPool.BeyondDoubleFraction,
+            Captured,
+            Query
+        ),
+        P1(
+            "p1-bigint-greater-or-equal-beyond-double-fraction-execute-delete",
+            BigInt,
+            Plain,
+            "greater-or-equal",
+            Single,
+            DecimalPool.BeyondDoubleFraction,
+            Captured,
+            ExecuteDelete
+        ),
+        P1(
+            "p1-bigint-less-near-long-max-fraction",
+            BigInt,
+            Plain,
+            "less",
+            Single,
+            DecimalPool.NearLongMaxFraction,
+            Captured,
+            Query
+        ),
+        P1(
+            "p1-bigint-in-list-beyond-double-fraction",
+            BigInt,
+            Plain,
+            "in",
+            List,
+            DecimalPool.BeyondDoubleFraction,
+            Captured,
+            Query
+        ),
+        P1(
+            "p1-bigint-not-in-array-beyond-double-fraction-execute-delete",
+            BigInt,
+            Plain,
+            "not-in",
+            Array,
+            DecimalPool.BeyondDoubleFraction,
+            Constant,
+            ExecuteDelete
+        ),
+        P1(
+            "p1-int-not-equal-fraction-null-row",
+            Int,
+            Plain,
+            "not-equal",
+            Single,
+            DecimalPool.Fraction,
+            Captured,
+            Query
+        ),
+        P1(
+            "p1-bigint-in-list-below-long",
+            BigInt,
+            Plain,
+            "in",
+            List,
+            IntegerPool.BelowTypeMin,
+            Captured,
+            Query
+        ),
     ];
+
+    /// <summary>P1 の受け入れの必ず含む行（数の値・日時でない値。札は P1 の指摘）</summary>
+    private static RequiredRow P1(
+        string id,
+        string columnType,
+        string columnShape,
+        string comparison,
+        string count,
+        string pool,
+        string valueShape,
+        string path
+    ) =>
+        Tagged(
+            id,
+            RowTag.Reason(
+                RowTagKind.ReviewFinding,
+                "P1（value-pool-canon-phase3a-stop）：QuickER 版の SQLite で整数の列と比べる decimal の値が REAL へ丸まって行に重なる。値のプールの水準（below-type-min・beyond-double-fraction・near-long-max-fraction）は網羅の配列でも交差するが、比べ方・値の数・経路の隣の形をこの行でそろえる"
+            ),
+            columnType,
+            columnShape,
+            comparison,
+            count,
+            pool,
+            NoKind,
+            valueShape,
+            path
+        );
+
+    /// <summary>述語の表から移した必ず含む行（全因子の水準を宣言の順に並べ、改名の札を付ける）</summary>
+    private static RequiredRow Moved(
+        string id,
+        string reason,
+        string columnType,
+        string columnShape,
+        string comparison,
+        string count,
+        string pool,
+        string kind,
+        string valueShape,
+        string path
+    ) =>
+        Tagged(
+            id,
+            MovedFromPredicates(reason),
+            columnType,
+            columnShape,
+            comparison,
+            count,
+            pool,
+            kind,
+            valueShape,
+            path
+        );
 
     /// <summary>必ず含む行（全因子の水準を宣言の順に並べ、台帳の札を付ける）</summary>
     private static RequiredRow Required(
         string id,
         string ledgerItem,
+        string columnType,
+        string columnShape,
+        string comparison,
+        string count,
+        string pool,
+        string kind,
+        string valueShape,
+        string path
+    ) =>
+        Tagged(
+            id,
+            Ledger(ledgerItem),
+            columnType,
+            columnShape,
+            comparison,
+            count,
+            pool,
+            kind,
+            valueShape,
+            path
+        );
+
+    /// <summary>必ず含む行（全因子の水準を宣言の順に並べ、札 <paramref name="tag"/> を付ける）</summary>
+    private static RequiredRow Tagged(
+        string id,
+        RowTag tag,
         string columnType,
         string columnShape,
         string comparison,
@@ -625,7 +1396,7 @@ public static class TranslatorParityBindingRows
             }
         )
         {
-            Tag = Ledger(ledgerItem),
+            Tag = tag,
         };
 
     /// <summary>必ず含む行の Id から、その行の水準の割り当て（網羅の配列の行の Id）を引く</summary>
@@ -673,7 +1444,7 @@ public static class TranslatorParityBindingRows
         new(
             EngineIds.GeneratedRuntime,
             Part,
-            "値の束縛の生成の表（列の型・列の側の形・比べ方・値の数・値の池・Kind・値の形・クエリの経路を、QuickER 版・インメモリ・EF Core 版の 5 方言で C# の評価と照らす）",
+            "値の束縛の生成の表（列の型・列の側の形・比べ方・値の数・値のプール・Kind・値の形・クエリの経路を、QuickER 版・インメモリ・EF Core 版の 5 方言で C# の評価と照らす）",
             Table,
             AllRows.Count,
             [
@@ -780,8 +1551,9 @@ public static class TranslatorParityBindingRows
     /// </summary>
     private static bool IsValid(IReadOnlyDictionary<string, string> assignment)
     {
-        // 値の池・Kind・列の側と値の側の形は列の型の系統（日時・数・bool）を決める：系統の違う列と値は C# で比べられず、Kind は日時の値だけが
-        // 持ち、値を保つ変換（int → long・bigint → decimal）・縮める明示の変換・char の暗黙の変換は数の上に、日付部品は日時の列の上にしか無い。
+        // 値のプール・Kind・列の側と値の側の形は列の型の系統（日時・数・bool）を決める：系統の違う列と値は C# で比べられず、Kind は日時の値だけが
+        // 持ち、値を保つ変換（int → long・bigint → decimal）・縮める明示の変換・符号だけの変換・char の暗黙の変換は数の上に、日付部品は日時の列の
+        // 上にしか無い。
         // 系統を決める因子どうしが食い違う組は起こり得ない
         var families = new List<IReadOnlySet<string>>();
 
@@ -823,7 +1595,11 @@ public static class TranslatorParityBindingRows
             families.Add(Only(DateTimeFamily));
         }
 
-        if (shape == NarrowingCast || valueShape is NarrowingCast or ImplicitChar)
+        if (
+            shape == NarrowingCast
+            || IsSignCast(shape)
+            || valueShape is NarrowingCast or ImplicitChar
+        )
         {
             families.Add(Only(NumberFamily));
         }
@@ -846,8 +1622,8 @@ public static class TranslatorParityBindingRows
             return false;
         }
 
-        // 縮める変換の元の値の池は、縮める変換の元の値という定義なので、列の側か値の側に縮める変換がある組にだけあり、
-        // 縮める変換は元の値をこの池から取る（ほかの池の値は変換の元の値でない）
+        // 縮める変換の元の値のプールは、縮める変換の元の値という定義なので、列の側か値の側に縮める変換がある組にだけあり、
+        // 縮める変換は元の値をこのプールから取る（ほかのプールの値は変換の元の値でない）
         if (pool is not null)
         {
             var narrowingPool = IsNarrowingPool(pool);
@@ -866,6 +1642,111 @@ public static class TranslatorParityBindingRows
             )
             {
                 return false;
+            }
+        }
+
+        // 符号だけの変換は、符号つきの整数の列を同じ幅か広い符号なしの型へ変える形：uint への変換は 32 ビットの int の列だけ（bigint → uint は
+        // 縮める変換）、ulong への変換は int・bigint の列だけ（decimal の列からは整数への変換で、符号だけの変換でない）
+        if (
+            IsSignCast(shape)
+            && column is not null
+            && !(shape == UIntCast ? column == Int : IsIntegerColumn(column))
+        )
+        {
+            return false;
+        }
+
+        // 値の側の縮める変換は元の値を縮める変換の値のプールから取る（縮める変換の元の値という定義）ので、列の側の符号だけの変換と値の側の
+        // 縮める変換は組めない（列の側の縮める変換と符号だけの変換は同じ因子の別の水準）
+        if (IsSignCast(shape) && valueShape == NarrowingCast)
+        {
+            return false;
+        }
+
+        if (pool is not null)
+        {
+            // 縮める変換の元の値のプールは縮める変換の元の値という定義なので、符号だけの変換とは組まない
+            if (IsSignCast(shape) && IsNarrowingPool(pool))
+            {
+                return false;
+            }
+
+            // ulong と符号つきの整数（int・long）は C# で比べられない（どちらの型へも暗黙に変換できない）：型の最小は列の型の整数、int の列の
+            // 型の最小の 1 つ下は long の値（bigint の列の 1 つ下は decimal の値なので組める）。符号だけの変換と decimal の値は、C# が符号なしの
+            // 値を decimal へ広げて比べる（P4 の組）
+            if (
+                shape == ULongCast
+                && (
+                    pool == IntegerPool.TypeMin
+                    || (pool == IntegerPool.BelowTypeMin && column is not (null or BigInt))
+                )
+            )
+            {
+                return false;
+            }
+
+            // 符号の境目と符号なしの型の最大は、符号だけの変換の変換先の型で決まる値という定義なので、列の側に符号だけの変換がある組
+            // （つまり整数の列）にだけある
+            if (
+                pool is IntegerPool.SignBoundary or IntegerPool.UnsignedMax
+                && (
+                    (shape is not null && !IsSignCast(shape))
+                    || (column is not null && !IsIntegerColumn(column))
+                )
+            )
+            {
+                return false;
+            }
+
+            // 2^53 を超える整数の間の小数と long の上限の近くの小数は、bigint の列の値の範囲（2^53 を超える行）で決まる値なので bigint の列と
+            // だけ組む（uint への変換は int の列の上にしか無い）
+            if (
+                pool is DecimalPool.BeyondDoubleFraction or DecimalPool.NearLongMaxFraction
+                && (column is not (null or BigInt) || shape == UIntCast)
+            )
+            {
+                return false;
+            }
+
+            // 列の型から決まる値のプールは、その列の型とだけ組む（ほかの列の型と組むと、その水準の値でなくなる）：型の最小とその 1 つ下は
+            // 整数の列の型の最小、スケールちょうどの最小の単位と精度の外は decimal(10,2) のスケールと精度、読み戻す値・窓・置き直しの帯は
+            // datetime の刻み、丸めの境目と範囲の端ちょうどは smalldatetime の分と範囲で決まる値。decimal の列は値を保って広げる変換を持たない
+            // ので、decimal の列だけと組む値のプールは値を保つ変換とも組まない（符号だけの変換も整数の列の上にしか無い）
+            if (
+                pool is DecimalPool.SmallestUnit or DecimalPool.BeyondPrecision
+                && (shape == PreservingConversion || IsSignCast(shape))
+            )
+            {
+                return false;
+            }
+
+            if (column is not null)
+            {
+                if (
+                    pool is IntegerPool.TypeMin or IntegerPool.BelowTypeMin
+                    && !IsIntegerColumn(column)
+                )
+                {
+                    return false;
+                }
+
+                if (
+                    pool is DecimalPool.SmallestUnit or DecimalPool.BeyondPrecision
+                    && column != Decimal
+                )
+                {
+                    return false;
+                }
+
+                if (DateTimePool.LegacyNames.Contains(pool) && column != LegacyDateTime)
+                {
+                    return false;
+                }
+
+                if (DateTimePool.SmallNames.Contains(pool) && column != SmallDateTime)
+                {
+                    return false;
+                }
             }
         }
 
@@ -915,7 +1796,7 @@ public static class TranslatorParityBindingRows
                 return false;
             }
 
-            // 列の側の縮める変換は元の値を縮める変換の値の池から取るので、char の値（行に当たる整数）とは組めない
+            // 列の側の縮める変換は元の値を縮める変換の値のプールから取るので、char の値（行に当たる整数）とは組めない
             if (shape == NarrowingCast)
             {
                 return false;
@@ -1012,7 +1893,7 @@ public static class TranslatorParityBindingRows
         };
 
     /// <summary>
-    /// 列の型と値の池の水準から、比べる値（日時は列のシードの日を基準の日にする：day・legacy_at・small_at は 2024-01-01、at は 2024-01-15）
+    /// 列の型と値のプールの水準から、比べる値（日時は列のシードの日を基準の日にする：day・legacy_at・small_at は 2024-01-01、at は 2024-01-15）
     /// </summary>
     private static object PoolValueOf(string columnType, string pool, string kind)
     {
@@ -1042,15 +1923,25 @@ public static class TranslatorParityBindingRows
                 IntegerPool.Integral => (object)(int)IntegerPool.Named(1, int.MaxValue, pool).Value,
                 IntegerPool.BeyondColumnRange => (object)
                     IntegerPool.Named(1, int.MaxValue, pool).Value,
+                IntegerPool.TypeMin => (object)(int)IntegerPool.TypeMinOf(int.MinValue).Value,
+                IntegerPool.BelowTypeMin => (object)IntegerPool.BelowTypeMinOf(int.MinValue).Value,
                 _ => (object)DecimalPool.Named(1m, 0, pool).Value,
             },
             BigInt => pool switch
             {
                 IntegerPool.Integral => (object)IntegerPool.Named(1, long.MaxValue, pool).Value,
                 DecimalPool.BeyondColumnRange => (object)DecimalPool.BeyondLong.Value,
+                IntegerPool.TypeMin => (object)IntegerPool.TypeMinOf(long.MinValue).Value,
+                IntegerPool.BelowTypeMin => (object)DecimalPool.BelowLong.Value,
+                DecimalPool.BeyondDoubleFraction => (object)
+                    DecimalPool.BeyondDoubleFractionValue.Value,
+                DecimalPool.NearLongMaxFraction => (object)
+                    DecimalPool.NearLongMaxFractionValue.Value,
                 _ => (object)DecimalPool.Named(1m, 0, pool).Value,
             },
-            Decimal => DecimalPool.Named(100m, 2, pool).Value,
+            Decimal => pool == DecimalPool.BeyondPrecision
+                ? DecimalPool.BeyondPrecisionOf(AmountPrecision, AmountScale).Value
+                : DecimalPool.Named(100m, AmountScale, pool).Value,
             _ => throw new ArgumentOutOfRangeException(nameof(columnType), columnType, null),
         };
 
@@ -1090,7 +1981,7 @@ public static class TranslatorParityBindingRows
         columnType == BigInt ? typeof(long) : typeof(int);
 
     /// <summary>
-    /// 縮める変換の元の値（池の値）。範囲の外の値は、列の側は列の型の上限（bigint の long の上限はシードの行。decimal(10,2) は int の範囲を
+    /// 縮める変換の元の値（プールの値）。範囲の外の値は、列の側は列の型の上限（bigint の long の上限はシードの行。decimal(10,2) は int の範囲を
     /// 超えないので列の上限）、値の側は変換先の型の上限を超える値（double から整数への変換は範囲の端に止まる）
     /// </summary>
     private static decimal NarrowingSourceOf(string columnType, string pool, bool valueSide)
@@ -1125,6 +2016,7 @@ public static class TranslatorParityBindingRows
         : type == typeof(long) ? 2
         : type == typeof(decimal) ? 3
         : type == typeof(double) ? 4
+        : type == typeof(uint) || type == typeof(ulong) ? 5
         : type == typeof(DateTime) ? 10
         : type == typeof(bool) ? 20
         : throw new ArgumentOutOfRangeException(nameof(type), type, null);
@@ -1132,6 +2024,25 @@ public static class TranslatorParityBindingRows
     /// <summary>2 つの型を C# の 2 項の昇格でそろえた型（decimal と double は変換を外した形の C# の評価だけが使い、double で比べる）</summary>
     private static Type Promote(Type left, Type right)
     {
+        if (left == right)
+        {
+            return RankOf(left) == 0 ? typeof(int) : left;
+        }
+
+        // 符号なしの値（符号だけの変換の変換先と比べる値）：C# は uint と符号つきの整数を long へ広げる。ulong と符号つきの整数は C# で直に
+        // 比べられないので、変換を外した形の評価（数として比べる）だけが decimal で比べる
+        if (IsUnsigned(left) || IsUnsigned(right))
+        {
+            var other = IsUnsigned(left) ? right : left;
+            var unsigned = IsUnsigned(left) ? left : right;
+
+            return other == typeof(decimal) ? typeof(decimal)
+                : IsUnsigned(other) ? typeof(ulong)
+                : unsigned == typeof(uint) && (other == typeof(int) || other == typeof(long))
+                    ? typeof(long)
+                : typeof(decimal);
+        }
+
         var promoted = RankOf(left) >= RankOf(right) ? left : right;
 
         return RankOf(promoted) == 0 ? typeof(int) : promoted;
@@ -1144,6 +2055,29 @@ public static class TranslatorParityBindingRows
     /// <param name="row">行</param>
     internal static Type? ColumnCastTypeOf(TranslatorParityBinding row) =>
         row.Levels[ColumnShape] == NarrowingCast ? ColumnCastOf(row.ColumnType) : null;
+
+    /// <summary>列の側の符号だけの変換の変換先の型（符号だけの変換の行でなければ null）</summary>
+    /// <param name="row">行</param>
+    internal static Type? SignCastTypeOf(TranslatorParityBinding row) =>
+        IsSignCast(row.Levels[ColumnShape]) ? SignCastTargetOf(row.Levels[ColumnShape]) : null;
+
+    /// <summary>行の列の、シードの行の値（基底が入れるシード。NULL を含む）</summary>
+    /// <param name="row">行</param>
+    internal static IEnumerable<object?> SeedColumnValues(TranslatorParityBinding row) =>
+        row.Entity switch
+        {
+            BindingEntity.SmallChild => TranslatorParityRuntimeTestsBase
+                .CrossTypeChildren()
+                .Select(seed => (object?)seed.BigParentId),
+            BindingEntity.BigParent => TranslatorParityRuntimeTestsBase
+                .WideBigParents()
+                .Select(seed => (object?)seed.Id),
+            _ => TranslatorParityRuntimeTestsBase
+                .SeedProbes()
+                .Select(seed =>
+                    typeof(ProbeEntity).GetProperty(PropertyOf(row.ColumnType))!.GetValue(seed)
+                ),
+        };
 
     /// <summary>値の側の縮める変換が作る値（単一の値は 1 つ・リスト・配列は要素の 2 つ。値の側に縮める変換が無い行は空）</summary>
     /// <param name="row">行</param>
@@ -1167,6 +2101,17 @@ public static class TranslatorParityBindingRows
         var levels = row.Levels;
         var pool = levels[ValuePool];
 
+        if (IsSignCast(levels[ColumnShape]))
+        {
+            var unsigned = SignCastValueOf(
+                levels[ColumnType],
+                levels[ColumnShape],
+                pool,
+                levels[DateTimeKind]
+            );
+            return new ValueSide(unsigned, unsigned.GetType(), false);
+        }
+
         if (!IsNarrowingPool(pool))
         {
             var value = PoolValueOf(levels[ColumnType], pool, levels[DateTimeKind]);
@@ -1187,6 +2132,37 @@ public static class TranslatorParityBindingRows
         );
 
         return new ValueSide(image, typeof(int), false);
+    }
+
+    /// <summary>符号なしの型か</summary>
+    private static bool IsUnsigned(Type type) => type == typeof(uint) || type == typeof(ulong);
+
+    /// <summary>
+    /// 符号だけの変換の行の比べる値：符号の境目と符号なしの型の最大は変換先の型の値、ほかの値のプールは列の型の値（<see cref="PoolValueOf"/>）で、
+    /// 変換先の型で表せる 0 以上の整数は変換先の型の値にする（C# の符号なしどうしの比較）。小数・負の整数・decimal の値はそのまま C# の
+    /// 2 項の昇格で比べる（uint と int・long は long、uint・ulong と decimal は decimal）
+    /// </summary>
+    private static object SignCastValueOf(string columnType, string shape, string pool, string kind)
+    {
+        var target = SignCastTargetOf(shape);
+        object value = pool switch
+        {
+            IntegerPool.SignBoundary => IntegerPool.SignBoundaryOf(target).Value,
+            IntegerPool.UnsignedMax => IntegerPool.UnsignedMaxOf(target).Value,
+            _ => PoolValueOf(columnType, pool, kind),
+        };
+
+        // 腕を object へそろえる（そろえないと条件式の型が ulong になり、uint の値が ulong へ広がる）
+        return value switch
+        {
+            ulong number => target == typeof(uint) ? (object)checked((uint)number) : (object)number,
+            int number when number >= 0 => target == typeof(uint)
+                ? (object)(uint)number
+                : (object)(ulong)number,
+            long number when number >= 0 && (target == typeof(ulong) || number <= uint.MaxValue) =>
+                target == typeof(uint) ? (object)(uint)number : (object)(ulong)number,
+            _ => value,
+        };
     }
 
     /// <summary>列の側の式（列と、列の側の形。日付部品は NULL の行を外す条件 <paramref name="guard"/> を返す）</summary>
@@ -1221,6 +2197,13 @@ public static class TranslatorParityBindingRows
                 return Expression.Convert(
                     column,
                     Lifted(column.Type, ColumnCastOf(row.ColumnType))
+                );
+
+            case UIntCast
+            or ULongCast when !drop.HasFlag(NarrowingDrop.Column):
+                return Expression.Convert(
+                    column,
+                    Lifted(column.Type, SignCastTargetOf(row.Levels[ColumnShape]))
                 );
 
             default:
@@ -1494,6 +2477,9 @@ public static class TranslatorParityBindingRows
             DateTime day => day.AddDays(-1),
             int number => number + 1,
             long number => number + 1,
+            // 符号なしの型の最大は 1 つ前へずらす（足すと 0 へ折り返す）
+            uint number => number == uint.MaxValue ? number - 1 : number + 1,
+            ulong number => number == ulong.MaxValue ? number - 1 : number + 1,
             decimal number => number + 1m,
             double number => number + 1d,
             bool flag => !flag,

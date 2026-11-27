@@ -1,5 +1,6 @@
 using QuickER.Dialects;
 using QuickER.Tests.Provider;
+using QuickER.Tests.TestSupport.ValuePools;
 
 namespace QuickER.Tests.Integration.Dialects;
 
@@ -763,8 +764,30 @@ internal static class DialectTypeRealDbRows
                 "map-postgresql-array-timetz-words-efcore-column-type",
                 PostgreSql,
                 "'{\"10:30:00+07\"}'",
-                new[] { new DateTimeOffset(1, 1, 2, 10, 30, 0, TimeSpan.FromHours(7)) },
-                new[] { new DateTimeOffset(1, 1, 2, 23, 4, 5, TimeSpan.FromHours(-5)) }
+                new[]
+                {
+                    new DateTimeOffset(
+                        DateTimeEdges.CalendarFirstYear,
+                        1,
+                        2,
+                        10,
+                        30,
+                        0,
+                        TimeSpan.FromHours(7)
+                    ),
+                },
+                new[]
+                {
+                    new DateTimeOffset(
+                        DateTimeEdges.CalendarFirstYear,
+                        1,
+                        2,
+                        23,
+                        4,
+                        5,
+                        TimeSpan.FromHours(-5)
+                    ),
+                }
             ),
             EfCore(
                 "map-postgresql-array-json-efcore-column-type",
@@ -793,8 +816,24 @@ internal static class DialectTypeRealDbRows
                 "map-postgresql-timetz-words",
                 PostgreSql,
                 "'10:30:00.123456+07'",
-                new DateTimeOffset(1, 1, 2, 10, 30, 0, TimeSpan.FromHours(7)).AddTicks(1234560),
-                new DateTimeOffset(1, 1, 2, 23, 4, 5, TimeSpan.FromHours(-5)).AddTicks(1234560)
+                new DateTimeOffset(
+                    DateTimeEdges.CalendarFirstYear,
+                    1,
+                    2,
+                    10,
+                    30,
+                    0,
+                    TimeSpan.FromHours(7)
+                ).AddTicks(1234560),
+                new DateTimeOffset(
+                    DateTimeEdges.CalendarFirstYear,
+                    1,
+                    2,
+                    23,
+                    4,
+                    5,
+                    TimeSpan.FromHours(-5)
+                ).AddTicks(1234560)
             ),
         ];
 
@@ -844,7 +883,7 @@ internal static class DialectTypeRealDbRows
                 DialectNames.Sqlite,
                 "'2026-03-10 10:00:40.1234567'",
                 new DateTime(2026, 3, 10, 10, 0, 40).AddTicks(1234567),
-                new DateTime(1899, 12, 31, 23, 59, 30)
+                DateTimeEdges.SmallDateTimeMinRoundingUpAtHalfMinute
             ),
             EfCore(
                 "map-sqlite-smallmoney-decimal",
@@ -882,7 +921,7 @@ internal static class DialectTypeRealDbRows
     {
         var micro = TimeSpan.FromTicks(10);
         var clock = new TimeSpan(0, 10, 30, 0).Add(TimeSpan.FromTicks(1234560));
-        var day = TimeSpan.FromDays(1);
+        var day = TimeSpanEdges.OneDay;
         var dayAndHour = new TimeSpan(1, 1, 0, 0);
         var hour = TimeSpan.FromHours(1);
         var mySqlMax = new TimeSpan(34, 22, 59, 59);

@@ -244,7 +244,7 @@
     {
       "id": "GeneratedRuntime",
       "part": "TranslatorParityBindings",
-      "title": "値の束縛の生成の表（列の型・列の側の形・比べ方・値の数・値の池・Kind・値の形・クエリの経路を、QuickER 版・インメモリ・EF Core 版の 5 方言で C# の評価と照らす）",
+      "title": "値の束縛の生成の表（列の型・列の側の形・比べ方・値の数・値のプール・Kind・値の形・クエリの経路を、QuickER 版・インメモリ・EF Core 版の 5 方言で C# の評価と照らす）",
       "sourceFiles": [
         "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityBindingRows.cs",
         "tests/QuickER.Tests.Integration/GeneratedRuntime/TranslatorParityBindingRun.cs",

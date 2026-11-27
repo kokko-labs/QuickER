@@ -369,17 +369,33 @@ public static class NotGeneratedGuard
             problems.Add($"{generator}: 作らない形があるのに、無い理由を持つ");
         }
 
+        problems.AddRange(ShapeProblems(generator, shapes));
+    }
+
+    /// <summary>
+    /// 作らない形の行の並びの問題（Id の形と重複・形の説明・種類と直す区切り・理由・受け持つ守りの有無）。
+    /// 同じ行の形を使うほかの宣言（値のプールの受けない水準）も、この検査を共有する
+    /// </summary>
+    /// <param name="owner">行の持ち主の名前（問題の文の先頭に付ける）</param>
+    /// <param name="shapes">行（null の行も名指しする）</param>
+    public static IReadOnlyList<string> ShapeProblems(
+        string owner,
+        IReadOnlyList<NotGeneratedShape?> shapes
+    )
+    {
+        ArgumentNullException.ThrowIfNull(shapes);
+        var problems = new List<string>();
         var ids = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var shape in shapes)
         {
             if (shape is null)
             {
-                problems.Add($"{generator}: null の行がある");
+                problems.Add($"{owner}: null の行がある");
                 continue;
             }
 
-            var name = $"{generator}/{shape.Id}";
+            var name = $"{owner}/{shape.Id}";
 
             if (shape.Id is null || !IdPattern.IsMatch(shape.Id))
             {
@@ -422,5 +438,7 @@ public static class NotGeneratedGuard
                 );
             }
         }
+
+        return problems;
     }
 }

@@ -23,10 +23,6 @@ public sealed class TranslatorParityAdoSqliteRuntimeTests
     private readonly SqliteTempDatabase _db = SqliteTempDatabase.Create();
 
     /// <inheritdoc />
-    protected override IReadOnlyDictionary<string, string> KnownRefusals =>
-        QuickErUlongColumnCastRefusals;
-
-    /// <inheritdoc />
     /// <remarks>
     /// SQLite は TimeSpan を文字列（<c>hh:mm:ss.fffffff</c>・1 日以上は <c>d.hh:mm:ss</c>）で持ち、順序比較は文字列の順で比べる。
     /// 0〜24 時間未満の値どうしなら数の順と一致するが、1 日の値との比較は文字列の順で割れる（docs の TimeSpan の既知の割り切り）。

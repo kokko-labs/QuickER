@@ -6,7 +6,7 @@ using QuickER.Tests.TestSupport.Engines;
 namespace QuickER.Tests.Integration.GeneratedRuntime;
 
 /// <summary>
-/// 実装先どうしの一致の乱数の操作の列が書く値の幅（<see cref="BackendParityGenerator"/> の値の池）の次元表・網羅しない組の一覧・
+/// 実装先どうしの一致の乱数の操作の列が書く値の幅（<see cref="BackendParityGenerator"/> の値のプール）の次元表・網羅しない組の一覧・
 /// 台帳の行
 /// </summary>
 /// <remarks>
@@ -75,8 +75,16 @@ internal static class BackendParityValueDimensions
                 ),
                 new Factor(
                     DateFraction,
-                    [new Level(None), new Level("Whole"), new Level("Ticks")],
-                    "注文の日時の端数（整数秒・7 桁の tick）"
+                    [
+                        new Level(None),
+                        new Level("Whole"),
+                        new Level("Ticks"),
+                        new Level("Midnight"),
+                        new Level("DayEnd"),
+                        new Level("CalendarFirst"),
+                        new Level("CalendarLast"),
+                    ],
+                    "注文の日時の形（整数秒・7 桁の tick・0 時・その日の最後の tick・暦の最初と最後）"
                 ),
                 new Factor(
                     DecimalEdge,
@@ -102,8 +110,9 @@ internal static class BackendParityValueDimensions
                         new Level("Ascii"),
                         new Level("NonAscii"),
                         new Level("Surrogate"),
+                        new Level("Empty"),
                     ],
-                    "メモ・品名・備考・ラベルの文字（ASCII だけ・BMP の非 ASCII・サロゲートペア）"
+                    "メモ・品名・備考・ラベルの文字（ASCII だけ・BMP の非 ASCII・サロゲートペア・空文字列）"
                 ),
             ],
             [],
@@ -258,10 +267,16 @@ internal static class BackendParityValueDimensions
     }
 
     private static (string, string)[] Date(DateTime value) =>
-        [
-            (DateKind, value.Kind.ToString()),
-            (DateFraction, value.Ticks % TimeSpan.TicksPerSecond == 0 ? "Whole" : "Ticks"),
-        ];
+        [(DateKind, value.Kind.ToString()), (DateFraction, FractionOf(value))];
+
+    /// <summary>日時の形：暦の端 → 0 時 → その日の最後の tick → 整数秒 → tick の順に当てる</summary>
+    private static string FractionOf(DateTime value) =>
+        value.Ticks == DateTime.MinValue.Ticks ? "CalendarFirst"
+        : value.Ticks == DateTime.MaxValue.Ticks ? "CalendarLast"
+        : value.TimeOfDay == TimeSpan.Zero ? "Midnight"
+        : value.TimeOfDay.Ticks == TimeSpan.TicksPerDay - 1 ? "DayEnd"
+        : value.Ticks % TimeSpan.TicksPerSecond == 0 ? "Whole"
+        : "Ticks";
 
     private static (string, string)[] Decimal(decimal value, decimal[] edges) =>
         [
@@ -304,7 +319,8 @@ internal static class BackendParityValueDimensions
         [
             (
                 TextShape,
-                value.Any(char.IsSurrogate) ? "Surrogate"
+                value.Length == 0 ? "Empty"
+                : value.Any(char.IsSurrogate) ? "Surrogate"
                 : value.Any(c => c > '\u007f') ? "NonAscii"
                 : "Ascii"
             ),

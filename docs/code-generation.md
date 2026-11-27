@@ -618,11 +618,11 @@ And the stores disagree.
 
 | Backend | How `Contains` / `StartsWith` / `EndsWith` decide |
 |---|---|
-| SQL Server | Follows the column's collation, which is case-insensitive under the usual `..._CI_AS` default. On a non-Unicode column (`char`, `varchar`), trailing blanks in the column's value are not counted, while blanks in the pattern are |
+| SQL Server | Follows the column's collation. The usual `..._CI_AS` default ignores letter case and the difference between full-width and half-width forms, so the full-width space counts as a space. On a non-Unicode column (`char`, `varchar`), trailing blanks in the column's value are not counted, while blanks in the pattern are |
 | SQLite | The built-in `LIKE` folds case for ASCII letters only, so `A` matches `a` but `Á` does not match `á` |
 | EF Core | Hands the call to its provider and gets that same store-dependent answer |
 | EF Core on PostgreSQL | Case matters under the database's default collation, a deterministic one such as `en_US.utf8` |
-| EF Core on MySQL | The default collation `utf8mb4_0900_ai_ci` ignores letter case and accents, matches a precomposed letter with its decomposed form, and matches `ß` with `ss`. On a value object column all three calls follow it. On a plain string column `StartsWith` and `EndsWith` are the exception: case matters, and trailing blanks in the pattern are not counted |
+| EF Core on MySQL | The default collation `utf8mb4_0900_ai_ci` ignores letter case, accents, and the difference between full-width and half-width forms (the full-width space counts as a space), matches a precomposed letter with its decomposed form, and matches `ß` with `ss`. On a value object column all three calls follow it. On a plain string column `StartsWith` and `EndsWith` are the exception: case matters, and trailing blanks in the pattern are not counted |
 | EF Core on Oracle | Case matters under the default binary comparison (`NLS_COMP=BINARY`) |
 | In-memory | Compiles the expression and evaluates it in C#, so the comparison is ordinal and case matters, on a plain string column and on a value object alike |
 
@@ -633,7 +633,10 @@ A hybrid build runs the identical predicate on two engines, so a search that is 
 Multi-target generation is one such build; a remote repository against the server with a local one against the copy is another.
 
 On MySQL the collation decides equality as well.
-`x.Name == "a"`, `x.Name != "a"`, and an `IN` list treat `a`, `A`, and `á` as the same value, as a string match does, while C# and the in-memory backend compare them ordinally.
+`x.Name == "a"`, `x.Name != "a"`, and an `IN` list treat `a`, `A`, `á`, and the full-width `ａ` as the same value, as a string match does, while C# and the in-memory backend compare them ordinally.
+MySQL's default collation compares trailing spaces too, so `a` and `a ` are different values, while `a ` and `a　` ending in a full-width space are the same value.
+SQL Server also compares equality under the column's collation, and its default ignores letter case and the difference between full-width and half-width forms, and ignores trailing spaces.
+The full-width space counts as a space, so a trailing full-width space is ignored as well, and `a`, `a `, and `a　` are the same value.
 PostgreSQL and Oracle compare equality ordinally under their defaults.
 
 In a `Query()` predicate, `string.IsNullOrEmpty` and `string.IsNullOrWhiteSpace` hold for `NULL` too and give the C# answer on both SQL engines.
@@ -773,8 +776,9 @@ A date part (`x.At.Value.Date == day`) has no column type to take, so the QuickE
 > Compare the column without the cast and convert the value side instead.
 > A mini DSL condition compares a column with a value only, so a named query does not meet this.
 
-> **Known limitation**: the EF Core Repository sends a `char` value compared with an integer column (`Query().Where(x => x.Id > letter)` with `letter` a `char`) as text instead of the number C# compares.
-> Depending on the provider and the shape of the condition, the query fails (PostgreSQL, SQL Server, Oracle, and a MySQL `ExecuteDeleteAsync`), or the answer differs without an error (SQLite in an `ExecuteUpdate` written on `QuickErDbContext`, MySQL in a query).
+> **Known limitation**: the EF Core Repository sends a `char` value compared with an `int` column (`Query().Where(x => x.Id > letter)` with `letter` a `char`) as text instead of the number C# compares.
+> Compared with a `bigint` column, the value is sent as the number.
+> Depending on the provider and the shape of the condition, the query fails (PostgreSQL, SQL Server, Oracle, and a MySQL `ExecuteDeleteAsync`), or the answer differs without an error (SQLite in an `ExecuteDeleteAsync` and in an `ExecuteUpdate` written on `QuickErDbContext`, MySQL in a query).
 > Pass the value as a number instead: `(int)letter`, or an `int` variable.
 > The QuickER Repository binds the number.
 
@@ -3469,7 +3473,7 @@ A refresh fetches every row again, so a large database can go over `DownloadRowL
   On a case-insensitive column, then, `ABC` and `abc` are one row to the server and two different keys to the engine.
   Keep the case of a text key stable, the same way [GUID keys](#guid-keys-for-string-primary-keys-useguidkeyforstringprimarykey) have to be.
 - **Whether two unique values are the same is decided by the server's collation.**
-  The local SQLite database compares a text unique value exactly, while SQL Server's default collation ignores letter case and trailing spaces.
+  The local SQLite database compares a text unique value exactly, while SQL Server's default collation ignores letter case, the difference between full-width and half-width forms, and trailing spaces (a full-width space included).
   A device can therefore hold `ABC`, or `abc` followed by a space, next to another row's `abc`, and the server refuses that row with `UniqueValueTakenOnServer`, just as it refuses the identical value.
   It is settled the same way too: `Collect` and `LocalWins` report it again on every run, and a `ServerWins` run drops the change.
 - **A fixed-length string primary key (`nchar(n)` / `char(n)`) does not keep its local spelling.**
@@ -3603,6 +3607,11 @@ The client and server share `RemoteJson.Options`.
 A cycle cannot arise in the generated model, since parent-reference navigations carry `[JsonIgnore]`.
 Should one arise anyway, with `IncludeJsonIgnoreOnParentNavigation` turned off or a navigation of your own that closes a loop, `RemoteJson.Options` sets `ReferenceHandler.IgnoreCycles`, which writes `null` where the cycle closes rather than throwing.
 The transfer then succeeds with that navigation silently missing on the receiving side.
+
+**A `DateTime` travels without its kind.**
+`RemoteJson.Options` writes a `DateTime` in the round-trip form with no offset and no `Z`, and reads it back with the same ticks as `DateTimeKind.Unspecified` (a `DateTime?` and a `DateTime` inside a value object too).
+This is the form in which the database backends read a `DateTime` back, so a client and a server in different time zones send and store the same time, and a `Local` value at either end of the calendar travels too.
+A `DateTimeOffset` keeps its offset.
 
 Named queries can all be called through the remote surface regardless of implementation method (simple DSL, raw SQL, or manual implementation), and the real implementation lives in the server-side repository.
 

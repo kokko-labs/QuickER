@@ -490,19 +490,6 @@ public abstract class TranslatorParityRuntimeTestsBase
         new Dictionary<string, string>(StringComparer.Ordinal);
 
     /// <summary>
-    /// QuickER 版（SQL Server・SQLite）の翻訳器が断る、列の側の ulong への変換の行（インメモリと EF Core 版は流して C# と比べる）
-    /// </summary>
-    protected static IReadOnlyDictionary<string, string> QuickErUlongColumnCastRefusals { get; } =
-        new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["bigint-column-ulong-cast-greater"] = QuickErUlongColumnCastReason,
-            ["int-column-ulong-cast-greater"] = QuickErUlongColumnCastReason,
-        };
-
-    private const string QuickErUlongColumnCastReason =
-        "QuickER 版の翻訳器は、列の側に書いた ulong への変換を、変換を名指しした NotSupportedException で断る。C# が折り返した値は bigint に入らず、SQL で同じ値を作れないので翻訳しない（docs/code-generation.md「Letter case, whitespace, and date parts」の Known limitation：A cast to ulong is refused because its wrapped value does not fit a bigint）";
-
-    /// <summary>
     /// 述語の表（<see cref="TranslatorParityPredicateRows"/>）の 1 行が、C# と同じ行を返すことを検証する。
     /// </summary>
     /// <remarks>
@@ -1083,7 +1070,7 @@ public abstract class TranslatorParityRuntimeTestsBase
     // ===== CLR の型が違うキーの Include =====
 
     /// <summary><see cref="SeedCrossTypeFamilyAsync"/> が入れる small_child の行の数</summary>
-    private const int CrossTypeChildCount = 4;
+    private const int CrossTypeChildCount = 5;
 
     /// <summary>
     /// 主キーが long（bigint）・外部キーが int の親子を投入する（SQL Server はこの外部キー制約を作らないが、値の組は同じ）。
@@ -1103,12 +1090,16 @@ public abstract class TranslatorParityRuntimeTestsBase
         }
     }
 
-    /// <summary>big_parent のシード（呼ぶたびに新しいインスタンスを返す）</summary>
+    /// <summary>
+    /// big_parent のシード（呼ぶたびに新しいインスタンスを返す。-1 の行は small_child の負の外部キーの親＝<see cref="WideBigParents"/> の
+    /// -1 の行と同じ値）
+    /// </summary>
     internal static IReadOnlyList<BigParentEntity> CrossTypeParents() =>
         [
             new() { Id = 1, Label = "a" },
             new() { Id = 2, Label = "b" },
             new() { Id = 3, Label = "c" },
+            new() { Id = -1, Label = "minus-one" },
         ];
 
     /// <summary>
@@ -1138,13 +1129,17 @@ public abstract class TranslatorParityRuntimeTestsBase
             Probe(12, null, null, null, null, true, amount: 12m),
         ];
 
-    /// <summary>small_child のシード（外部キー 1・1・2・NULL。呼ぶたびに新しいインスタンスを返す）</summary>
+    /// <summary>
+    /// small_child のシード（外部キー 1・1・2・NULL・-1。呼ぶたびに新しいインスタンスを返す。-1 の行は、列の側の符号だけの変換が負の値を
+    /// 折り返す行＝値の束縛の生成の表の符号だけの変換の水準）
+    /// </summary>
     internal static IReadOnlyList<SmallChildEntity> CrossTypeChildren() =>
         [
             new() { Id = 10, BigParentId = 1 },
             new() { Id = 11, BigParentId = 1 },
             new() { Id = 20, BigParentId = 2 },
             new() { Id = 30, BigParentId = null },
+            new() { Id = 40, BigParentId = -1 },
         ];
 
     /// <summary>
@@ -1172,6 +1167,7 @@ public abstract class TranslatorParityRuntimeTestsBase
                 (1L, new List<int> { 10, 11 }),
                 (2L, new List<int> { 20 }),
                 (3L, new List<int>()),
+                (-1L, new List<int> { 40 }),
             ]);
 
         var children = await Repository<ISmallChildRepository>()
@@ -1182,7 +1178,13 @@ public abstract class TranslatorParityRuntimeTestsBase
         children
             .Select(c => (c.Id, c.BigParent?.Label))
             .Should()
-            .BeEquivalentTo([(10, "a"), (11, "a"), (20, "b"), (30, (string?)null)]);
+            .BeEquivalentTo([
+                (10, "a"),
+                (11, "a"),
+                (20, "b"),
+                (30, (string?)null),
+                (40, "minus-one"),
+            ]);
     }
 
     /// <summary>
@@ -1205,7 +1207,7 @@ public abstract class TranslatorParityRuntimeTestsBase
         deleted.Should().Be(3);
 
         var remaining = await Repository<ISmallChildRepository>().Query().ToListAsync(Ct);
-        remaining.Select(c => c.Id).Should().BeEquivalentTo([20, 30]);
+        remaining.Select(c => c.Id).Should().BeEquivalentTo([20, 30, 40]);
     }
 
     // ===== 更新できる列が無い表の UPDATE =====

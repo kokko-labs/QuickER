@@ -1,6 +1,7 @@
 using QuickER.Dialects;
 using QuickER.Model;
 using QuickER.Tests.TestSupport.Engines;
+using QuickER.Tests.TestSupport.ValuePools;
 
 namespace QuickER.Tests.TestSupport;
 
@@ -175,8 +176,8 @@ public static class DslFuzzUnits
     /// クエリ <c>KM*</c>（経路ごとの結果を読む）と、それを使う合成のクエリ <c>KX*</c>
     /// </summary>
     /// <remarks>
-    /// money の値の範囲は 10 の累乗の桁では表せないので、列の型に入るかは <see cref="DslMoneyType"/> で決める。行の値の池は型の両端を持つ
-    /// （smallmoney の列は、種類ごとの decimal の池の ±99999999.99 が入らないので範囲の中の値だけ）。種の単位は money の列を持たない
+    /// money の値の範囲は 10 の累乗の桁では表せないので、列の型に入るかは <see cref="DslMoneyType"/> で決める。行の値のプールは型の両端を持つ
+    /// （smallmoney の列は、種類ごとの decimal のプールの ±99999999.99 が入らないので範囲の中の値だけ）。種の単位は money の列を持たない
     /// （種の生成器の入力と指紋を変えないため）。
     /// </remarks>
     public static DslFuzzUnit SqlServerMoneyCoverage()
@@ -256,7 +257,7 @@ public static class DslFuzzUnits
     /// </para>
     /// <para>
     /// SQL Server の QuickER 版 Repository と EF Core 版の両方で流す（Integration の <c>NamedQueryDslConditionFuzzSqlServerRuntimeTests</c>）。
-    /// 4 つの池と原子の形は <see cref="DslFuzzGenerator"/> の列の型に入らない値の原子が作る。
+    /// 4 つのプールと原子の形は <see cref="DslFuzzGenerator"/> の列の型に入らない値の原子が作る。
     /// </para>
     /// </remarks>
     public static DslFuzzUnit SqlServerLegacyDateTimeCoverage()
@@ -297,14 +298,14 @@ public static class DslFuzzUnits
                     day.AddMilliseconds(4),
                     day.AddMilliseconds(5),
                     // 読み戻す値と 1/300 秒の刻みの間（.003 と .0033333 の間・.0066667 と .007 の間）
-                    day.AddTicks(31_000),
-                    day.AddTicks(68_000),
+                    day.AddTicks(DateTimeEdges.LegacyWindowAfterReadBackTicks),
+                    day.AddTicks(DateTimeEdges.LegacyWindowBeforeReadBackTicks),
                     // 最大値の後（.998 は .997 に丸まり、.999 は 10000 年へ繰り上がる）
-                    new DateTime(9999, 12, 31, 23, 59, 59, 998),
-                    new DateTime(9999, 12, 31, 23, 59, 59, 999),
+                    DateTimeEdges.SqlDateTimeMaxRoundingDown,
+                    DateTimeEdges.SqlDateTimeMaxRoundingOverflow,
                     // 最小値の前
-                    new DateTime(1752, 12, 31),
-                    new DateTime(1752, 12, 31, 23, 59, 59, 999),
+                    DateTimeEdges.DayBeforeSqlDateTimeMin,
+                    DateTimeEdges.SqlDateTimeMinRoundingUp,
                 ],
             },
             new("sd", "smalldatetime", DslClr.DateTime, Nullable: true)
@@ -324,10 +325,10 @@ public static class DslFuzzUnits
                     minute.AddMilliseconds(29_999),
                     minute.AddMilliseconds(500),
                     // 範囲の外（最大値の後・最小値の前）
-                    new DateTime(2079, 6, 6, 23, 59, 20),
-                    new DateTime(2079, 6, 7),
-                    new DateTime(1899, 12, 31, 23, 59, 0),
-                    new DateTime(1899, 12, 31, 23, 59, 40),
+                    DateTimeEdges.SmallDateTimeMaxRoundingDown,
+                    DateTimeEdges.DayAfterSmallDateTimeMax,
+                    DateTimeEdges.MinuteBeforeSmallDateTimeMin,
+                    DateTimeEdges.SmallDateTimeMinRoundingUp,
                 ],
             },
         ];
@@ -357,7 +358,7 @@ public static class DslFuzzUnits
     }
 
     /// <summary>
-    /// datetime・smalldatetime の列の 2 行目から、列の値の池を 1 つずつ並べて入れる（比べる値が丸まって重なる行の値・型の両端を、
+    /// datetime・smalldatetime の列の 2 行目から、列の値のプールを 1 つずつ並べて入れる（比べる値が丸まって重なる行の値・型の両端を、
     /// 乱数の行の選び方に依らずいつも持たせる。1 行目の NULL は保つ）
     /// </summary>
     private static void PutLegacyDateTimeRows(
@@ -779,8 +780,8 @@ public static class DslFuzzUnits
     /// （NULL 許容。固定長を持たない PostgreSQL・Oracle は可変長）・並び替えと合成の相方の整数の列
     /// </summary>
     /// <remarks>
-    /// バイナリの列の長さは 4（値の池はそれより短い）。SQL Server・MySQL の固定長の列は値を 0x00 で詰めて読み戻す（docs のバイナリの
-    /// 段落）。Oracle の NOT NULL のバイナリの列の値の池は空の配列を持たない（Oracle は空のバイナリを NULL として持ち、NOT NULL の列は
+    /// バイナリの列の長さは 4（値のプールはそれより短い）。SQL Server・MySQL の固定長の列は値を 0x00 で詰めて読み戻す（docs のバイナリの
+    /// 段落）。Oracle の NOT NULL のバイナリの列の値のプールは空の配列を持たない（Oracle は空のバイナリを NULL として持ち、NOT NULL の列は
     /// 断る＝文字列の空文字列と同じ。NULL を許す列は空を持ち、読み戻すと NULL になる）。
     /// </remarks>
     private static DslColumn[] FamiliesColumns(string dbms)
@@ -977,7 +978,7 @@ public static class DslFuzzUnits
     /// <c>coverage-sqlite-datetimeoffset-mixed-ordered</c> と <c>-mixed-ordered-plain</c>）
     /// </summary>
     /// <remarks>
-    /// SQLite の単位の値の池は時差をそろえた値（docs の既知の割り切り）なので、局所の時刻で比べても瞬間で比べても答えが変わらない。
+    /// SQLite の単位の値のプールは時差をそろえた値（docs の既知の割り切り）なので、局所の時刻で比べても瞬間で比べても答えが変わらない。
     /// インメモリは C# の比較なので時差の混ざった値でも割り切りが無く、Docker の要らない QuickER.Tests でもオラクルの瞬間の比較と
     /// 並び替えを確かめられる（列の型は SQLite の宣言型のまま。QuickER 版と EF Core〔SQLite〕では流さない）。混在を断る形は作らない
     /// （生成の段の形で、ほかの単位が作る）。
@@ -1016,7 +1017,7 @@ public static class DslFuzzUnits
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 行と比べる値の池は docs の DateTimeOffset の既知の割り切りの写し：SQL Server・Oracle は時差の混ざった値（SQL Server は 100 ナノ秒の端数も。
+    /// 行と比べる値のプールは docs の DateTimeOffset の既知の割り切りの写し：SQL Server・Oracle は時差の混ざった値（SQL Server は 100 ナノ秒の端数も。
     /// Oracle はマイクロ秒の粒度）、SQLite は時差をそろえた値（TEXT で持ち、同じ時差の値どうしでだけ TEXT の順が瞬間の順と一致する）、
     /// PostgreSQL は時差 0 の値（timestamptz は Npgsql が時差 0 でない値を断る）。PostgreSQL の timetz は作らない（作らない形の宣言）。
     /// </para>
@@ -1150,7 +1151,7 @@ public static class DslFuzzUnits
     /// 可変長のバイナリ・並び替えと合成の相方の整数の列
     /// </summary>
     /// <remarks>
-    /// 行と比べる値の池は docs の TimeSpan の既知の割り切りの写し：SQLite（文字列で持つ）と SQL Server（time は 0〜24 時間未満）は日の中だけ、
+    /// 行と比べる値のプールは docs の TimeSpan の既知の割り切りの写し：SQLite（文字列で持つ）と SQL Server（time は 0〜24 時間未満）は日の中だけ、
     /// PostgreSQL の time の列は行の値が日の中だけで比べる値に範囲の外の値も持つ（time は 0〜24:00:00 しか持たず、EF Core 版は範囲の外の値の書き込みを断る）、
     /// PostgreSQL の interval の列は負の値と 1 日超の値と範囲の外の値、MySQL の time は ±838:59:59 の中の負の値と 1 日超の値（範囲の外の値は
     /// 端へ丸めて比べられるので作らない）。PostgreSQL・MySQL の値はマイクロ秒の粒度（端数の切り詰めは docs の既存の割り切り）。
@@ -1296,8 +1297,20 @@ public static class DslFuzzUnits
     /// </summary>
     private static void PutRoundingValues(List<IReadOnlyDictionary<string, object?>> rows)
     {
-        object?[] int32 = [16777217, 16777216, null, 100000001];
-        object?[] int64 = [9007199254740993L, 9007199254740992L, 16777217L, 10000000000000001L];
+        object?[] int32 =
+        [
+            PowerOfTwoEdges.TwoPow24Plus1,
+            PowerOfTwoEdges.TwoPow24,
+            null,
+            100000001,
+        ];
+        object?[] int64 =
+        [
+            PowerOfTwoEdges.TwoPow53Plus1,
+            PowerOfTwoEdges.TwoPow53,
+            (long)PowerOfTwoEdges.TwoPow24Plus1,
+            10000000000000001L,
+        ];
 
         for (var i = 0; i < int32.Length; i++)
         {
@@ -1318,10 +1331,10 @@ public static class DslFuzzUnits
         foreach (
             var (name, value) in new[]
             {
-                ("f32", (object)16777216f),
-                ("f32n", 16777216f),
-                ("f64", 9007199254740992d),
-                ("f64n", 9007199254740992d),
+                ("f32", (object)(float)PowerOfTwoEdges.TwoPow24),
+                ("f32n", (float)PowerOfTwoEdges.TwoPow24),
+                ("f64", (double)PowerOfTwoEdges.TwoPow53),
+                ("f64n", (double)PowerOfTwoEdges.TwoPow53),
             }
         )
         {
@@ -1343,9 +1356,9 @@ public static class DslFuzzUnits
     /// <c>BINARY_FLOAT</c>・<c>BINARY_DOUBLE</c>（NUMBER 系の <c>FLOAT</c> は作らない形の宣言）。
     /// </para>
     /// <para>
-    /// 値の池は NaN・無限大を持たない（docs の既知の割り切り）。float の列の比べる値は double の値（<see cref="DslFuzz.FloatOperandDoubles"/>）も
+    /// 値のプールは NaN・無限大を持たない（docs の既知の割り切り）。float の列の比べる値は double の値（<see cref="DslFuzz.FloatOperandDoubles"/>）も
     /// 持つ。MySQL の float の列は 2 進で正確で 6 桁以内の値だけ、相方の整数の列は 2^24 の内側の値だけにする（docs の MySQL の既知の割り切りを
-    /// 値の池で表す）。
+    /// 値のプールで表す）。
     /// </para>
     /// </remarks>
     private static DslColumn[] FloatingColumns(string dbms)
@@ -1569,13 +1582,13 @@ public static class DslFuzzUnits
         ];
 
     /// <summary>
-    /// SQL Server の Unicode でない文字列の列（varchar・char）。値の池は列の長さに収まり、ASCII の外の文字を含む値（<c>'</c> を含むものと
+    /// SQL Server の Unicode でない文字列の列（varchar・char）。値のプールは列の長さに収まり、ASCII の外の文字を含む値（<c>'</c> を含むものと
     /// 含まないもの）と、それが列の文字集合で <c>?</c> に化けた形を含む
     /// </summary>
     /// <remarks>
     /// 末尾の空白で終わる値（varchar の <c>'a '</c> など・char の列の 4 文字に満たない値は詰めた空白で返る）と、先頭の空白で始まる値を持つ。
     /// SQL Server の Unicode でない列の文字列一致は列の値の末尾の空白を数えず、パターンの空白は数える（docs の「大文字小文字・空白・日付部品」の
-    /// 表の SQL Server の行。オラクルの <c>DslFuzz.MatchValue</c>）。値の池はパターンにも使うので、末尾の空白で終わるパターンも作る。
+    /// 表の SQL Server の行。オラクルの <c>DslFuzz.MatchValue</c>）。値のプールはパターンにも使うので、末尾の空白で終わるパターンも作る。
     /// </remarks>
     private static DslColumn[] SqlServerAnsiColumns() =>
         [
@@ -1597,14 +1610,14 @@ public static class DslFuzzUnits
                     "?",
                     "a?",
                     "?'",
-                    "日本",
-                    "日",
-                    "a日",
-                    "日'",
+                    TextEdges.KanjiNihon,
+                    TextEdges.KanjiNichi,
+                    "a" + TextEdges.KanjiNichi,
+                    TextEdges.KanjiNichi + "'",
                     "a ",
                     "a  ",
                     " a",
-                    "日 ",
+                    TextEdges.KanjiNichi + " ",
                 ],
             },
             new("f", "char(4)", DslClr.FixedString, Nullable: true)
@@ -1621,13 +1634,13 @@ public static class DslFuzzUnits
                     "????",
                     "a?bc",
                     "?'ab",
-                    "日本日本",
-                    "a日bc",
-                    "日'ab",
+                    TextEdges.KanjiNihon + TextEdges.KanjiNihon,
+                    "a" + TextEdges.KanjiNichi + "bc",
+                    TextEdges.KanjiNichi + "'ab",
                     "a",
                     "ab ",
                     " a",
-                    "日",
+                    TextEdges.KanjiNichi,
                 ],
             },
         ];
@@ -1637,7 +1650,7 @@ public static class DslFuzzUnits
     /// </summary>
     /// <remarks>
     /// <c>money</c> の列 <c>m</c> は、型マッパーが精度なしの decimal に写す型で、EF Core が比べる値をどの型で束縛するかを試す
-    /// （値の池の decimal は小数 2 桁までなので、money の列に丸めずに入る）。
+    /// （値のプールの decimal は小数 2 桁までなので、money の列に丸めずに入る）。
     /// <c>m</c> と比べる数のリテラルは負の値を作らない（行の値・パラメータは負の値も持つ）。Npgsql の EF Core のプロバイダは負の定数を
     /// <c>-99999999.99::money</c> と書き、PostgreSQL は money の単項の負号を持たないので断る（42883。docs の「大文字小文字・空白・日付部品」の
     /// 節の既知の割り切り）。
@@ -1662,7 +1675,7 @@ public static class DslFuzzUnits
     /// Oracle の列（SQL Server の列の組を Oracle の型へ写したもの。Oracle の型マッパーは RAW を byte[] に写すので Guid の列は無い）
     /// </summary>
     /// <remarks>
-    /// NOT NULL の文字列の列 <c>sn</c> の値の池は空文字列を持たない（Oracle は空文字列を NULL として持ち、NOT NULL の列は断る＝
+    /// NOT NULL の文字列の列 <c>sn</c> の値のプールは空文字列を持たない（Oracle は空文字列を NULL として持ち、NOT NULL の列は断る＝
     /// docs の「大文字小文字・空白・日付部品」の節）。NULL を許す列は空文字列を持ち、読み戻すと NULL になる。
     /// </remarks>
     private static DslColumn[] OracleColumns() =>

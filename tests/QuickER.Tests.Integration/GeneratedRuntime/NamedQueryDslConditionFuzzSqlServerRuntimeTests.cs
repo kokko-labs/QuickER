@@ -112,6 +112,7 @@ public sealed class NamedQueryDslConditionFuzzSqlServerRuntimeTests(
                     .Select(unit => (unit, target)),
                 (DslFuzzUnits.SqlServerOutOfDayCoverage(), adoTarget),
                 (DslFuzzUnits.SqlServerLegacyDateTimeCoverage(), target),
+                (DslFuzzPoolEdges.Coverage(DialectNames.SqlServer), target),
             ];
 
         // 単位・実装先ごとに別のデータベースを作るので、単位を並べて流せる

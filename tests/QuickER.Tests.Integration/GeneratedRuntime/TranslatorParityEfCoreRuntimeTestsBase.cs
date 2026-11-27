@@ -48,12 +48,13 @@ public abstract class TranslatorParityEfCoreRuntimeTestsBase
         new Dictionary<string, string>();
 
     /// <summary>
-    /// 述語の表の列の側の符号だけの変換の行（int → uint・ulong への変換ほか）の割れの理由の後ろに付ける、指摘の名前と扱い。
-    /// 縮める変換と同じく変換が C# のように折り返さないので、指摘 <see cref="TranslatorParityBindingKnownFailures.EfCoreNarrowingColumnCastFinding"/>
-    /// （Pending・きっかけ待ち）が受ける
+    /// 述語の表に残した列の側の符号だけの変換の行（int の列の (uint) と int の範囲の外の decimal の値。生成の表の値のプールでは作れない）の
+    /// 割れの理由。EF Core 版は 5 方言とも列の側の (uint) を負の値を折り返さない変換に書くので、C# が折り返して当てる int.MinValue の行に
+    /// 当たらない（生成の表の既知の失敗の規則 SignOnlyColumnCast と同じ振る舞い。指摘
+    /// <see cref="TranslatorParityBindingKnownFailures.EfCoreNarrowingColumnCastFinding"/>・Pending・きっかけ待ち）
     /// </summary>
-    protected const string ColumnCastFindingNote =
-        "（指摘 "
+    protected const string SignOnlyCastDecimalValue =
+        "EF Core 版は列の側の (uint) を負の値を折り返さない変換に書き、C# が折り返して当てる int.MinValue の行に当たらない（指摘 "
         + TranslatorParityBindingKnownFailures.EfCoreNarrowingColumnCastFinding
         + "・Pending・きっかけ待ち。docs の EF Core 版の Known limitation に、列は変換せずに値の側を変換する回避を書いた）";
 

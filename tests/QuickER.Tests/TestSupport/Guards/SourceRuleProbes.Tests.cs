@@ -627,5 +627,132 @@ internal static partial class SourceRuleProbes
             {
                 InactiveBranch = true,
             },
+            // 値の端の 7 つの形（日時の範囲の端・1 tick・datetime の刻み・TimeSpan の端・浮動小数点の端・2^24 と 2^53・
+            // 非 ASCII の短い文字列）を拾う。非 ASCII の文字列は生文字列の中にエスケープの表記で書く（トークンの値で拾う）。
+            // 修飾した型の名前・条件付きアクセス・長整数のリテラル・アンダースコア区切りのリテラルも拾う
+            new SourceRuleProbe(
+                "value-edge-literal-copies-forms",
+                "value-edge-literal-copies",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System;
+
+                        internal static class Probe
+                        {
+                            public static void Hits()
+                            {
+                                var a = new DateTime(1752, 12, 31);
+                                var b = new DateTimeOffset(9999, 1, 1, 0, 0, 0, TimeSpan.Zero);
+                                var c = new DateOnly(1, 1, 1);
+                                var c2 = new System.DateTime(1753, 1, 1);
+                                var d = a.AddTicks(-1);
+                                var e = a.AddTicks(1);
+                                var e2 = a.AddTicks(1L);
+                                DateTime? maybe = a;
+                                var e3 = maybe?.AddTicks(1);
+                                var f = a.AddTicks(31_000);
+                                var g = TimeSpan.FromTicks(66667);
+                                var h = TimeSpan.TicksPerSecond / 300;
+                                var k = TimeSpan.FromDays(1);
+                                var l = TimeSpan.MaxValue;
+                                var m = TimeSpan.FromHours(838);
+                                var n = float.Epsilon;
+                                var o = -0.0;
+                                var p = -0.0f;
+                                var q = -0f;
+                                var r = 16777216;
+                                var s = 9007199254740993L;
+                                var v = "日";
+                                var w = "Ｚé";
+                                var w2 = "é";
+                                var w3 = "Ж";
+                                var w4 = "ñ";
+                            }
+                        }
+                        """,
+                        "日時の範囲の端",
+                        "日時の範囲の端",
+                        "日時の範囲の端",
+                        "日時の範囲の端",
+                        "1 tick の端",
+                        "1 tick の端",
+                        "1 tick の端",
+                        "1 tick の端",
+                        "datetime の刻み",
+                        "datetime の刻み",
+                        "datetime の刻み",
+                        "TimeSpan の端",
+                        "TimeSpan の端",
+                        "TimeSpan の端",
+                        "浮動小数点の端",
+                        "浮動小数点の端",
+                        "浮動小数点の端",
+                        "浮動小数点の端",
+                        "2^24・2^53 の端",
+                        "2^24・2^53 の端",
+                        "ASCII の外の文字",
+                        "ASCII の外の文字",
+                        "ASCII の外の文字",
+                        "ASCII の外の文字",
+                        "ASCII の外の文字"
+                    ),
+                ]
+            ),
+            // ほかの年・±1 でない tick・刻みの値の外の引数・刻みでない位置の同じ数・Unspecified・端でない TimeSpan・通常のゼロ・2^24 の手前・
+            // 型の端でない名前・Kind と型の端（BCL の定数が正本なので拾わない）・8 文字以上の非 ASCII の文字列・平仮名と和文の約物を含む短い文言・ASCII の文字列・コメントと文字列の中の形・型を書かない new は拾わない
+            new SourceRuleProbe(
+                "value-edge-literal-copies-nonforms",
+                "value-edge-literal-copies",
+                [
+                    new ProbeFile(
+                        "Probe.cs",
+                        """
+                        using System;
+
+                        internal static class Probe
+                        {
+                            // new DateTime(1752, 1, 1) DateTimeKind.Utc long.MaxValue
+                            public static void Misses(DateTime a, Settings settings)
+                            {
+                                var a1 = new DateTime(2024, 1, 1);
+                                var a2 = new DateTime(1754, 1, 1);
+                                var a3 = new Version(1900, 1);
+                                DateTime a4 = new(1900, 1, 1);
+                                var b1 = a.AddTicks(2);
+                                var b2 = a.AddTicks(-2);
+                                var b3 = a.AddTicks(30_000);
+                                var c1 = 31_000;
+                                var c2 = Math.Max(31000, 1);
+                                var c3 = TimeSpan.TicksPerSecond / 3;
+                                var d1 = DateTimeKind.Unspecified;
+                                var d2 = DateTimeKind.Utc;
+                                var d3 = System.DateTimeKind.Local;
+                                var e1 = TimeSpan.FromDays(2);
+                                var e2 = TimeSpan.FromHours(837);
+                                var e3 = TimeSpan.Zero;
+                                var f1 = 0.0f;
+                                var f2 = -0;
+                                var f3 = -1.5;
+                                var g1 = 16777215;
+                                var g2 = 16777218;
+                                var h1 = settings.MaxValue;
+                                var h2 = char.MaxValue;
+                                var h4 = int.MaxValue;
+                                var h5 = System.DateTime.MinValue;
+                                var h3 = "new DateTime(1900, 1, 1) int.MaxValue";
+                                var i1 = "abc";
+                                var i2 = "日本日本日本日";
+                                var i3 = "";
+                                var i4 = "なし";
+                                var i5 = "（行 1）";
+                                var i6 = "列・行";
+                            }
+                        }
+                        """
+                    ),
+                ]
+            ),
         ];
 }

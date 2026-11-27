@@ -14,6 +14,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using QuickER.Runtime.EntityFrameworkCore;
 using QuickER.Tests.TestSupport;
 using QuickER.Tests.TestSupport.Engines;
+using QuickER.Tests.TestSupport.ValuePools;
 using Xunit;
 
 namespace QuickER.Tests.CodeGen.CSharp;
@@ -96,15 +97,15 @@ public class SqlServerQueryParameterInterceptorTests
                 ["abc AnsiString 0 0 20"]
             ),
             ["varchar-non-ascii-is-bound-as-unicode"] = new(
-                Where("日本", v => x => x.Code == v.Value),
+                Where(TextEdges.KanjiNihon, v => x => x.Code == v.Value),
                 ["日本 String 0 0 2"]
             ),
             ["char-non-ascii-is-bound-as-unicode"] = new(
-                Where("日本", v => x => x.Fixed == v.Value),
+                Where(TextEdges.KanjiNihon, v => x => x.Fixed == v.Value),
                 ["日本 String 0 0 2"]
             ),
             ["varchar-like-pattern-non-ascii-is-bound-as-unicode"] = new(
-                Where("日", v => x => x.Code != null && x.Code.Contains(v.Value)),
+                Where(TextEdges.KanjiNichi, v => x => x.Code != null && x.Code.Contains(v.Value)),
                 ["%日% String 0 0 3"]
             ),
             // ---- IN のリストは要素ごとのパラメータで、要素ごとに判定する ----
@@ -127,30 +128,39 @@ public class SqlServerQueryParameterInterceptorTests
                 [$"{Stamp(LegacyBase.AddMilliseconds(3))} DateTime 0 0 0"]
             ),
             ["datetime-between-read-back-and-step-is-moved"] = new(
-                Where<DateTime?>(LegacyBase.AddTicks(31_000), v => x => x.Legacy < v.Value),
+                Where<DateTime?>(
+                    LegacyBase.AddTicks(DateTimeEdges.LegacyWindowAfterReadBackTicks),
+                    v => x => x.Legacy < v.Value
+                ),
                 [$"{Stamp(LegacyBase.AddMilliseconds(4))} DateTime2 0 7 0"]
             ),
             ["datetime-between-step-and-read-back-is-moved"] = new(
-                Where<DateTime?>(LegacyBase.AddTicks(68_000), v => x => x.Legacy > v.Value),
+                Where<DateTime?>(
+                    LegacyBase.AddTicks(DateTimeEdges.LegacyWindowBeforeReadBackTicks),
+                    v => x => x.Legacy > v.Value
+                ),
                 [$"{Stamp(LegacyBase.AddMilliseconds(4))} DateTime2 0 7 0"]
             ),
             ["datetime-past-max-is-moved"] = new(
                 Where<DateTime?>(
-                    new DateTime(9999, 12, 31, 23, 59, 59, 999),
+                    DateTimeEdges.SqlDateTimeMaxRoundingOverflow,
                     v => x => x.Legacy < v.Value
                 ),
-                [$"{Stamp(new DateTime(9999, 12, 31, 23, 59, 59, 998))} DateTime2 0 7 0"]
+                [$"{Stamp(DateTimeEdges.SqlDateTimeMaxRoundingDown)} DateTime2 0 7 0"]
             ),
             ["datetime-before-min-is-bound-by-value"] = new(
-                Where<DateTime?>(new DateTime(1752, 12, 31), v => x => x.Legacy > v.Value),
-                [$"{Stamp(new DateTime(1752, 12, 31))} DateTime2 0 7 0"]
+                Where<DateTime?>(
+                    DateTimeEdges.DayBeforeSqlDateTimeMin,
+                    v => x => x.Legacy > v.Value
+                ),
+                [$"{Stamp(DateTimeEdges.DayBeforeSqlDateTimeMin)} DateTime2 0 7 0"]
             ),
             ["datetime-in-list-judges-each-element"] = new(
                 Where(
                     new List<DateTime?>
                     {
                         LegacyBase.AddMilliseconds(7),
-                        LegacyBase.AddTicks(68_000),
+                        LegacyBase.AddTicks(DateTimeEdges.LegacyWindowBeforeReadBackTicks),
                     },
                     v => x => v.Value.Contains(x.Legacy)
                 ),
@@ -169,14 +179,19 @@ public class SqlServerQueryParameterInterceptorTests
                 [$"{Stamp(SmallBase.AddSeconds(10))} DateTime2 0 7 0"]
             ),
             ["smalldatetime-past-max-is-bound-by-value"] = new(
-                Where<DateTime?>(new DateTime(2079, 6, 7), v => x => x.Small < v.Value),
-                [$"{Stamp(new DateTime(2079, 6, 7))} DateTime2 0 7 0"]
+                Where<DateTime?>(
+                    DateTimeEdges.DayAfterSmallDateTimeMax,
+                    v => x => x.Small < v.Value
+                ),
+                [$"{Stamp(DateTimeEdges.DayAfterSmallDateTimeMax)} DateTime2 0 7 0"]
             ),
             // ---- ExecuteDelete の条件も同じ（EF Core は出どころを ExecuteUpdate と同じに渡すので、本文の DELETE で見分ける） ----
             ["execute-delete-datetime-condition-is-moved"] = new(
                 (c, ct) =>
                 {
-                    var v = new Box<DateTime?>(LegacyBase.AddTicks(31_000));
+                    var v = new Box<DateTime?>(
+                        LegacyBase.AddTicks(DateTimeEdges.LegacyWindowAfterReadBackTicks)
+                    );
                     return c.Rows.Where(x => x.Legacy < v.Value).ExecuteDeleteAsync(ct);
                 },
                 [$"{Stamp(LegacyBase.AddMilliseconds(4))} DateTime2 0 7 0"]
@@ -196,16 +211,128 @@ public class SqlServerQueryParameterInterceptorTests
             ["execute-update-datetime-values-are-left-alone"] = new(
                 (c, ct) =>
                 {
-                    var set = new Box<DateTime?>(LegacyBase.AddTicks(31_000));
+                    var set = new Box<DateTime?>(
+                        LegacyBase.AddTicks(DateTimeEdges.LegacyWindowAfterReadBackTicks)
+                    );
                     var where = new Box<DateTime?>(SmallBase.AddSeconds(10));
                     return c
                         .Rows.Where(x => x.Small == where.Value)
                         .ExecuteUpdateAsync(s => s.SetProperty(x => x.Legacy, set.Value), ct);
                 },
                 [
-                    $"{Stamp(LegacyBase.AddTicks(31_000))} DateTime 0 0 0",
+                    $"{Stamp(LegacyBase.AddTicks(DateTimeEdges.LegacyWindowAfterReadBackTicks))} DateTime 0 0 0",
                     $"{Stamp(SmallBase.AddSeconds(10))} DateTime 0 0 0",
                 ]
+            ),
+            // ---- 値のプールの正本：Kind（Utc・Local）。判定は Kind を読まず、置き直した値も元の Kind のまま（SqlClient は Kind で送り方を変えない） ----
+            ["datetime-utc-read-back-keeps-column-type-and-kind"] = new(
+                Where<DateTime?>(
+                    DateTime.SpecifyKind(LegacyBase.AddMilliseconds(3), DateTimeKind.Utc),
+                    v => x => x.Legacy == v.Value
+                ),
+                [$"{Stamp(LegacyBase.AddMilliseconds(3))}(Utc) DateTime 0 0 0"],
+                CanonTag("FitsDateTime は Kind を読まない：読み戻す値は Utc でも列の型のまま")
+            ),
+            ["datetime-local-between-read-back-and-step-is-moved-keeping-kind"] = new(
+                Where<DateTime?>(
+                    DateTime.SpecifyKind(
+                        LegacyBase.AddTicks(DateTimeEdges.LegacyWindowAfterReadBackTicks),
+                        DateTimeKind.Local
+                    ),
+                    v => x => x.Legacy < v.Value
+                ),
+                [$"{Stamp(LegacyBase.AddMilliseconds(4))}(Local) DateTime2 0 7 0"],
+                CanonTag("BetweenDateTimeReadBacks は置き直した値に元の Kind を付ける")
+            ),
+            ["smalldatetime-utc-whole-minute-keeps-column-type-and-kind"] = new(
+                Where<DateTime?>(
+                    DateTime.SpecifyKind(SmallBase, DateTimeKind.Utc),
+                    v => x => x.Small == v.Value
+                ),
+                [$"{Stamp(SmallBase)}(Utc) DateTime 0 0 0"],
+                CanonTag("FitsSmallDateTime は Kind を読まない：分ちょうどは Utc でも列の型のまま")
+            ),
+            ["smalldatetime-local-seconds-is-bound-by-value-keeping-kind"] = new(
+                Where<DateTime?>(
+                    DateTime.SpecifyKind(SmallBase.AddSeconds(10), DateTimeKind.Local),
+                    v => x => x.Small == v.Value
+                ),
+                [$"{Stamp(SmallBase.AddSeconds(10))}(Local) DateTime2 0 7 0"],
+                CanonTag("smalldatetime の置き直しは値のまま（元の Kind を保つ）")
+            ),
+            // ---- 値のプールの正本：翌日の 1 tick 前 ----
+            ["datetime-tick-before-next-day-is-moved-below-read-back"] = new(
+                Where<DateTime?>(
+                    DateTimeEdges.OneTickBefore(LegacyBase.Date.AddDays(1)),
+                    v => x => x.Legacy < v.Value
+                ),
+                [$"{Stamp(new DateTime(2024, 1, 1, 23, 59, 59, 998))} DateTime2 0 7 0"],
+                CanonTag(
+                    "BetweenDateTimeReadBacks の帯 7〜9（.9999999 は読み戻す .997 の 1 ms 後へ置き直す）"
+                )
+            ),
+            ["smalldatetime-tick-before-next-day-is-bound-by-value"] = new(
+                Where<DateTime?>(
+                    DateTimeEdges.OneTickBefore(SmallBase.Date.AddDays(1)),
+                    v => x => x.Small < v.Value
+                ),
+                [
+                    $"{Stamp(DateTimeEdges.OneTickBefore(SmallBase.Date.AddDays(1)))} DateTime2 0 7 0",
+                ],
+                CanonTag(
+                    "FitsSmallDateTime の分ちょうどの腕（その日の最後の tick は分ちょうどでない）"
+                )
+            ),
+            // ---- 値のプールの正本：smalldatetime が分へ丸める境目（29.998 秒は切り下げ・30 秒は切り上げ）。判定は分ちょうどかだけで、どちらも値のまま datetime2 ----
+            ["smalldatetime-29-998-seconds-is-bound-by-value"] = new(
+                Where<DateTime?>(
+                    SmallBase.AddTicks(29_998 * TimeSpan.TicksPerMillisecond),
+                    v => x => x.Small == v.Value
+                ),
+                [
+                    $"{Stamp(SmallBase.AddTicks(29_998 * TimeSpan.TicksPerMillisecond))} DateTime2 0 7 0",
+                ],
+                CanonTag("FitsSmallDateTime の分ちょうどの腕（29.998 秒は列が切り下げる側）")
+            ),
+            ["smalldatetime-30-seconds-is-bound-by-value"] = new(
+                Where<DateTime?>(SmallBase.AddSeconds(30), v => x => x.Small == v.Value),
+                [$"{Stamp(SmallBase.AddSeconds(30))} DateTime2 0 7 0"],
+                CanonTag("FitsSmallDateTime の分ちょうどの腕（30 秒は列が切り上げる側）")
+            ),
+            // ---- 値のプールの正本：範囲の端ちょうどは列の型のまま（範囲の比較の境目の腕） ----
+            ["datetime-range-min-keeps-column-type"] = new(
+                Where<DateTime?>(ValueEdges.SqlDateTimeMin, v => x => x.Legacy == v.Value),
+                [$"{Stamp(ValueEdges.SqlDateTimeMin)} DateTime 0 0 0"],
+                CanonTag("FitsDateTime の value >= DateTimeMin（範囲の最初ちょうど）")
+            ),
+            ["datetime-range-max-keeps-column-type"] = new(
+                Where<DateTime?>(ValueEdges.SqlDateTimeMax, v => x => x.Legacy == v.Value),
+                [$"{Stamp(ValueEdges.SqlDateTimeMax)} DateTime 0 0 0"],
+                CanonTag("FitsDateTime の value <= DateTimeMax（範囲の最後ちょうど）")
+            ),
+            ["smalldatetime-range-min-keeps-column-type"] = new(
+                Where<DateTime?>(ValueEdges.SmallDateTimeMin, v => x => x.Small == v.Value),
+                [$"{Stamp(ValueEdges.SmallDateTimeMin)} DateTime 0 0 0"],
+                CanonTag("FitsSmallDateTime の value >= SmallDateTimeMin（範囲の最初ちょうど）")
+            ),
+            ["smalldatetime-range-max-keeps-column-type"] = new(
+                Where<DateTime?>(ValueEdges.SmallDateTimeMax, v => x => x.Small == v.Value),
+                [$"{Stamp(ValueEdges.SmallDateTimeMax)} DateTime 0 0 0"],
+                CanonTag("FitsSmallDateTime の value <= SmallDateTimeMax（範囲の最後ちょうど）")
+            ),
+            ["decimal-column-range-max-keeps-column-type"] = new(
+                Where(99999999.99m, v => x => x.Amount == v.Value),
+                ["99999999.99 Decimal 10 2 0"],
+                CanonTag(
+                    "特性の固定：FitsDecimal の整数部の桁の境目（decimal(10,2) の最大）。束縛し直しても SqlParameter が値から精度とスケールを決め直すので、束縛し直したかは出力に出ない"
+                )
+            ),
+            ["decimal-column-range-min-keeps-column-type"] = new(
+                Where(-99999999.99m, v => x => x.Amount == v.Value),
+                ["-99999999.99 Decimal 10 2 0"],
+                CanonTag(
+                    "特性の固定：FitsDecimal の Math.Abs の腕（decimal(10,2) の最小）。束縛し直しても SqlParameter が値から精度とスケールを決め直すので、束縛し直したかは出力に出ない（Math.Abs を外す mutation は赤にならない）"
+                )
             ),
             // ---- SaveChanges のコマンドは変えない（列に入らない値は今までどおり列の型で送る） ----
             ["save-changes-is-left-alone"] = new(
@@ -216,7 +343,7 @@ public class SqlServerQueryParameterInterceptorTests
                         {
                             Id = 1,
                             Amount = 1.234m,
-                            Code = "日本",
+                            Code = TextEdges.KanjiNihon,
                         }
                     );
 
@@ -232,6 +359,13 @@ public class SqlServerQueryParameterInterceptorTests
                 ["1 Int64 0 0 0", "1.234 Decimal 10 2 0", "日本 AnsiString 0 0 20", "0 Int32 0 0 0"]
             ),
         };
+
+    /// <summary>値のプールの正本で足した行の札（種別は既存の水準の対照。どの判定の腕かを理由に書く）</summary>
+    private static RowTag CanonTag(string arm) =>
+        RowTag.Reason(
+            RowTagKind.ExistingLevelControl,
+            $"値のプールの正本（決定 value-pool-canon-phase3-decisions）：{arm}"
+        );
 
     /// <summary>datetime の列 legacy と比べる値の基準（ミリ秒の 0・3・7 が読み戻す値。<see cref="Rows"/> の初期化より前に読まれるのでプロパティにする）</summary>
     private static DateTime LegacyBase => new(2024, 1, 1, 10, 0, 0);
@@ -286,7 +420,7 @@ public class SqlServerQueryParameterInterceptorTests
         var parameter = command.CreateParameter();
         parameter.DbType = DbType.AnsiString;
         parameter.Size = 20;
-        parameter.Value = "日本";
+        parameter.Value = TextEdges.KanjiNihon;
         command.Parameters.Add(parameter);
 
         SqlServerQueryParameterInterceptor.Instance.ReaderExecuting(command, null!, default);
@@ -300,6 +434,7 @@ public class SqlServerQueryParameterInterceptorTests
             ' ',
             parameter.Value is DateTime moment
                 ? Stamp(moment)
+                    + (moment.Kind == DateTimeKind.Unspecified ? "" : $"({moment.Kind})")
                 : Convert.ToString(parameter.Value, CultureInfo.InvariantCulture),
             parameter.DbType,
             parameter.Precision.ToString(CultureInfo.InvariantCulture),
@@ -400,12 +535,76 @@ public class SqlServerQueryParameterInterceptorTests
             return ValueTask.FromResult(InterceptionResult<int>.SuppressWithResult(0));
         }
 
-        private void Record(DbCommand command) =>
-            LastParameters = [
+        /// <summary>最後に止めたコマンドの、値が null でないパラメータそのもの（値のプールの観測が読む）</summary>
+        public IReadOnlyList<DbParameter> LastRaw { get; private set; } = [];
+
+        private void Record(DbCommand command)
+        {
+            LastRaw =
+            [
                 .. command
                     .Parameters.Cast<DbParameter>()
-                    .Where(parameter => parameter.Value is not (null or DBNull))
-                    .Select(Describe),
+                    .Where(parameter => parameter.Value is not (null or DBNull)),
             ];
+            LastParameters = [.. LastRaw.Select(Describe)];
+        }
+    }
+
+    /// <summary>
+    /// 値のプールの観測：表の行の操作を、インターセプターを外して（直す前の値と型で）流し、コマンドのパラメータの値と、EF Core が比べる列から
+    /// 決めた SqlParameter の型を列の相として読む（DB は使わない。値は変えない）
+    /// </summary>
+    /// <param name="ct">取り消し</param>
+    internal static async Task<
+        IReadOnlyList<TestSupport.ValuePools.ValueObservation>
+    > ObserveValuesAsync(CancellationToken ct)
+    {
+        var observations = new List<TestSupport.ValuePools.ValueObservation>();
+
+        foreach (var (id, row) in Rows)
+        {
+            var recorder = new CommandRecorder();
+            var options = new DbContextOptionsBuilder<ProbeContext>()
+                .UseSqlServer("Server=unused;Database=unused;Integrated Security=true")
+                .IgnoreServiceProviderCacheLimit()
+                .AddInterceptors(recorder)
+                .Options;
+            await using var context = new ProbeContext(options);
+            await row.Act(context, ct);
+
+            observations.AddRange(
+                recorder.LastRaw.Select(parameter => new TestSupport.ValuePools.ValueObservation(
+                    parameter.Value,
+                    TestSupport.ValuePools.ValueColumn.FromSqlType(SqlTypeOf(parameter)),
+                    $"行 {id}"
+                ))
+            );
+        }
+
+        return observations;
+    }
+
+    /// <summary>EF Core が比べる列から決めた SqlParameter の型を、宣言の型の名前で書く</summary>
+    private static string SqlTypeOf(DbParameter parameter)
+    {
+        var sql = (Microsoft.Data.SqlClient.SqlParameter)parameter;
+        var size = sql.Size < 0 ? "max" : sql.Size.ToString(CultureInfo.InvariantCulture);
+
+        return sql.SqlDbType switch
+        {
+            SqlDbType.Decimal => string.Create(
+                CultureInfo.InvariantCulture,
+                $"decimal({sql.Precision},{sql.Scale})"
+            ),
+            SqlDbType.VarChar => $"varchar({size})",
+            SqlDbType.Char => $"char({size})",
+            SqlDbType.NVarChar => $"nvarchar({size})",
+            SqlDbType.NChar => $"nchar({size})",
+            SqlDbType.DateTime2 => string.Create(
+                CultureInfo.InvariantCulture,
+                $"datetime2({sql.Scale})"
+            ),
+            _ => sql.SqlDbType.ToString().ToLowerInvariant(),
+        };
     }
 }
